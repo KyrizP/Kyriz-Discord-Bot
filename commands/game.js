@@ -81,7 +81,7 @@ function setCooldown(userId, command) {
   const normalized = normalizeCmdName(command);
   const key = `${userId}_${normalized}`;
   let duration = COOLDOWN_CMD;
-  if (normalized === 'blackjack' || normalized === 'crash') duration = COOLDOWN_BJ;
+  if (['blackjack', 'crash', 'slots', 'roulette'].includes(normalized)) duration = COOLDOWN_BJ;
   else if (normalized === 'help') duration = COOLDOWN_HELP;
   cooldowns.set(key, Date.now() + duration);
 
@@ -468,7 +468,7 @@ function parseBet(betStr, userId) {
     const balance = getBalance(userId);
     const actualBalance = isSuperAdmin(userId) ? MAX_BET : balance;
     const bet = Math.min(actualBalance, MAX_BET);
-    return bet <= 0 ? null : bet; // Return null if no balance
+    return bet <= 0 ? 1 : bet; // If 0 balance, return 1 so removeBalance handles "Insufficient balance"
   }
 
   const bet = parseInt(betStr);
@@ -1116,7 +1116,6 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
     return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
   }
 
-  // Deduct bet
   if (!isSuperAdmin(userId)) {
     const result = removeBalance(userId, bet);
     if (!result.success) {
@@ -1127,6 +1126,15 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
   const result = Math.random() < 0.5 ? 'heads' : 'tails';
   const won = result === side;
 
+  // Animation: flipping coin
+  const flipEmbed = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('Coinflip | Flipping...')
+    .setDescription(`🪙 *The coin is in the air...*\n\nYour pick: **${side}**`)
+    .setTimestamp();
+  const msg = await context.reply({ embeds: [flipEmbed], fetchReply: true });
+  await new Promise((r) => setTimeout(r, 1500));
+
   if (won) {
     const payout = bet * 2;
     if (!isSuperAdmin(userId)) {
@@ -1134,32 +1142,30 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
       addXP(userId, 20);
       recordWin(userId);
     }
-
     const embed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle('Coinflip | You Win!')
+      .setTitle('Coinflip | You Win! 🎉')
       .setDescription(
-        `The coin landed on **${result}**! You chose **${side}**.\n\n` +
+        `🪙 The coin landed on **${result}**! You chose **${side}**.\n\n` +
         `Bet: **${bet.toLocaleString()}** Kryztal\n` +
         `Payout: **+${payout.toLocaleString()}** Kryztal`
       )
       .setTimestamp();
-    return context.reply({ embeds: [embed] });
+    try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
       addXP(userId, 5);
       recordLoss(userId);
     }
-
     const embed = new EmbedBuilder()
       .setColor(0xed4245)
       .setTitle('Coinflip | You Lose')
       .setDescription(
-        `The coin landed on **${result}**. You chose **${side}**.\n\n` +
+        `🪙 The coin landed on **${result}**. You chose **${side}**.\n\n` +
         `Lost: **-${bet.toLocaleString()}** Kryztal`
       )
       .setTimestamp();
-    return context.reply({ embeds: [embed] });
+    try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   }
 }
 
@@ -1200,6 +1206,36 @@ async function playSlots(context, userId, betStr) {
   }
 
   const reels = spinSlots();
+  const randSym = () => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)];
+
+  // Animation step 1: all spinning
+  const spin1 = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('Slots | Spinning... 🎰')
+    .setDescription(`**[ ${randSym()} | ${randSym()} | ${randSym()} ]**\n\nBet: **${bet.toLocaleString()}** Kryztal`)
+    .setTimestamp();
+  const msg = await context.reply({ embeds: [spin1], fetchReply: true });
+
+  // Animation step 2: first reel locked
+  await new Promise((r) => setTimeout(r, 1000));
+  const spin2 = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('Slots | Spinning... 🎰')
+    .setDescription(`**[ ${reels[0]} | ${randSym()} | ${randSym()} ]**\n\nBet: **${bet.toLocaleString()}** Kryztal`)
+    .setTimestamp();
+  try { await msg.edit({ embeds: [spin2] }); } catch {}
+
+  // Animation step 3: second reel locked
+  await new Promise((r) => setTimeout(r, 1000));
+  const spin3 = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('Slots | Spinning... 🎰')
+    .setDescription(`**[ ${reels[0]} | ${reels[1]} | ${randSym()} ]**\n\nBet: **${bet.toLocaleString()}** Kryztal`)
+    .setTimestamp();
+  try { await msg.edit({ embeds: [spin3] }); } catch {}
+
+  // Final result
+  await new Promise((r) => setTimeout(r, 1000));
   const display = `**[ ${reels[0]} | ${reels[1]} | ${reels[2]} ]**`;
 
   let multiplier = 0;
@@ -1208,7 +1244,6 @@ async function playSlots(context, userId, betStr) {
   let xp = 5;
 
   if (reels[0] === reels[1] && reels[1] === reels[2]) {
-    // 3 of a kind
     if (reels[0] === '7️⃣') {
       multiplier = 50;
       title = 'Slots | 🎰 MEGA JACKPOT!!! 🎰';
@@ -1235,7 +1270,6 @@ async function playSlots(context, userId, betStr) {
       addXP(userId, xp);
       recordWin(userId);
     }
-
     const embed = new EmbedBuilder()
       .setColor(color)
       .setTitle(title)
@@ -1246,13 +1280,12 @@ async function playSlots(context, userId, betStr) {
         `Payout: **+${payout.toLocaleString()}** Kryztal`
       )
       .setTimestamp();
-    return context.reply({ embeds: [embed] });
+    try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
       addXP(userId, xp);
       recordLoss(userId);
     }
-
     const embed = new EmbedBuilder()
       .setColor(color)
       .setTitle(title)
@@ -1261,7 +1294,7 @@ async function playSlots(context, userId, betStr) {
         `Lost: **-${bet.toLocaleString()}** Kryztal`
       )
       .setTimestamp();
-    return context.reply({ embeds: [embed] });
+    try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   }
 }
 
@@ -1309,6 +1342,18 @@ async function playDice(context, userId, betStr, guessStr) {
 
   const roll = Math.floor(Math.random() * 6) + 1;
   const diceEmojis = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+  const guessDisplay = guess.type === 'number' ? `**${guess.value}**` : `**${guess.value}**`;
+
+  // Animation: rolling dice
+  const randFace = () => diceEmojis[Math.floor(Math.random() * 6) + 1];
+  const rollEmbed = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('Dice Roll | Rolling... 🎲')
+    .setDescription(`${randFace()} ${randFace()} ${randFace()}\n\nYour guess: ${guessDisplay}`)
+    .setTimestamp();
+  const msg = await context.reply({ embeds: [rollEmbed], fetchReply: true });
+  await new Promise((r) => setTimeout(r, 1500));
+
   let won = false;
   let multiplier = 0;
 
@@ -1323,8 +1368,6 @@ async function playDice(context, userId, betStr, guessStr) {
     }
   }
 
-  const guessDisplay = guess.type === 'number' ? `**${guess.value}**` : `**${guess.value}**`;
-
   if (won) {
     const payout = bet * multiplier;
     if (!isSuperAdmin(userId)) {
@@ -1332,10 +1375,9 @@ async function playDice(context, userId, betStr, guessStr) {
       addXP(userId, guess.type === 'number' ? 50 : 25);
       recordWin(userId);
     }
-
     const embed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle('Dice Roll | You Win!')
+      .setTitle('Dice Roll | You Win! 🎲')
       .setDescription(
         `${diceEmojis[roll]} Rolled: **${roll}** | Your guess: ${guessDisplay}\n\n` +
         `Bet: **${bet.toLocaleString()}** Kryztal\n` +
@@ -1343,22 +1385,21 @@ async function playDice(context, userId, betStr, guessStr) {
         `Payout: **+${payout.toLocaleString()}** Kryztal`
       )
       .setTimestamp();
-    return context.reply({ embeds: [embed] });
+    try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
       addXP(userId, 5);
       recordLoss(userId);
     }
-
     const embed = new EmbedBuilder()
       .setColor(0xed4245)
-      .setTitle('Dice Roll | You Lose')
+      .setTitle('Dice Roll | You Lose 🎲')
       .setDescription(
         `${diceEmojis[roll]} Rolled: **${roll}** | Your guess: ${guessDisplay}\n\n` +
         `Lost: **-${bet.toLocaleString()}** Kryztal`
       )
       .setTimestamp();
-    return context.reply({ embeds: [embed] });
+    try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   }
 }
 
@@ -1369,10 +1410,25 @@ async function playDice(context, userId, betStr, guessStr) {
 const activeCrashGames = new Map(); // userId -> crash game state
 
 function generateCrashPoint() {
-  // House edge ~4%: crash point follows inverse distribution
+  // Table-based crash odds for precise control
+  // Survival rates: 1.2x=85%, 1.5x=68%, 2.0x=45%, 3.0x=28%, 5.0x=13%, 10.0x=4%
   const r = Math.random();
-  if (r < 0.04) return 1.0; // Instant crash 4% of the time
-  return Math.min(parseFloat((1 / (1 - r)).toFixed(2)), 10.0);
+  if (r < 0.05) return 1.0;    // 5%  — instant crash
+  if (r < 0.15) return 1.1;    // 10% — crash before 1.2x
+  if (r < 0.32) return 1.3;    // 17% — crash before 1.5x  (survive to 1.5x = 68%)
+  if (r < 0.45) return 1.6;    // 13% — crash before 1.8x
+  if (r < 0.55) return 1.9;    // 10% — crash before 2.0x  (survive to 2.0x = 45%)
+  if (r < 0.63) return 2.2;    // 8%  — crash before 2.5x
+  if (r < 0.72) return 2.7;    // 9%  — crash before 3.0x  (survive to 3.0x = 28%)
+  if (r < 0.78) return 3.2;    // 6%  — crash before 3.5x
+  if (r < 0.82) return 3.7;    // 4%  — crash before 4.0x
+  if (r < 0.87) return 4.5;    // 5%  — crash before 5.0x  (survive to 5.0x = 13%)
+  if (r < 0.90) return 5.5;    // 3%  — crash before 6.0x
+  if (r < 0.92) return 6.5;    // 2%  — crash before 7.0x
+  if (r < 0.94) return 7.5;    // 2%  — crash before 8.0x
+  if (r < 0.95) return 8.5;    // 1%  — crash before 9.0x
+  if (r < 0.96) return 9.5;    // 1%  — crash before 10.0x (survive to 10.0x = 4%)
+  return 10.1;                  // 4%  — survive all → auto cashout at 10x
 }
 
 async function handleCrash(interaction, userId) {
@@ -1426,7 +1482,7 @@ async function playCrash(context, userId, betStr, source) {
 
     const crashEmbed = new EmbedBuilder()
       .setColor(0xed4245)
-      .setTitle('Crash | Instant CRASH!')
+      .setTitle('Crash | 💥 Instant CRASH!')
       .setDescription(
         `Crashed at **1.00x** instantly!\n\n` +
         `Lost: **-${bet.toLocaleString()}** Kryztal`
@@ -1439,7 +1495,7 @@ async function playCrash(context, userId, betStr, source) {
   // Create initial embed
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle('Crash | Game Started')
+    .setTitle('Crash | 🚀 Game Started')
     .setDescription(
       `Bet: **${bet.toLocaleString()}** Kryztal\n\n` +
       `Current Multiplier: **1.00x**\n` +
@@ -1484,7 +1540,7 @@ async function runCrashLoop(game, msg) {
 
       const embed = new EmbedBuilder()
         .setColor(0xed4245)
-        .setTitle('Crash | CRASHED!')
+        .setTitle('Crash | 💥 CRASHED!')
         .setDescription(
           `Crashed at **${game.crashPoint.toFixed(2)}x**!\n\n` +
           `Lost: **-${game.bet.toLocaleString()}** Kryztal`
@@ -1509,7 +1565,7 @@ async function runCrashLoop(game, msg) {
 
     const embed = new EmbedBuilder()
       .setColor(0xfee75c)
-      .setTitle('Crash | Running...')
+      .setTitle('Crash | 🚀 Running...')
       .setDescription(
         `Bet: **${game.bet.toLocaleString()}** Kryztal\n\n` +
         `Current Multiplier: **${step.toFixed(2)}x**\n` +
@@ -1536,7 +1592,7 @@ async function runCrashLoop(game, msg) {
 
     const embed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle('Crash | Auto Cash Out — 10.00x!')
+      .setTitle('Crash | 💰 Auto Cash Out — 10.00x!')
       .setDescription(
         `Reached maximum multiplier!\n\n` +
         `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
@@ -1632,6 +1688,38 @@ async function playRoulette(context, userId, betStr, choiceStr) {
 
   const result = Math.floor(Math.random() * 37); // 0-36
   const resultColor = getRouletteColor(result);
+  const choiceDisplay = choice.type === 'number' ? `Number **${choice.value}**` : `**${choice.value.charAt(0).toUpperCase() + choice.value.slice(1)}**`;
+
+  // Animation: spinning wheel
+  const randNum = () => Math.floor(Math.random() * 37);
+  const rn1 = randNum(); const rn2 = randNum(); const rn3 = randNum();
+
+  const spinEmbed1 = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('Roulette | 🎡 Spinning...')
+    .setDescription(`${getRouletteColor(rn1)} **${rn1}** ← ball bouncing...\n\nYour bet: ${choiceDisplay}`)
+    .setTimestamp();
+  const msg = await context.reply({ embeds: [spinEmbed1], fetchReply: true });
+
+  await new Promise((r) => setTimeout(r, 1000));
+  const spinEmbed2 = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('Roulette | 🎡 Spinning...')
+    .setDescription(`${getRouletteColor(rn2)} **${rn2}** ← ball bouncing...\n\nYour bet: ${choiceDisplay}`)
+    .setTimestamp();
+  try { await msg.edit({ embeds: [spinEmbed2] }); } catch {}
+
+  await new Promise((r) => setTimeout(r, 1000));
+  const spinEmbed3 = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('Roulette | 🎡 Slowing down...')
+    .setDescription(`${getRouletteColor(rn3)} **${rn3}** ← almost there...\n\nYour bet: ${choiceDisplay}`)
+    .setTimestamp();
+  try { await msg.edit({ embeds: [spinEmbed3] }); } catch {}
+
+  await new Promise((r) => setTimeout(r, 1000));
+
+  // Determine outcome
   const isRed = RED_NUMBERS.includes(result);
   const isBlack = BLACK_NUMBERS.includes(result);
 
@@ -1658,8 +1746,6 @@ async function playRoulette(context, userId, betStr, choiceStr) {
       break;
   }
 
-  const choiceDisplay = choice.type === 'number' ? `Number **${choice.value}**` : `**${choice.value.charAt(0).toUpperCase() + choice.value.slice(1)}**`;
-
   if (won) {
     const payout = bet * multiplier;
     if (!isSuperAdmin(userId)) {
@@ -1667,10 +1753,9 @@ async function playRoulette(context, userId, betStr, choiceStr) {
       addXP(userId, choice.type === 'number' ? 75 : 25);
       recordWin(userId);
     }
-
     const embed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle('Roulette | You Win!')
+      .setTitle('Roulette | You Win! 🎡')
       .setDescription(
         `${resultColor} Ball landed on **${result}**\n` +
         `Your bet: ${choiceDisplay}\n\n` +
@@ -1679,23 +1764,22 @@ async function playRoulette(context, userId, betStr, choiceStr) {
         `Payout: **+${payout.toLocaleString()}** Kryztal`
       )
       .setTimestamp();
-    return context.reply({ embeds: [embed] });
+    try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
       addXP(userId, 5);
       recordLoss(userId);
     }
-
     const embed = new EmbedBuilder()
       .setColor(0xed4245)
-      .setTitle('Roulette | You Lose')
+      .setTitle('Roulette | You Lose 🎡')
       .setDescription(
         `${resultColor} Ball landed on **${result}**\n` +
         `Your bet: ${choiceDisplay}\n\n` +
         `Lost: **-${bet.toLocaleString()}** Kryztal`
       )
       .setTimestamp();
-    return context.reply({ embeds: [embed] });
+    try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   }
 }
 
@@ -1953,7 +2037,7 @@ async function handleButton(interaction) {
 
     const embed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle('Crash | Cashed Out!')
+      .setTitle('Crash | 💰 Cashed Out!')
       .setDescription(
         `You cashed out at **${game.currentMultiplier.toFixed(2)}x**!\n\n` +
         `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
