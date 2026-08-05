@@ -1,97 +1,81 @@
-# 🤖 Kyriz — Personal Assistant Discord Bot
+# Kyriz — Personal Assistant Discord Bot
 
-Bot Discord personal dengan fitur auto-reply yang bisa dikonfigurasi langsung dari Discord menggunakan slash commands.
-
----
-
-## 📋 Daftar Isi
-
-1. [Buat Bot di Discord Developer Portal](#1--buat-bot-di-discord-developer-portal)
-2. [Dapatkan Bot Token & Client ID](#2--dapatkan-bot-token--client-id)
-3. [Dapatkan Discord User ID](#3--dapatkan-discord-user-id-untuk-superadmin)
-4. [Setup Project](#4--setup-project)
-5. [Isi File .env](#5--isi-file-env)
-6. [Install Dependencies](#6--install-dependencies)
-7. [Register Slash Commands](#7--register-slash-commands)
-8. [Invite Bot ke Server](#8--invite-bot-ke-server)
-9. [Jalankan Bot](#9--jalankan-bot)
-10. [Cara Pakai Commands](#10--cara-pakai-commands)
-11. [Deploy ke Railway (Online 24/7)](#11--deploy-ke-railway-gratis-online-247)
+A personal Discord bot with auto-reply, economy system, and games.
 
 ---
 
-## 1. 🌐 Buat Bot di Discord Developer Portal
+## Features
 
-1. Buka **[discord.com/developers/applications](https://discord.com/developers/applications)**
-2. Login dengan akun Discord kamu
-3. Klik tombol **"New Application"** (kanan atas)
-4. Beri nama: **Kyriz** → klik **"Create"**
-5. Di sidebar kiri, klik **"Bot"**
-6. Klik **"Reset Token"** → **"Yes, do it!"**
-7. Klik **"Copy"** untuk menyalin token → **SIMPAN BAIK-BAIK!**
-
-> ⚠️ **JANGAN PERNAH** share token bot kamu ke siapapun! Token = password bot kamu.
-
-### Aktifkan Intents
-
-Masih di halaman **Bot**, scroll ke bawah ke bagian **Privileged Gateway Intents**, aktifkan:
-
-- ✅ **MESSAGE CONTENT INTENT** (WAJIB — supaya bot bisa baca isi pesan)
-- ✅ **SERVER MEMBERS INTENT** (opsional, untuk fitur user mention)
-
-Klik **"Save Changes"**
+- Auto-Reply
+- Economy System (Kryztal currency, leveling, XP)
+- Blackjack
+- Wallet, Daily Rewards, Transfers
+- Leaderboard (Server / Global)
 
 ---
 
-## 2. 🔑 Dapatkan Bot Token & Client ID
+## Setup Guide
 
-### Bot Token
-- Sudah di-copy di langkah sebelumnya
-- Kalau lupa, bisa ke **Bot** → **"Reset Token"** lagi
+### 1. Create Bot in Discord Developer Portal
 
-### Client ID (Application ID)
-1. Di sidebar, klik **"General Information"**
-2. Cari **"Application ID"**
-3. Klik **"Copy"**
+1. Open **[discord.com/developers/applications](https://discord.com/developers/applications)**
+2. Login with your Discord account
+3. Click **"New Application"** > name it **Kyriz** > **"Create"**
+4. Go to **"Bot"** in the sidebar
+5. Click **"Reset Token"** > **"Yes, do it!"** > **"Copy"**
+
+> **WARNING:** Never share your bot token with anyone.
+
+### Enable Intents
+
+Still on the **Bot** page, scroll to **Privileged Gateway Intents** and enable:
+
+- **MESSAGE CONTENT INTENT** (required — for reading messages and prefix commands)
+- **SERVER MEMBERS INTENT** (required — for server leaderboard filtering)
+
+Click **"Save Changes"**
 
 ---
 
-## 3. 👤 Dapatkan Discord User ID (untuk Superadmin)
+### 2. Get Bot Token & Client ID
 
-1. Buka Discord (app atau web)
-2. Pergi ke **Settings** → **Advanced** → aktifkan **"Developer Mode"**
-3. Klik kanan profil kamu (di chat atau member list)
-4. Klik **"Copy User ID"**
+- **Bot Token:** Already copied from step 1
+- **Client ID:** Go to **"General Information"** > copy **"Application ID"**
 
 ---
 
-## 4. 📁 Setup Project
+### 3. Get Discord User ID (for Superadmin)
 
-Pastikan kamu sudah punya **Node.js 18+** terinstall. Cek dengan:
+1. Open Discord > **Settings** > **Advanced** > enable **"Developer Mode"**
+2. Right-click your profile > **"Copy User ID"**
+
+---
+
+### 4. Setup Project
+
+Requires **Node.js 18+**. Check with:
 
 ```bash
 node --version
 ```
 
-Kalau belum punya, download di [nodejs.org](https://nodejs.org/).
-
 ---
 
-## 5. 📝 Isi File .env
+### 5. Fill .env File
 
-Buka file `.env` di folder `discord-bot/`, lalu isi dengan data kamu:
+Open `.env` in the `discord-bot/` folder:
 
 ```env
-DISCORD_TOKEN=paste_token_bot_disini
-CLIENT_ID=paste_client_id_disini
-SUPERADMIN_ID=paste_user_id_kamu_disini
+DISCORD_TOKEN=paste_bot_token_here
+CLIENT_ID=paste_client_id_here
+SUPERADMIN_ID=paste_your_user_id_here
 ```
 
-> ⚠️ Jangan pakai tanda kutip, dan jangan ada spasi sebelum/sesudah `=`
+> No quotes, no spaces around `=`
 
 ---
 
-## 6. 📦 Install Dependencies
+### 6. Install Dependencies
 
 ```bash
 cd discord-bot
@@ -100,171 +84,105 @@ npm install
 
 ---
 
-## 7. 🚀 Register Slash Commands
-
-Jalankan sekali untuk mendaftarkan slash commands ke Discord:
+### 7. Register Slash Commands
 
 ```bash
 npm run deploy
 ```
 
-Kamu akan melihat output:
-```
-🔄 Mendaftarkan slash commands ke Discord...
-✅ Slash commands berhasil didaftarkan!
-```
-
-> ℹ️ Jalankan ulang command ini setiap kali kamu menambah/mengubah structure command.
+> Run this again whenever you change command structure.
 
 ---
 
-## 8. 📨 Invite Bot ke Server
+### 8. Invite Bot to Server
 
-1. Buka **[discord.com/developers/applications](https://discord.com/developers/applications)**
-2. Pilih aplikasi **Kyriz**
-3. Di sidebar, klik **"OAuth2"**
-4. Scroll ke **"OAuth2 URL Generator"**
-5. Di **SCOPES**, centang:
-   - ✅ `bot`
-   - ✅ `applications.commands`
-6. Di **BOT PERMISSIONS**, centang:
-   - ✅ `Send Messages`
-   - ✅ `Read Message History`
-   - ✅ `Use Slash Commands`
-7. Copy **Generated URL** di bagian bawah
-8. Buka URL tersebut di browser
-9. Pilih server yang kamu mau → **"Authorize"**
+1. Go to **OAuth2** in Developer Portal
+2. Under **SCOPES**, check: `bot`, `applications.commands`
+3. Under **BOT PERMISSIONS**, check: `Send Messages`, `Read Message History`, `Use Slash Commands`
+4. Copy the generated URL and open it in browser
+5. Select your server > **"Authorize"**
 
 ---
 
-## 9. ▶️ Jalankan Bot
+### 9. Run Bot
 
 ```bash
 npm start
 ```
 
-Kamu akan melihat:
-```
-╔══════════════════════════════════════════╗
-║   🤖 Kyriz — Personal Assistant Bot      ║
-╠══════════════════════════════════════════╣
-║   ✅ Online sebagai: Kyriz#1234          ║
-║   🌐 Server: 1                           ║
-╚══════════════════════════════════════════╝
-```
+---
 
-Bot sekarang **online** dan siap dipakai! 🎉
+## Commands
+
+### Auto-Reply (Admin only)
+
+| Command | Function |
+|---------|----------|
+| `/kyriz autoreply add` | Add an auto-reply |
+| `/kyriz autoreply remove` | Remove an auto-reply |
+| `/kyriz autoreply edit` | Edit an auto-reply |
+| `/kyriz autoreply list` | View all auto-replies |
+
+### User Management (Superadmin only)
+
+| Command | Function |
+|---------|----------|
+| `/kyriz user add` | Grant config access |
+| `/kyriz user remove` | Revoke config access |
+| `/kyriz user list` | View authorized users |
+
+### Game & Economy
+
+All commands support both slash (`/kyriz`) and prefix (`ky`).
+
+| Slash Command | Prefix | Function |
+|---------------|--------|----------|
+| `/kyriz blackjack [bet]` | `ky bj [bet]` | Play Blackjack |
+| `/kyriz wallet` | `ky wallet` | Check balance and stats |
+| `/kyriz daily` | `ky daily` | Claim daily reward (resets 00:00 WIB) |
+| `/kyriz transfer @user amount` | `ky transfer @user amount` | Send Kryztal to another user |
+| `/kyriz leaderboard` | `ky lb` | Server top 10 |
+| `/kyriz leaderboard scope:all` | `ky lb all` | Global top 10 |
+| `/kyriz help` | `ky help` | View available commands |
 
 ---
 
-## 10. 💡 Cara Pakai Commands
-
-### Auto-Reply
-
-| Command | Contoh | Fungsi |
-|---------|--------|--------|
-| `/kyriz autoreply add` | `trigger: halo` `reply: Halo juga! 👋` | Tambah auto-reply |
-| `/kyriz autoreply remove` | `trigger: halo` | Hapus auto-reply |
-| `/kyriz autoreply edit` | `trigger: halo` `reply: Hey!` | Edit auto-reply |
-| `/kyriz autoreply list` | — | Lihat semua auto-reply |
-
-**Parameter opsional untuk `add` dan `edit`:**
-- `case_sensitive`: `true` / `false` (default: `false`)
-- `match_mode`: `exact` / `contains` (default: `contains`)
-
-### User Management (Superadmin Only)
-
-| Command | Contoh | Fungsi |
-|---------|--------|--------|
-| `/kyriz user add` | `target: @temanku` | Beri akses config |
-| `/kyriz user remove` | `target: @temanku` | Hapus akses config |
-| `/kyriz user list` | — | Lihat daftar user |
-
----
-
-## 11. ☁️ Deploy ke Railway (Gratis, Online 24/7)
-
-Supaya bot tetap online walau laptop kamu mati:
-
-### Persiapan: Upload ke GitHub
-
-1. Buat repository baru di [github.com](https://github.com) (set ke **Private**!)
-2. Push kode bot:
-
-```bash
-cd discord-bot
-git init
-git add .
-git commit -m "Initial commit: Kyriz bot"
-git branch -M main
-git remote add origin https://github.com/USERNAME_KAMU/kyriz-bot.git
-git push -u origin main
-```
-
-> ⚠️ Pastikan `.env` sudah ada di `.gitignore` supaya token tidak ter-upload!
-
-### Deploy ke Railway
-
-1. Buka **[railway.app](https://railway.app)** → Login dengan GitHub
-2. Klik **"New Project"** → **"Deploy from GitHub Repo"**
-3. Pilih repository **kyriz-bot**
-4. Setelah project dibuat, klik **"Variables"**
-5. Tambahkan variable (sama seperti `.env`):
-   - `DISCORD_TOKEN` = token bot kamu
-   - `CLIENT_ID` = client id kamu
-   - `SUPERADMIN_ID` = user id kamu
-6. Di **Settings** → **Deploy** → pastikan start command: `npm start`
-7. Klik **"Deploy"**
-
-✅ Bot sekarang **online 24/7** — bahkan kalau laptop kamu mati!
-
-### Update Bot
-
-Setiap kali kamu push perubahan ke GitHub, Railway akan **auto re-deploy**:
-
-```bash
-git add .
-git commit -m "Update fitur baru"
-git push
-```
-
----
-
-## 📁 Struktur File
+## File Structure
 
 ```
 discord-bot/
 ├── index.js                  # Entry point
 ├── commands/
 │   ├── autoreply.js          # /kyriz autoreply commands
-│   └── user.js               # /kyriz user commands
+│   ├── user.js               # /kyriz user commands
+│   └── game.js               # Blackjack, economy, leaderboard
 ├── handlers/
 │   └── autoReply.js          # Auto-reply logic
 ├── utils/
-│   ├── dataManager.js        # Baca/tulis JSON data
-│   └── permissionCheck.js    # Cek akses user
+│   ├── dataManager.js        # Read/write JSON data
+│   ├── permissionCheck.js    # User access check
+│   ├── economyManager.js     # Economy, XP, leveling
+│   └── cardDeck.js           # Card deck and Blackjack mechanics
 ├── data/
-│   ├── replies.json          # Config auto-reply
-│   └── users.json            # Daftar authorized users
+│   ├── replies.json          # Auto-reply config
+│   ├── users.json            # Authorized users
+│   └── economy.json          # Player data (auto-generated)
 ├── deploy-commands.js        # Register slash commands
 ├── package.json
-├── .env                      # Token & config (JANGAN di-share!)
+├── .env                      # Token & config (DO NOT share)
 ├── .gitignore
-└── README.md                 # File ini
+└── README.md
 ```
 
 ---
 
-## ❓ FAQ
+## FAQ
 
-**Q: Slash commands tidak muncul di Discord?**
-A: Jalankan `npm run deploy` ulang. Commands bisa butuh waktu ~1 jam untuk muncul secara global.
+**Q: Slash commands not showing in Discord?**
+A: Run `npm run deploy` again. Global commands can take up to 1 hour to appear.
 
-**Q: Bot online tapi tidak reply pesan?**
-A: Pastikan **MESSAGE CONTENT INTENT** sudah diaktifkan di Developer Portal → Bot.
+**Q: Bot online but not replying?**
+A: Make sure **MESSAGE CONTENT INTENT** is enabled in Developer Portal > Bot.
 
-**Q: Bagaimana cara tambah fitur baru?**
-A: Buat file command baru di folder `commands/`, register di `deploy-commands.js` dan `index.js`. Struktur kode sudah modular, jadi tinggal tambah tanpa mengubah yang sudah ada.
-
-**Q: Data auto-reply hilang setelah restart?**
-A: Data disimpan di `data/replies.json`. Selama file tersebut tidak dihapus, data aman. Di Railway, pertimbangkan menggunakan database (misal SQLite) untuk storage yang lebih persistent.
+**Q: Leaderboard shows global instead of server?**
+A: Enable **SERVER MEMBERS INTENT** in Developer Portal > Bot.
