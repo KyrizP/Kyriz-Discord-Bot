@@ -55,6 +55,8 @@ const COOLDOWN_HELP = 1000;  // 1 second for help
 function normalizeCmdName(command) {
   if (command === 'bj') return 'blackjack';
   if (command === 'lb') return 'leaderboard';
+  if (command === 'cf') return 'coinflip';
+  if (command === 'rl') return 'roulette';
   return command;
 }
 
@@ -79,7 +81,7 @@ function setCooldown(userId, command) {
   const normalized = normalizeCmdName(command);
   const key = `${userId}_${normalized}`;
   let duration = COOLDOWN_CMD;
-  if (normalized === 'blackjack') duration = COOLDOWN_BJ;
+  if (normalized === 'blackjack' || normalized === 'crash') duration = COOLDOWN_BJ;
   else if (normalized === 'help') duration = COOLDOWN_HELP;
   cooldowns.set(key, Date.now() + duration);
 
@@ -160,6 +162,78 @@ function attachGameSubcommands(commandBuilder) {
       )
   );
 
+  // /kyriz coinflip
+  commandBuilder.addSubcommand((sub) =>
+    sub
+      .setName('coinflip')
+      .setDescription('Flip a coin — heads or tails!')
+      .addStringOption((opt) =>
+        opt.setName('bet').setDescription('Amount to bet (number or "all")').setRequired(false)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName('side')
+          .setDescription('Pick heads or tails (default: heads)')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Heads', value: 'heads' },
+            { name: 'Tails', value: 'tails' }
+          )
+      )
+  );
+
+  // /kyriz slots
+  commandBuilder.addSubcommand((sub) =>
+    sub
+      .setName('slots')
+      .setDescription('Spin the slot machine!')
+      .addStringOption((opt) =>
+        opt.setName('bet').setDescription('Amount to bet (number or "all")').setRequired(false)
+      )
+  );
+
+  // /kyriz dice
+  commandBuilder.addSubcommand((sub) =>
+    sub
+      .setName('dice')
+      .setDescription('Roll a dice and bet on the result!')
+      .addStringOption((opt) =>
+        opt
+          .setName('guess')
+          .setDescription('Guess: a number (1-6), "even", or "odd"')
+          .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName('bet').setDescription('Amount to bet (number or "all")').setRequired(false)
+      )
+  );
+
+  // /kyriz crash
+  commandBuilder.addSubcommand((sub) =>
+    sub
+      .setName('crash')
+      .setDescription('Bet and cash out before the multiplier crashes!')
+      .addStringOption((opt) =>
+        opt.setName('bet').setDescription('Amount to bet (number or "all")').setRequired(false)
+      )
+  );
+
+  // /kyriz roulette
+  commandBuilder.addSubcommand((sub) =>
+    sub
+      .setName('roulette')
+      .setDescription('Spin the roulette wheel!')
+      .addStringOption((opt) =>
+        opt
+          .setName('choice')
+          .setDescription('Bet on: red, black, even, odd, 1-18, 19-36, or exact number 0-36')
+          .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName('bet').setDescription('Amount to bet (number or "all")').setRequired(false)
+      )
+  );
+
   // /kyriz help
   commandBuilder.addSubcommand((sub) =>
     sub.setName('help').setDescription('View available commands')
@@ -218,7 +292,7 @@ async function execute(interaction) {
   }
 
   // T&C check (skip for superadmin)
-  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer'];
+  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette'];
   if (requiresRegistration.includes(subcommand) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -248,6 +322,16 @@ async function execute(interaction) {
       return handleTransfer(interaction, userId);
     case 'leaderboard':
       return handleLeaderboard(interaction);
+    case 'coinflip':
+      return handleCoinflip(interaction, userId);
+    case 'slots':
+      return handleSlots(interaction, userId);
+    case 'dice':
+      return handleDice(interaction, userId);
+    case 'crash':
+      return handleCrash(interaction, userId);
+    case 'roulette':
+      return handleRoulette(interaction, userId);
     case 'help':
       return handleHelp(interaction);
   }
@@ -277,7 +361,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -307,6 +391,18 @@ async function handlePrefixCommand(message, command, args) {
     case 'lb':
     case 'leaderboard':
       return handleLeaderboardPrefix(message, args);
+    case 'cf':
+    case 'coinflip':
+      return handleCoinflipPrefix(message, userId, args);
+    case 'slots':
+      return handleSlotsPrefix(message, userId, args);
+    case 'dice':
+      return handleDicePrefix(message, userId, args);
+    case 'crash':
+      return handleCrashPrefix(message, userId, args);
+    case 'rl':
+    case 'roulette':
+      return handleRoulettePrefix(message, userId, args);
     case 'help':
       if (args.length > 0) return; // Only exact "ky help", ignore "ky help aku dong"
       return handleHelpPrefix(message);
@@ -334,7 +430,7 @@ async function handleMaintenance(message, userId, args) {
     // Update bot status
     try {
       message.client.user.setPresence({
-        activities: [{ name: 'Under Maintenance', type: 4 }],
+        activities: [{ name: 'Under Maintenance', type: 4, state: 'Under Maintenance' }],
         status: 'dnd',
       });
     } catch (e) { /* ignore */ }
@@ -986,6 +1082,624 @@ function scheduleTransferExpiry(transferId) {
 }
 
 // ============================================================
+// COINFLIP
+// ============================================================
+
+function parseSide(input) {
+  if (!input) return 'heads';
+  const s = input.toLowerCase();
+  if (s === 'heads' || s === 'head' || s === 'h') return 'heads';
+  if (s === 'tails' || s === 'tail' || s === 't') return 'tails';
+  return null; // invalid
+}
+
+async function handleCoinflip(interaction, userId) {
+  const betStr = interaction.options.getString('bet');
+  const sideStr = interaction.options.getString('side') || 'heads';
+  return playCoinflip(interaction, userId, betStr, sideStr, 'reply');
+}
+
+async function handleCoinflipPrefix(message, userId, args) {
+  const betStr = args[0];
+  const sideStr = args[1];
+  return playCoinflip(message, userId, betStr, sideStr, 'reply');
+}
+
+async function playCoinflip(context, userId, betStr, sideStr, method) {
+  const side = parseSide(sideStr);
+  if (side === null) {
+    return context.reply({ content: 'Invalid side. Please choose `heads` or `tails`.' });
+  }
+
+  const bet = parseBet(betStr, userId);
+  if (bet === null) {
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+  }
+
+  // Deduct bet
+  if (!isSuperAdmin(userId)) {
+    const result = removeBalance(userId, bet);
+    if (!result.success) {
+      return context.reply({ content: 'Insufficient balance.' });
+    }
+  }
+
+  const result = Math.random() < 0.5 ? 'heads' : 'tails';
+  const won = result === side;
+
+  if (won) {
+    const payout = bet * 2;
+    if (!isSuperAdmin(userId)) {
+      addBalance(userId, payout);
+      addXP(userId, 20);
+      recordWin(userId);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('Coinflip | You Win!')
+      .setDescription(
+        `The coin landed on **${result}**! You chose **${side}**.\n\n` +
+        `Bet: **${bet.toLocaleString()}** Kryztal\n` +
+        `Payout: **+${payout.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+    return context.reply({ embeds: [embed] });
+  } else {
+    if (!isSuperAdmin(userId)) {
+      addXP(userId, 5);
+      recordLoss(userId);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle('Coinflip | You Lose')
+      .setDescription(
+        `The coin landed on **${result}**. You chose **${side}**.\n\n` +
+        `Lost: **-${bet.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+    return context.reply({ embeds: [embed] });
+  }
+}
+
+// ============================================================
+// SLOTS
+// ============================================================
+
+const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '💎', '7️⃣'];
+
+function spinSlots() {
+  return [
+    SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)],
+    SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)],
+    SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)],
+  ];
+}
+
+async function handleSlots(interaction, userId) {
+  const betStr = interaction.options.getString('bet');
+  return playSlots(interaction, userId, betStr);
+}
+
+async function handleSlotsPrefix(message, userId, args) {
+  return playSlots(message, userId, args[0]);
+}
+
+async function playSlots(context, userId, betStr) {
+  const bet = parseBet(betStr, userId);
+  if (bet === null) {
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+  }
+
+  if (!isSuperAdmin(userId)) {
+    const result = removeBalance(userId, bet);
+    if (!result.success) {
+      return context.reply({ content: 'Insufficient balance.' });
+    }
+  }
+
+  const reels = spinSlots();
+  const display = `**[ ${reels[0]} | ${reels[1]} | ${reels[2]} ]**`;
+
+  let multiplier = 0;
+  let title = 'Slots | No Match';
+  let color = 0xed4245;
+  let xp = 5;
+
+  if (reels[0] === reels[1] && reels[1] === reels[2]) {
+    // 3 of a kind
+    if (reels[0] === '7️⃣') {
+      multiplier = 50;
+      title = 'Slots | 🎰 MEGA JACKPOT!!! 🎰';
+    } else if (reels[0] === '💎') {
+      multiplier = 25;
+      title = 'Slots | 💎 JACKPOT! 💎';
+    } else {
+      multiplier = 10;
+      title = 'Slots | Jackpot!';
+    }
+    color = 0xfee75c;
+    xp = 75;
+  } else if (reels[0] === reels[1]) {
+    multiplier = 2;
+    title = 'Slots | Partial Match!';
+    color = 0x57f287;
+    xp = 25;
+  }
+
+  if (multiplier > 0) {
+    const payout = bet * multiplier;
+    if (!isSuperAdmin(userId)) {
+      addBalance(userId, payout);
+      addXP(userId, xp);
+      recordWin(userId);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(color)
+      .setTitle(title)
+      .setDescription(
+        `${display}\n\n` +
+        `Bet: **${bet.toLocaleString()}** Kryztal\n` +
+        `Multiplier: **${multiplier}x**\n` +
+        `Payout: **+${payout.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+    return context.reply({ embeds: [embed] });
+  } else {
+    if (!isSuperAdmin(userId)) {
+      addXP(userId, xp);
+      recordLoss(userId);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(color)
+      .setTitle(title)
+      .setDescription(
+        `${display}\n\n` +
+        `Lost: **-${bet.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+    return context.reply({ embeds: [embed] });
+  }
+}
+
+// ============================================================
+// DICE ROLL
+// ============================================================
+
+function parseDiceGuess(input) {
+  if (!input) return null;
+  const s = input.toLowerCase();
+  if (s === 'even') return { type: 'parity', value: 'even' };
+  if (s === 'odd') return { type: 'parity', value: 'odd' };
+  const num = parseInt(s);
+  if (!isNaN(num) && num >= 1 && num <= 6) return { type: 'number', value: num };
+  return null;
+}
+
+async function handleDice(interaction, userId) {
+  const betStr = interaction.options.getString('bet');
+  const guessStr = interaction.options.getString('guess');
+  return playDice(interaction, userId, betStr, guessStr);
+}
+
+async function handleDicePrefix(message, userId, args) {
+  return playDice(message, userId, args[0], args[1]);
+}
+
+async function playDice(context, userId, betStr, guessStr) {
+  const guess = parseDiceGuess(guessStr);
+  if (!guess) {
+    return context.reply({ content: 'Invalid guess. Use a number `1-6`, `even`, or `odd`.' });
+  }
+
+  const bet = parseBet(betStr, userId);
+  if (bet === null) {
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+  }
+
+  if (!isSuperAdmin(userId)) {
+    const result = removeBalance(userId, bet);
+    if (!result.success) {
+      return context.reply({ content: 'Insufficient balance.' });
+    }
+  }
+
+  const roll = Math.floor(Math.random() * 6) + 1;
+  const diceEmojis = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+  let won = false;
+  let multiplier = 0;
+
+  if (guess.type === 'number' && roll === guess.value) {
+    won = true;
+    multiplier = 5;
+  } else if (guess.type === 'parity') {
+    const isEven = roll % 2 === 0;
+    if ((guess.value === 'even' && isEven) || (guess.value === 'odd' && !isEven)) {
+      won = true;
+      multiplier = 2;
+    }
+  }
+
+  const guessDisplay = guess.type === 'number' ? `**${guess.value}**` : `**${guess.value}**`;
+
+  if (won) {
+    const payout = bet * multiplier;
+    if (!isSuperAdmin(userId)) {
+      addBalance(userId, payout);
+      addXP(userId, guess.type === 'number' ? 50 : 25);
+      recordWin(userId);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('Dice Roll | You Win!')
+      .setDescription(
+        `${diceEmojis[roll]} Rolled: **${roll}** | Your guess: ${guessDisplay}\n\n` +
+        `Bet: **${bet.toLocaleString()}** Kryztal\n` +
+        `Multiplier: **${multiplier}x**\n` +
+        `Payout: **+${payout.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+    return context.reply({ embeds: [embed] });
+  } else {
+    if (!isSuperAdmin(userId)) {
+      addXP(userId, 5);
+      recordLoss(userId);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle('Dice Roll | You Lose')
+      .setDescription(
+        `${diceEmojis[roll]} Rolled: **${roll}** | Your guess: ${guessDisplay}\n\n` +
+        `Lost: **-${bet.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+    return context.reply({ embeds: [embed] });
+  }
+}
+
+// ============================================================
+// CRASH
+// ============================================================
+
+const activeCrashGames = new Map(); // userId -> crash game state
+
+function generateCrashPoint() {
+  // House edge ~4%: crash point follows inverse distribution
+  const r = Math.random();
+  if (r < 0.04) return 1.0; // Instant crash 4% of the time
+  return Math.min(parseFloat((1 / (1 - r)).toFixed(2)), 10.0);
+}
+
+async function handleCrash(interaction, userId) {
+  const betStr = interaction.options.getString('bet');
+  return playCrash(interaction, userId, betStr, 'slash');
+}
+
+async function handleCrashPrefix(message, userId, args) {
+  return playCrash(message, userId, args[0], 'prefix');
+}
+
+async function playCrash(context, userId, betStr, source) {
+  if (activeCrashGames.has(userId)) {
+    return context.reply({ content: 'You already have an active crash game. Cash out or wait for it to end.' });
+  }
+
+  const bet = parseBet(betStr, userId);
+  if (bet === null) {
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+  }
+
+  if (!isSuperAdmin(userId)) {
+    const result = removeBalance(userId, bet);
+    if (!result.success) {
+      return context.reply({ content: 'Insufficient balance.' });
+    }
+  }
+
+  const crashPoint = generateCrashPoint();
+
+  const game = {
+    userId,
+    bet,
+    crashPoint,
+    currentMultiplier: 1.0,
+    cashedOut: false,
+    finished: false,
+  };
+
+  activeCrashGames.set(userId, game);
+
+  // If instant crash (1.0x), show crash result immediately without cashout button
+  if (crashPoint <= 1.0) {
+    game.finished = true;
+    activeCrashGames.delete(userId);
+
+    if (!isSuperAdmin(userId)) {
+      addXP(userId, 10);
+      recordLoss(userId);
+    }
+
+    const crashEmbed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle('Crash | Instant CRASH!')
+      .setDescription(
+        `Crashed at **1.00x** instantly!\n\n` +
+        `Lost: **-${bet.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+
+    return context.reply({ embeds: [crashEmbed] });
+  }
+
+  // Create initial embed
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('Crash | Game Started')
+    .setDescription(
+      `Bet: **${bet.toLocaleString()}** Kryztal\n\n` +
+      `Current Multiplier: **1.00x**\n` +
+      `Potential Payout: **${bet.toLocaleString()}** Kryztal\n\n` +
+      `Click **Cash Out** before it crashes!`
+    )
+    .setTimestamp();
+
+  const button = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`crash_cashout_${userId}`)
+      .setLabel('Cash Out — 1.00x')
+      .setStyle(ButtonStyle.Success)
+  );
+
+  const msg = await context.reply({ embeds: [embed], components: [button], fetchReply: true });
+  game.messageRef = msg;
+
+  // Run crash game loop
+  runCrashLoop(game, msg);
+}
+
+async function runCrashLoop(game, msg) {
+  const steps = [1.2, 1.5, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+  
+  for (const step of steps) {
+    if (game.finished || game.cashedOut) return;
+    
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    
+    if (game.finished || game.cashedOut) return;
+
+    if (step > game.crashPoint) {
+      // CRASHED
+      game.finished = true;
+      activeCrashGames.delete(game.userId);
+
+      if (!isSuperAdmin(game.userId)) {
+        addXP(game.userId, 10);
+        recordLoss(game.userId);
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle('Crash | CRASHED!')
+        .setDescription(
+          `Crashed at **${game.crashPoint.toFixed(2)}x**!\n\n` +
+          `Lost: **-${game.bet.toLocaleString()}** Kryztal`
+        )
+        .setTimestamp();
+
+      const disabledBtn = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`crash_cashout_${game.userId}`)
+          .setLabel(`Crashed at ${game.crashPoint.toFixed(2)}x`)
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(true)
+      );
+
+      try { await msg.edit({ embeds: [embed], components: [disabledBtn] }); } catch {}
+      return;
+    }
+
+    // Update multiplier
+    game.currentMultiplier = step;
+    const potential = Math.floor(game.bet * step);
+
+    const embed = new EmbedBuilder()
+      .setColor(0xfee75c)
+      .setTitle('Crash | Running...')
+      .setDescription(
+        `Bet: **${game.bet.toLocaleString()}** Kryztal\n\n` +
+        `Current Multiplier: **${step.toFixed(2)}x**\n` +
+        `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
+        `Click **Cash Out** before it crashes!`
+      )
+      .setTimestamp();
+
+    const button = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`crash_cashout_${game.userId}`)
+        .setLabel(`Cash Out — ${step.toFixed(2)}x`)
+        .setStyle(ButtonStyle.Success)
+    );
+
+    try { await msg.edit({ embeds: [embed], components: [button] }); } catch {}
+  }
+
+  // Reached max 10x without crash (shouldn't happen often since crashPoint ≤ 10)
+  if (!game.finished && !game.cashedOut) {
+    game.currentMultiplier = 10.0;
+    // Auto cash out at 10x
+    const payout = handleCrashCashout(game);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('Crash | Auto Cash Out — 10.00x!')
+      .setDescription(
+        `Reached maximum multiplier!\n\n` +
+        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
+        `Payout: **+${payout.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+
+    const disabledBtn = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`crash_cashout_${game.userId}`)
+        .setLabel('Auto Cashed Out at 10.00x')
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(true)
+    );
+
+    try { await msg.edit({ embeds: [embed], components: [disabledBtn] }); } catch {}
+  }
+}
+
+function handleCrashCashout(game) {
+  if (game.finished || game.cashedOut) return;
+  game.cashedOut = true;
+  game.finished = true;
+  activeCrashGames.delete(game.userId);
+
+  const payout = Math.floor(game.bet * game.currentMultiplier);
+
+  if (!isSuperAdmin(game.userId)) {
+    addBalance(game.userId, payout);
+    const xp = game.currentMultiplier >= 5 ? 100 : 30;
+    addXP(game.userId, xp);
+    recordWin(game.userId);
+  }
+
+  return payout;
+}
+
+// ============================================================
+// ROULETTE
+// ============================================================
+
+const RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+const BLACK_NUMBERS = [2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35];
+
+function parseRouletteChoice(input) {
+  if (!input) return null;
+  const s = input.toLowerCase().trim();
+  if (s === 'red') return { type: 'color', value: 'red' };
+  if (s === 'black') return { type: 'color', value: 'black' };
+  if (s === 'even') return { type: 'parity', value: 'even' };
+  if (s === 'odd') return { type: 'parity', value: 'odd' };
+  if (s === '1-18' || s === 'low') return { type: 'range', value: 'low' };
+  if (s === '19-36' || s === 'high') return { type: 'range', value: 'high' };
+  const num = parseInt(s);
+  if (!isNaN(num) && num >= 0 && num <= 36 && s === String(num)) return { type: 'number', value: num };
+  return null;
+}
+
+function getRouletteColor(num) {
+  if (num === 0) return '🟢';
+  return RED_NUMBERS.includes(num) ? '🔴' : '⚫';
+}
+
+async function handleRoulette(interaction, userId) {
+  const betStr = interaction.options.getString('bet');
+  const choiceStr = interaction.options.getString('choice');
+  return playRoulette(interaction, userId, betStr, choiceStr);
+}
+
+async function handleRoulettePrefix(message, userId, args) {
+  return playRoulette(message, userId, args[0], args[1]);
+}
+
+async function playRoulette(context, userId, betStr, choiceStr) {
+  const choice = parseRouletteChoice(choiceStr);
+  if (!choice) {
+    return context.reply({
+      content: 'Invalid choice. Options: `red`, `black`, `even`, `odd`, `1-18`, `19-36`, or a number `0-36`.',
+    });
+  }
+
+  const bet = parseBet(betStr, userId);
+  if (bet === null) {
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+  }
+
+  if (!isSuperAdmin(userId)) {
+    const result = removeBalance(userId, bet);
+    if (!result.success) {
+      return context.reply({ content: 'Insufficient balance.' });
+    }
+  }
+
+  const result = Math.floor(Math.random() * 37); // 0-36
+  const resultColor = getRouletteColor(result);
+  const isRed = RED_NUMBERS.includes(result);
+  const isBlack = BLACK_NUMBERS.includes(result);
+
+  let won = false;
+  let multiplier = 0;
+
+  switch (choice.type) {
+    case 'color':
+      if (choice.value === 'red' && isRed) { won = true; multiplier = 2; }
+      else if (choice.value === 'black' && isBlack) { won = true; multiplier = 2; }
+      break;
+    case 'parity':
+      if (result !== 0) {
+        if (choice.value === 'even' && result % 2 === 0) { won = true; multiplier = 2; }
+        else if (choice.value === 'odd' && result % 2 !== 0) { won = true; multiplier = 2; }
+      }
+      break;
+    case 'range':
+      if (choice.value === 'low' && result >= 1 && result <= 18) { won = true; multiplier = 2; }
+      else if (choice.value === 'high' && result >= 19 && result <= 36) { won = true; multiplier = 2; }
+      break;
+    case 'number':
+      if (result === choice.value) { won = true; multiplier = 35; }
+      break;
+  }
+
+  const choiceDisplay = choice.type === 'number' ? `Number **${choice.value}**` : `**${choice.value.charAt(0).toUpperCase() + choice.value.slice(1)}**`;
+
+  if (won) {
+    const payout = bet * multiplier;
+    if (!isSuperAdmin(userId)) {
+      addBalance(userId, payout);
+      addXP(userId, choice.type === 'number' ? 75 : 25);
+      recordWin(userId);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('Roulette | You Win!')
+      .setDescription(
+        `${resultColor} Ball landed on **${result}**\n` +
+        `Your bet: ${choiceDisplay}\n\n` +
+        `Bet: **${bet.toLocaleString()}** Kryztal\n` +
+        `Multiplier: **${multiplier}x**\n` +
+        `Payout: **+${payout.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+    return context.reply({ embeds: [embed] });
+  } else {
+    if (!isSuperAdmin(userId)) {
+      addXP(userId, 5);
+      recordLoss(userId);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle('Roulette | You Lose')
+      .setDescription(
+        `${resultColor} Ball landed on **${result}**\n` +
+        `Your bet: ${choiceDisplay}\n\n` +
+        `Lost: **-${bet.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+    return context.reply({ embeds: [embed] });
+  }
+}
+
+// ============================================================
 // LEADERBOARD
 // ============================================================
 
@@ -1082,7 +1796,7 @@ async function handleButton(interaction) {
 
     const embed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle('Welcome to Kyriz!')
+      .setTitle('Welcome to Kyriz Games!')
       .setDescription(
         `You have been registered successfully.\n\n` +
           `**Starting balance:** 100,000 Kryztal\n` +
@@ -1220,6 +1934,42 @@ async function handleButton(interaction) {
       }
       throw error;
     }
+  }
+
+  // --- Crash cashout button ---
+  if (customId.startsWith('crash_cashout_')) {
+    const targetUserId = customId.replace('crash_cashout_', '');
+
+    if (interaction.user.id !== targetUserId) {
+      return interaction.reply({ content: 'This is not your game.', ephemeral: true });
+    }
+
+    const game = activeCrashGames.get(targetUserId);
+    if (!game || game.finished || game.cashedOut) {
+      return interaction.deferUpdate();
+    }
+
+    const payout = handleCrashCashout(game);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('Crash | Cashed Out!')
+      .setDescription(
+        `You cashed out at **${game.currentMultiplier.toFixed(2)}x**!\n\n` +
+        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
+        `Payout: **+${payout.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+
+    const disabledBtn = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`crash_cashout_${targetUserId}`)
+        .setLabel(`Cashed Out at ${game.currentMultiplier.toFixed(2)}x`)
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(true)
+    );
+
+    return interaction.update({ embeds: [embed], components: [disabledBtn] });
   }
 
   // --- Transfer buttons ---
@@ -1381,7 +2131,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'lb', 'leaderboard', 'help', 'maintenance'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'lb', 'leaderboard', 'help', 'maintenance', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
@@ -1399,20 +2149,28 @@ function createHelpEmbed() {
       'All commands can be used with **slash commands** or **prefix commands**.\n' +
       'Prefix commands start with `ky` followed by the command name.\n\n' +
       '```\n' +
-      'GAME\n' +
+      'GAMES\n' +
       '/kyriz blackjack [bet]    ky bj [bet]\n' +
-      '  Play a game of Blackjack. Default bet: 1. Max: 500,000.\n' +
-      '  Use "all" as bet to go all-in (capped at 500,000).\n\n' +
+      '  Play Blackjack. Default bet: 1. Max: 500,000.\n\n' +
+      '/kyriz coinflip [bet] [side]  ky cf [bet] [h/t]\n' +
+      '  Flip a coin. Side: heads/head/h, tails/tail/t.\n\n' +
+      '/kyriz slots [bet]        ky slots [bet]\n' +
+      '  Spin the slot machine.\n\n' +
+      '/kyriz dice [bet] [guess] ky dice [bet] [1-6/even/odd]\n' +
+      '  Roll a dice and bet on the result.\n\n' +
+      '/kyriz crash [bet]        ky crash [bet]\n' +
+      '  Cash out before the multiplier crashes.\n\n' +
+      '/kyriz roulette [bet] [choice]  ky rl [bet] [choice]\n' +
+      '  Roulette: red/black/even/odd/1-18/19-36/0-36.\n\n' +
       'ECONOMY\n' +
       '/kyriz wallet             ky wallet\n' +
       '  Check your Kryztal balance and stats.\n\n' +
       '/kyriz daily              ky daily\n' +
-      '  Claim your daily Kryztal reward (resets at midnight).\n\n' +
+      '  Claim your daily reward (resets 00:00 WIB).\n\n' +
       '/kyriz transfer           ky transfer @user [amount]\n' +
       '  Send Kryztal to another user.\n\n' +
       '/kyriz leaderboard        ky lb\n' +
-      '  View the top 10 richest players in this server.\n' +
-      '  Use "ky lb all" or scope:all for global ranking.\n\n' +
+      '  Server top 10. Use "ky lb all" for global.\n\n' +
       'INFO\n' +
       '/kyriz help               ky help\n' +
       '  Show this help message.\n' +

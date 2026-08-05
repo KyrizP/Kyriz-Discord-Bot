@@ -302,9 +302,13 @@ function claimDaily(userId) {
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
 
+    const timeStr = (hours === 0 && minutes === 0)
+      ? 'less than a minute'
+      : `**${hours}h ${minutes}m**`;
+
     return {
       success: false,
-      message: `You already claimed your daily reward today. Come back in **${hours}h ${minutes}m**.`,
+      message: `You already claimed your daily reward today. Come back in ${timeStr}.`,
       amount: 0,
     };
   }
