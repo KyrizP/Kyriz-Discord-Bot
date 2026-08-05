@@ -23,6 +23,9 @@ const { createDeck, drawCard, calculateHand, formatHand, isBlackjack } = require
 
 const activeGames = new Map(); // userId -> game state
 const pendingTransfers = new Map(); // uniqueId -> { fromId, toId, amount }
+const activeMinesGames = new Map(); // userId -> mines game state
+const activeHiloGames = new Map(); // userId -> hilo game state
+const activeTowerGames = new Map(); // userId -> tower game state
 
 // ============================================================
 // Maintenance mode (in-memory, superadmin toggle)
@@ -57,6 +60,9 @@ function normalizeCmdName(command) {
   if (command === 'lb') return 'leaderboard';
   if (command === 'cf') return 'coinflip';
   if (command === 'rl') return 'roulette';
+  if (command === 'hl') return 'hilo';
+  if (command === 'tw') return 'tower';
+  if (command === 'tf') return 'transfer';
   return command;
 }
 
@@ -81,7 +87,7 @@ function setCooldown(userId, command) {
   const normalized = normalizeCmdName(command);
   const key = `${userId}_${normalized}`;
   let duration = COOLDOWN_CMD;
-  if (['blackjack', 'crash', 'slots', 'roulette'].includes(normalized)) duration = COOLDOWN_BJ;
+  if (['blackjack', 'crash', 'slots', 'roulette', 'mines', 'hilo', 'tower'].includes(normalized)) duration = COOLDOWN_BJ;
   else if (normalized === 'help') duration = COOLDOWN_HELP;
   cooldowns.set(key, Date.now() + duration);
 
@@ -234,6 +240,55 @@ function attachGameSubcommands(commandBuilder) {
       )
   );
 
+  // /kyriz mines
+  commandBuilder.addSubcommand((sub) =>
+    sub
+      .setName('mines')
+      .setDescription('Minesweeper — reveal tiles, avoid mines, cash out anytime!')
+      .addStringOption((opt) =>
+        opt.setName('bet').setDescription('Amount to bet (number or "all")').setRequired(false)
+      )
+      .addIntegerOption((opt) =>
+        opt
+          .setName('mines')
+          .setDescription('Number of mines (1-12, default: 3)')
+          .setRequired(false)
+          .setMinValue(1)
+          .setMaxValue(12)
+      )
+  );
+
+  // /kyriz hilo
+  commandBuilder.addSubcommand((sub) =>
+    sub
+      .setName('hilo')
+      .setDescription('Higher or Lower — guess the next card!')
+      .addStringOption((opt) =>
+        opt.setName('bet').setDescription('Amount to bet (number or "all")').setRequired(false)
+      )
+  );
+
+  // /kyriz tower
+  commandBuilder.addSubcommand((sub) =>
+    sub
+      .setName('tower')
+      .setDescription('Tower — climb floors by picking safe doors!')
+      .addStringOption((opt) =>
+        opt.setName('bet').setDescription('Amount to bet (number or "all")').setRequired(false)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName('difficulty')
+          .setDescription('Difficulty level (default: easy)')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Easy (3 doors, 1 trap)', value: 'easy' },
+            { name: 'Medium (3 doors, 2 traps)', value: 'medium' },
+            { name: 'Hard (4 doors, 3 traps)', value: 'hard' }
+          )
+      )
+  );
+
   // /kyriz help
   commandBuilder.addSubcommand((sub) =>
     sub.setName('help').setDescription('View available commands')
@@ -292,7 +347,7 @@ async function execute(interaction) {
   }
 
   // T&C check (skip for superadmin)
-  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette'];
+  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower'];
   if (requiresRegistration.includes(subcommand) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -332,6 +387,12 @@ async function execute(interaction) {
       return handleCrash(interaction, userId);
     case 'roulette':
       return handleRoulette(interaction, userId);
+    case 'mines':
+      return handleMines(interaction, userId);
+    case 'hilo':
+      return handleHilo(interaction, userId);
+    case 'tower':
+      return handleTower(interaction, userId);
     case 'help':
       return handleHelp(interaction);
   }
@@ -361,7 +422,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -387,6 +448,7 @@ async function handlePrefixCommand(message, command, args) {
     case 'daily':
       return handleDailyPrefix(message, userId);
     case 'transfer':
+    case 'tf':
       return handleTransferPrefix(message, userId, args);
     case 'lb':
     case 'leaderboard':
@@ -403,6 +465,14 @@ async function handlePrefixCommand(message, command, args) {
     case 'rl':
     case 'roulette':
       return handleRoulettePrefix(message, userId, args);
+    case 'mines':
+      return handleMinesPrefix(message, userId, args);
+    case 'hl':
+    case 'hilo':
+      return handleHiloPrefix(message, userId, args);
+    case 'tw':
+    case 'tower':
+      return handleTowerPrefix(message, userId, args);
     case 'help':
       if (args.length > 0) return; // Only exact "ky help", ignore "ky help aku dong"
       return handleHelpPrefix(message);
@@ -1108,12 +1178,12 @@ async function handleCoinflipPrefix(message, userId, args) {
 async function playCoinflip(context, userId, betStr, sideStr, method) {
   const side = parseSide(sideStr);
   if (side === null) {
-    return context.reply({ content: 'Invalid side. Please choose `heads` or `tails`.' });
+    return context.reply({ content: 'Invalid side. Please choose `heads` or `tails`.\n\nUsage: `ky cf [bet] [heads/tails]`' });
   }
 
   const bet = parseBet(betStr, userId);
   if (bet === null) {
-    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`. Max: 500,000.\n\nUsage: `ky cf [bet] [heads/tails]`' });
   }
 
   if (!isSuperAdmin(userId)) {
@@ -1195,7 +1265,7 @@ async function handleSlotsPrefix(message, userId, args) {
 async function playSlots(context, userId, betStr) {
   const bet = parseBet(betStr, userId);
   if (bet === null) {
-    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`. Max: 500,000.\n\nUsage: `ky slots [bet]`' });
   }
 
   if (!isSuperAdmin(userId)) {
@@ -1325,12 +1395,12 @@ async function handleDicePrefix(message, userId, args) {
 async function playDice(context, userId, betStr, guessStr) {
   const guess = parseDiceGuess(guessStr);
   if (!guess) {
-    return context.reply({ content: 'Invalid guess. Use a number `1-6`, `even`, or `odd`.' });
+    return context.reply({ content: 'Invalid guess. Use a number `1-6`, `even`, or `odd`.\n\nUsage: `ky dice [bet] [1-6/even/odd]`' });
   }
 
   const bet = parseBet(betStr, userId);
   if (bet === null) {
-    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`. Max: 500,000.\n\nUsage: `ky dice [bet] [1-6/even/odd]`' });
   }
 
   if (!isSuperAdmin(userId)) {
@@ -1447,7 +1517,7 @@ async function playCrash(context, userId, betStr, source) {
 
   const bet = parseBet(betStr, userId);
   if (bet === null) {
-    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`. Max: 500,000.\n\nUsage: `ky crash [bet]`' });
   }
 
   if (!isSuperAdmin(userId)) {
@@ -1670,13 +1740,13 @@ async function playRoulette(context, userId, betStr, choiceStr) {
   const choice = parseRouletteChoice(choiceStr);
   if (!choice) {
     return context.reply({
-      content: 'Invalid choice. Options: `red`, `black`, `even`, `odd`, `1-18`, `19-36`, or a number `0-36`.',
+      content: 'Invalid choice. Options: `red`, `black`, `even`, `odd`, `1-18`, `19-36`, or a number `0-36`.\n\nUsage: `ky rl [bet] [red/black/even/odd/1-18/19-36/0-36]`',
     });
   }
 
   const bet = parseBet(betStr, userId);
   if (bet === null) {
-    return context.reply({ content: 'Invalid bet. Use a positive number or `all`.' });
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`. Max: 500,000.\n\nUsage: `ky rl [bet] [red/black/even/odd/1-18/19-36/0-36]`' });
   }
 
   if (!isSuperAdmin(userId)) {
@@ -1782,6 +1852,862 @@ async function playRoulette(context, userId, betStr, choiceStr) {
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   }
 }
+
+// ============================================================
+// MINES (Minesweeper)
+// ============================================================
+
+/**
+ * Calculate mines multiplier based on total tiles, mines count, and tiles revealed.
+ * Formula: cumulative probability-based, with ~3% house edge.
+ * multiplier = (1 - houseEdge) * product of (remaining / safe) for each reveal step
+ */
+function calculateMinesMultiplier(totalTiles, minesCount, revealed) {
+  if (revealed === 0) return 1.0;
+  const houseEdge = 0.03;
+  let multiplier = 1.0;
+  for (let i = 0; i < revealed; i++) {
+    const remaining = totalTiles - i;
+    const safe = remaining - minesCount;
+    if (safe <= 0) return multiplier;
+    multiplier *= remaining / safe;
+  }
+  return parseFloat((multiplier * (1 - houseEdge)).toFixed(2));
+}
+
+async function handleMines(interaction, userId) {
+  const betStr = interaction.options.getString('bet');
+  const minesCount = interaction.options.getInteger('mines') || 3;
+  return playMines(interaction, userId, betStr, minesCount, 'slash');
+}
+
+async function handleMinesPrefix(message, userId, args) {
+  const betStr = args[0];
+  const minesCount = parseInt(args[1]) || 3;
+  if (args[1] && (isNaN(parseInt(args[1])) || parseInt(args[1]) < 1 || parseInt(args[1]) > 12)) {
+    return message.reply({ content: 'Invalid mines count. Must be 1-12.\n\nUsage: `ky mines [bet] [mines: 1-12]`' });
+  }
+  return playMines(message, userId, betStr, minesCount, 'prefix');
+}
+
+async function playMines(context, userId, betStr, minesCount, source) {
+  // Validate mines count
+  if (minesCount < 1 || minesCount > 12) {
+    return context.reply({ content: 'Invalid mines count. Must be between 1 and 12.\n\nUsage: `ky mines [bet] [mines: 1-12]`' });
+  }
+
+  // Check active game
+  if (activeMinesGames.has(userId)) {
+    return context.reply({ content: 'You already have an active Mines game. Finish it first.' });
+  }
+
+  const bet = parseBet(betStr, userId);
+  if (bet === null) {
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`. Max: 500,000.\n\nUsage: `ky mines [bet] [mines: 1-12]`' });
+  }
+
+  // Deduct balance
+  if (!isSuperAdmin(userId)) {
+    const result = removeBalance(userId, bet);
+    if (!result.success) {
+      return context.reply({ content: `Insufficient balance. You have **${getBalance(userId).toLocaleString()} Kryztal**.` });
+    }
+  }
+
+  // Generate mine positions
+  const totalTiles = 16; // 4x4 grid
+  const minePositions = new Set();
+  while (minePositions.size < minesCount) {
+    minePositions.add(Math.floor(Math.random() * totalTiles));
+  }
+
+  const game = {
+    userId,
+    bet,
+    minesCount,
+    totalTiles,
+    minePositions,
+    revealedTiles: new Set(),
+    finished: false,
+    cashedOut: false,
+    processing: false,
+    messageRef: null,
+    timeout: null,
+  };
+
+  activeMinesGames.set(userId, game);
+
+  const currentMultiplier = 1.0;
+  const embed = createMinesEmbed(game, currentMultiplier, false);
+  const components = createMinesButtons(game, userId);
+
+  const msg = await context.reply({ embeds: [embed], components, fetchReply: true });
+  game.messageRef = msg;
+
+  // Auto cash-out after 120s
+  game.timeout = setTimeout(() => {
+    autoMinesCashout(game);
+  }, 120000);
+}
+
+function createMinesEmbed(game, multiplier, gameOver, hitMine = false) {
+  const safeTiles = game.totalTiles - game.minesCount;
+  const revealed = game.revealedTiles.size;
+  const potential = Math.floor(game.bet * multiplier);
+
+  let gridDisplay = '';
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 4; col++) {
+      const idx = row * 4 + col;
+      if (game.revealedTiles.has(idx) && game.minePositions.has(idx)) {
+        gridDisplay += '💣 '; // The mine they clicked
+      } else if (game.revealedTiles.has(idx)) {
+        gridDisplay += '💎 ';
+      } else if (gameOver && game.minePositions.has(idx)) {
+        gridDisplay += '💣 ';
+      } else if (gameOver) {
+        gridDisplay += '⬜ ';
+      } else {
+        gridDisplay += '⬜ ';
+      }
+    }
+    gridDisplay += '\n';
+  }
+
+  const embed = new EmbedBuilder().setTimestamp();
+
+  if (hitMine) {
+    embed
+      .setColor(0xed4245)
+      .setTitle('Mines | 💣 BOOM!')
+      .setDescription(
+        `${gridDisplay}\n` +
+        `Mines: **${game.minesCount}** | Revealed: **${revealed}**\n\n` +
+        `Lost: **-${game.bet.toLocaleString()}** Kryztal`
+      );
+  } else if (game.cashedOut) {
+    embed
+      .setColor(0x57f287)
+      .setTitle('Mines | 💰 Cashed Out!')
+      .setDescription(
+        `${gridDisplay}\n` +
+        `Mines: **${game.minesCount}** | Revealed: **${revealed}/${safeTiles}**\n\n` +
+        `Multiplier: **${multiplier}x**\n` +
+        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
+        `Payout: **+${potential.toLocaleString()}** Kryztal`
+      );
+  } else if (revealed >= safeTiles) {
+    embed
+      .setColor(0xf1c40f)
+      .setTitle('Mines | 🏆 ALL CLEAR!')
+      .setDescription(
+        `${gridDisplay}\n` +
+        `You found every safe tile!\n\n` +
+        `Multiplier: **${multiplier}x**\n` +
+        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
+        `Payout: **+${potential.toLocaleString()}** Kryztal`
+      );
+  } else {
+    embed
+      .setColor(0x5865f2)
+      .setTitle('Mines | 💎 Playing...')
+      .setDescription(
+        `${gridDisplay}\n` +
+        `Mines: **${game.minesCount}** | Revealed: **${revealed}/${safeTiles}**\n\n` +
+        `Current Multiplier: **${multiplier}x**\n` +
+        `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
+        `Click tiles to reveal, or **Cash Out** to collect!`
+      );
+  }
+
+  return embed;
+}
+
+function createMinesButtons(game, userId) {
+  const rows = [];
+  for (let row = 0; row < 4; row++) {
+    const actionRow = new ActionRowBuilder();
+    for (let col = 0; col < 4; col++) {
+      const idx = row * 4 + col;
+      const btn = new ButtonBuilder()
+        .setCustomId(`mines_tile_${userId}_${idx}`);
+
+      if (game.revealedTiles.has(idx)) {
+        btn.setLabel('💎').setStyle(ButtonStyle.Success).setDisabled(true);
+      } else {
+        btn.setLabel('⬜').setStyle(ButtonStyle.Secondary);
+      }
+
+      actionRow.addComponents(btn);
+    }
+    rows.push(actionRow);
+  }
+
+  // Cash out button row
+  const multiplier = calculateMinesMultiplier(game.totalTiles, game.minesCount, game.revealedTiles.size);
+  const cashoutRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`mines_cashout_${userId}`)
+      .setLabel(`💰 Cash Out — ${multiplier}x`)
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(game.revealedTiles.size === 0) // Can't cash out without revealing at least 1
+  );
+  rows.push(cashoutRow);
+
+  return rows;
+}
+
+function createMinesDisabledButtons(game, userId) {
+  const rows = [];
+  for (let row = 0; row < 4; row++) {
+    const actionRow = new ActionRowBuilder();
+    for (let col = 0; col < 4; col++) {
+      const idx = row * 4 + col;
+      const btn = new ButtonBuilder()
+        .setCustomId(`mines_tile_${userId}_${idx}`)
+        .setDisabled(true);
+
+      if (game.revealedTiles.has(idx) && game.minePositions.has(idx)) {
+        btn.setLabel('💣').setStyle(ButtonStyle.Danger);
+      } else if (game.revealedTiles.has(idx)) {
+        btn.setLabel('💎').setStyle(ButtonStyle.Success);
+      } else if (game.minePositions.has(idx)) {
+        btn.setLabel('💣').setStyle(ButtonStyle.Danger);
+      } else {
+        btn.setLabel('⬜').setStyle(ButtonStyle.Secondary);
+      }
+
+      actionRow.addComponents(btn);
+    }
+    rows.push(actionRow);
+  }
+
+  const cashoutRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`mines_cashout_${userId}`)
+      .setLabel('Game Over')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(true)
+  );
+  rows.push(cashoutRow);
+
+  return rows;
+}
+
+function finishMinesGame(game, won, multiplier) {
+  game.finished = true;
+  if (game.timeout) {
+    clearTimeout(game.timeout);
+    game.timeout = null;
+  }
+  activeMinesGames.delete(game.userId);
+
+  if (won) {
+    const payout = Math.floor(game.bet * multiplier);
+    if (!isSuperAdmin(game.userId)) {
+      addBalance(game.userId, payout);
+      const xp = Math.min(30 + game.revealedTiles.size * 7, 100);
+      addXP(game.userId, xp);
+      recordWin(game.userId);
+    }
+    return payout;
+  } else {
+    if (!isSuperAdmin(game.userId)) {
+      addXP(game.userId, XP_LOSE);
+      recordLoss(game.userId);
+    }
+    return 0;
+  }
+}
+
+async function autoMinesCashout(game) {
+  if (game.finished) return;
+  if (game.revealedTiles.size === 0) {
+    // Nothing revealed, just refund
+    game.finished = true;
+    activeMinesGames.delete(game.userId);
+    if (!isSuperAdmin(game.userId)) {
+      addBalance(game.userId, game.bet);
+    }
+    if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
+    try {
+      const embed = new EmbedBuilder()
+        .setColor(0xfee75c)
+        .setTitle('Mines | ⏰ Time Expired')
+        .setDescription('No tiles revealed. Your bet has been returned.')
+        .setTimestamp();
+      await game.messageRef.edit({ embeds: [embed], components: createMinesDisabledButtons(game, game.userId) });
+    } catch {}
+    return;
+  }
+
+  game.cashedOut = true;
+  const multiplier = calculateMinesMultiplier(game.totalTiles, game.minesCount, game.revealedTiles.size);
+  const payout = finishMinesGame(game, true, multiplier);
+
+  const embed = createMinesEmbed(game, multiplier, true);
+  embed.setFooter({ text: '⏰ Auto Cash Out — Time expired' });
+  const components = createMinesDisabledButtons(game, game.userId);
+
+  try { await game.messageRef.edit({ embeds: [embed], components }); } catch {}
+}
+
+// ============================================================
+// HI-LO (Higher/Lower)
+// ============================================================
+
+const HILO_CARD_NAMES = ['', 'A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const HILO_SUITS = ['♠️', '♥️', '♦️', '♣️'];
+
+function hiloDrawCard() {
+  const value = Math.floor(Math.random() * 13) + 1; // 1-13
+  const suit = HILO_SUITS[Math.floor(Math.random() * 4)];
+  return { value, suit, display: `${HILO_CARD_NAMES[value]}${suit}` };
+}
+
+/**
+ * Calculate hilo multiplier based on the current card and guess type.
+ * Higher: (13 / cards_higher) * 0.97
+ * Lower: (13 / cards_lower) * 0.97
+ * Same: (13 / cards_same) * 0.97
+ */
+function hiloGuessMultiplier(currentValue, guess) {
+  const houseEdge = 0.97;
+  let validCount;
+
+  if (guess === 'higher') {
+    validCount = 13 - currentValue; // cards strictly higher
+  } else if (guess === 'lower') {
+    validCount = currentValue - 1; // cards strictly lower
+  } else { // same
+    validCount = 1; // only same value
+  }
+
+  if (validCount <= 0) return 0; // impossible guess
+  return parseFloat(((13 / validCount) * houseEdge).toFixed(2));
+}
+
+async function handleHilo(interaction, userId) {
+  const betStr = interaction.options.getString('bet');
+  return playHilo(interaction, userId, betStr, 'slash');
+}
+
+async function handleHiloPrefix(message, userId, args) {
+  return playHilo(message, userId, args[0], 'prefix');
+}
+
+async function playHilo(context, userId, betStr, source) {
+  if (activeHiloGames.has(userId)) {
+    return context.reply({ content: 'You already have an active Hi-Lo game. Finish it first.' });
+  }
+
+  const bet = parseBet(betStr, userId);
+  if (bet === null) {
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`. Max: 500,000.\n\nUsage: `ky hl [bet]`' });
+  }
+
+  if (!isSuperAdmin(userId)) {
+    const result = removeBalance(userId, bet);
+    if (!result.success) {
+      return context.reply({ content: `Insufficient balance. You have **${getBalance(userId).toLocaleString()} Kryztal**.` });
+    }
+  }
+
+  const firstCard = hiloDrawCard();
+
+  const game = {
+    userId,
+    bet,
+    currentCard: firstCard,
+    streak: 0,
+    multiplier: 1.0,
+    history: [firstCard.display],
+    finished: false,
+    cashedOut: false,
+    processing: false,
+    messageRef: null,
+    timeout: null,
+  };
+
+  activeHiloGames.set(userId, game);
+
+  // Animation: card reveal
+  const animEmbed = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('Hi-Lo | 🃏 Drawing card...')
+    .setDescription('🎴 *Shuffling the deck...*')
+    .setTimestamp();
+
+  const msg = await context.reply({ embeds: [animEmbed], fetchReply: true });
+  await new Promise((r) => setTimeout(r, 1500));
+
+  game.messageRef = msg;
+
+  const embed = createHiloEmbed(game);
+  const components = createHiloButtons(game, userId);
+
+  try { await msg.edit({ embeds: [embed], components }); } catch {}
+
+  // Timeout: 60s
+  game.timeout = setTimeout(() => {
+    autoHiloCashout(game);
+  }, 60000);
+}
+
+function createHiloEmbed(game) {
+  const card = game.currentCard;
+  const potential = Math.floor(game.bet * game.multiplier);
+  const historyStr = game.history.join(' → ');
+
+  // Calculate multipliers for display
+  const higherMult = hiloGuessMultiplier(card.value, 'higher');
+  const lowerMult = hiloGuessMultiplier(card.value, 'lower');
+  const sameMult = hiloGuessMultiplier(card.value, 'same');
+
+  const oddsDisplay = [
+    higherMult > 0 ? `⬆️ Higher: **${higherMult}x**` : '⬆️ Higher: ~~impossible~~',
+    lowerMult > 0 ? `⬇️ Lower: **${lowerMult}x**` : '⬇️ Lower: ~~impossible~~',
+    `↔️ Same: **${sameMult}x**`,
+  ].join('\n');
+
+  return new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle(`Hi-Lo | 🃏 Streak: ${game.streak}`)
+    .setDescription(
+      `Current card: **${card.display}** (Value: ${card.value})\n\n` +
+      `${oddsDisplay}\n\n` +
+      `Cards: ${historyStr}\n\n` +
+      `Current Multiplier: **${game.multiplier}x**\n` +
+      `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
+      `Guess the next card, or **Cash Out**!`
+    )
+    .setTimestamp();
+}
+
+function createHiloButtons(game, userId) {
+  const card = game.currentCard;
+  const higherMult = hiloGuessMultiplier(card.value, 'higher');
+  const lowerMult = hiloGuessMultiplier(card.value, 'lower');
+  const sameMult = hiloGuessMultiplier(card.value, 'same');
+
+  const guessRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`hilo_higher_${userId}`)
+      .setLabel(`Higher ⬆️ (${higherMult}x)`)
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(higherMult === 0), // King can't go higher
+    new ButtonBuilder()
+      .setCustomId(`hilo_lower_${userId}`)
+      .setLabel(`Lower ⬇️ (${lowerMult}x)`)
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(lowerMult === 0), // Ace can't go lower
+    new ButtonBuilder()
+      .setCustomId(`hilo_same_${userId}`)
+      .setLabel(`Same ↔️ (${sameMult}x)`)
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  const cashoutRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`hilo_cashout_${userId}`)
+      .setLabel(`💰 Cash Out — ${game.multiplier}x`)
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(game.streak === 0) // Can't cash out without at least 1 correct guess
+  );
+
+  return [guessRow, cashoutRow];
+}
+
+function createHiloDisabledButtons(userId) {
+  const guessRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`hilo_higher_${userId}`).setLabel('Higher ⬆️').setStyle(ButtonStyle.Primary).setDisabled(true),
+    new ButtonBuilder().setCustomId(`hilo_lower_${userId}`).setLabel('Lower ⬇️').setStyle(ButtonStyle.Primary).setDisabled(true),
+    new ButtonBuilder().setCustomId(`hilo_same_${userId}`).setLabel('Same ↔️').setStyle(ButtonStyle.Secondary).setDisabled(true)
+  );
+  const cashoutRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`hilo_cashout_${userId}`).setLabel('Game Over').setStyle(ButtonStyle.Secondary).setDisabled(true)
+  );
+  return [guessRow, cashoutRow];
+}
+
+function finishHiloGame(game, won) {
+  game.finished = true;
+  if (game.timeout) {
+    clearTimeout(game.timeout);
+    game.timeout = null;
+  }
+  activeHiloGames.delete(game.userId);
+
+  if (won) {
+    const payout = Math.floor(game.bet * game.multiplier);
+    if (!isSuperAdmin(game.userId)) {
+      addBalance(game.userId, payout);
+      const xp = Math.min(30 + game.streak * 10, 100);
+      addXP(game.userId, xp);
+      recordWin(game.userId);
+    }
+    return payout;
+  } else {
+    if (!isSuperAdmin(game.userId)) {
+      addXP(game.userId, XP_LOSE);
+      recordLoss(game.userId);
+    }
+    return 0;
+  }
+}
+
+async function autoHiloCashout(game) {
+  if (game.finished) return;
+
+  if (game.streak === 0) {
+    // No correct guesses, forfeit
+    game.finished = true;
+    activeHiloGames.delete(game.userId);
+    if (!isSuperAdmin(game.userId)) {
+      addXP(game.userId, XP_LOSE);
+      recordLoss(game.userId);
+    }
+    if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
+    try {
+      const embed = new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle('Hi-Lo | ⏰ Time Expired')
+        .setDescription(`No guesses made. You lose **${game.bet.toLocaleString()} Kryztal**.`)
+        .setTimestamp();
+      await game.messageRef.edit({ embeds: [embed], components: createHiloDisabledButtons(game.userId) });
+    } catch {}
+    return;
+  }
+
+  game.cashedOut = true;
+  const payout = finishHiloGame(game, true);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x57f287)
+    .setTitle('Hi-Lo | 💰 Auto Cash Out!')
+    .setDescription(
+      `Cards: ${game.history.join(' → ')}\n\n` +
+      `Streak: **${game.streak}** | Multiplier: **${game.multiplier}x**\n\n` +
+      `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
+      `Payout: **+${payout.toLocaleString()}** Kryztal`
+    )
+    .setFooter({ text: '⏰ Auto Cash Out — Time expired' })
+    .setTimestamp();
+
+  try { await game.messageRef.edit({ embeds: [embed], components: createHiloDisabledButtons(game.userId) }); } catch {}
+}
+
+// ============================================================
+// TOWER
+// ============================================================
+
+const TOWER_CONFIGS = {
+  easy:   { doors: 3, traps: 1, label: 'Easy' },
+  medium: { doors: 3, traps: 2, label: 'Medium' },
+  hard:   { doors: 4, traps: 3, label: 'Hard' },
+};
+
+/**
+ * Calculate tower multiplier based on difficulty and floors cleared.
+ * multiplier = (doors / safeDoors)^floors * (1 - houseEdge)
+ */
+function calculateTowerMultiplier(difficulty, floorsCleared) {
+  if (floorsCleared === 0) return 1.0;
+  const config = TOWER_CONFIGS[difficulty];
+  const houseEdge = 0.03;
+  const oddsPerFloor = config.doors / (config.doors - config.traps);
+  const raw = Math.pow(oddsPerFloor, floorsCleared) * (1 - houseEdge);
+  return parseFloat(raw.toFixed(2));
+}
+
+async function handleTower(interaction, userId) {
+  const betStr = interaction.options.getString('bet');
+  const difficulty = interaction.options.getString('difficulty') || 'easy';
+  return playTower(interaction, userId, betStr, difficulty, 'slash');
+}
+
+async function handleTowerPrefix(message, userId, args) {
+  const betStr = args[0];
+  let difficulty = (args[1] || 'easy').toLowerCase();
+  if (!['easy', 'medium', 'hard'].includes(difficulty)) {
+    return message.reply({ content: 'Invalid difficulty. Options: `easy`, `medium`, `hard`.\n\nUsage: `ky tw [bet] [easy/medium/hard]`' });
+  }
+  return playTower(message, userId, betStr, difficulty, 'prefix');
+}
+
+async function playTower(context, userId, betStr, difficulty, source) {
+  if (activeTowerGames.has(userId)) {
+    return context.reply({ content: 'You already have an active Tower game. Finish it first.' });
+  }
+
+  if (!TOWER_CONFIGS[difficulty]) {
+    return context.reply({ content: 'Invalid difficulty. Options: `easy`, `medium`, `hard`.\n\nUsage: `ky tw [bet] [easy/medium/hard]`' });
+  }
+
+  const bet = parseBet(betStr, userId);
+  if (bet === null) {
+    return context.reply({ content: 'Invalid bet. Use a positive number or `all`. Max: 500,000.\n\nUsage: `ky tw [bet] [easy/medium/hard]`' });
+  }
+
+  if (!isSuperAdmin(userId)) {
+    const result = removeBalance(userId, bet);
+    if (!result.success) {
+      return context.reply({ content: `Insufficient balance. You have **${getBalance(userId).toLocaleString()} Kryztal**.` });
+    }
+  }
+
+  const config = TOWER_CONFIGS[difficulty];
+  const maxFloors = 10;
+
+  // Pre-generate trap positions for all floors
+  const floors = [];
+  for (let f = 0; f < maxFloors; f++) {
+    const trapPositions = new Set();
+    while (trapPositions.size < config.traps) {
+      trapPositions.add(Math.floor(Math.random() * config.doors));
+    }
+    floors.push({ trapPositions, revealed: false, chosenDoor: null });
+  }
+
+  const game = {
+    userId,
+    bet,
+    difficulty,
+    config,
+    maxFloors,
+    floors,
+    currentFloor: 0, // 0-indexed, next floor to play
+    finished: false,
+    cashedOut: false,
+    processing: false,
+    messageRef: null,
+    timeout: null,
+  };
+
+  activeTowerGames.set(userId, game);
+
+  const embed = createTowerEmbed(game);
+  const components = createTowerButtons(game, userId);
+
+  const msg = await context.reply({ embeds: [embed], components, fetchReply: true });
+  game.messageRef = msg;
+
+  // Timeout: 120s
+  game.timeout = setTimeout(() => {
+    autoTowerCashout(game);
+  }, 120000);
+}
+
+function createTowerEmbed(game, hitTrap = false) {
+  const config = game.config;
+  const multiplier = calculateTowerMultiplier(game.difficulty, game.currentFloor);
+  const potential = Math.floor(game.bet * multiplier);
+  const floorNum = game.currentFloor + 1; // Display 1-indexed
+
+  // Build tower visual (show from current floor down to floor 1)
+  let towerDisplay = '';
+  const showFloors = Math.min(game.currentFloor + 1, 8); // Show at most 8 floors
+
+  for (let f = Math.min(game.currentFloor, game.maxFloors - 1); f >= Math.max(0, game.currentFloor - showFloors + 1); f--) {
+    const floor = game.floors[f];
+    const label = `Floor ${f + 1}: `;
+
+    if (floor.revealed) {
+      // Show revealed floor
+      let doorDisplay = '';
+      for (let d = 0; d < config.doors; d++) {
+        if (d === floor.chosenDoor && floor.trapPositions.has(d)) {
+          doorDisplay += '💀 ';
+        } else if (d === floor.chosenDoor) {
+          doorDisplay += '✅ ';
+        } else if (floor.trapPositions.has(d)) {
+          doorDisplay += '💀 ';
+        } else {
+          doorDisplay += '✅ ';
+        }
+      }
+      towerDisplay += `${label}${doorDisplay}\n`;
+    } else if (f === game.currentFloor) {
+      // Current floor (unplayed)
+      let doorDisplay = '';
+      for (let d = 0; d < config.doors; d++) {
+        doorDisplay += '🚪 ';
+      }
+      towerDisplay += `${label}${doorDisplay}  ← Pick a door!\n`;
+    }
+  }
+
+  if (!towerDisplay) {
+    let doorDisplay = '';
+    for (let d = 0; d < config.doors; d++) {
+      doorDisplay += '🚪 ';
+    }
+    towerDisplay = `Floor 1: ${doorDisplay}  ← Pick a door!\n`;
+  }
+
+  const embed = new EmbedBuilder().setTimestamp();
+
+  if (hitTrap) {
+    embed
+      .setColor(0xed4245)
+      .setTitle(`Tower | 💀 GAME OVER — Floor ${floorNum}`)
+      .setDescription(
+        `**${config.label}** difficulty\n\n` +
+        `${towerDisplay}\n` +
+        `You hit a trap on Floor ${floorNum}!\n\n` +
+        `Lost: **-${game.bet.toLocaleString()}** Kryztal`
+      );
+  } else if (game.cashedOut || game.currentFloor >= game.maxFloors) {
+    embed
+      .setColor(0x57f287)
+      .setTitle(game.currentFloor >= game.maxFloors
+        ? `Tower | 🏆 MAX FLOOR REACHED!`
+        : `Tower | 💰 Cashed Out — Floor ${game.currentFloor}`)
+      .setDescription(
+        `**${config.label}** difficulty\n\n` +
+        `${towerDisplay}\n` +
+        `Floors cleared: **${game.currentFloor}/${game.maxFloors}**\n\n` +
+        `Multiplier: **${multiplier}x**\n` +
+        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
+        `Payout: **+${potential.toLocaleString()}** Kryztal`
+      );
+  } else {
+    embed
+      .setColor(0x5865f2)
+      .setTitle(`Tower | 🏗️ Floor ${floorNum}`)
+      .setDescription(
+        `**${config.label}** difficulty (${config.doors} doors, ${config.traps} trap${config.traps > 1 ? 's' : ''})\n\n` +
+        `${towerDisplay}\n` +
+        `Floors cleared: **${game.currentFloor}/${game.maxFloors}**\n` +
+        `Current Multiplier: **${multiplier}x**\n` +
+        `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
+        `Pick a safe door to climb higher!`
+      );
+  }
+
+  return embed;
+}
+
+function createTowerButtons(game, userId) {
+  const config = game.config;
+  const rows = [];
+
+  // Door buttons
+  const doorRow = new ActionRowBuilder();
+  for (let d = 0; d < config.doors; d++) {
+    doorRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`tower_door_${userId}_${d}`)
+        .setLabel(`🚪 ${d + 1}`)
+        .setStyle(ButtonStyle.Secondary)
+    );
+  }
+  rows.push(doorRow);
+
+  // Cash out button
+  const multiplier = calculateTowerMultiplier(game.difficulty, game.currentFloor);
+  const cashoutRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tower_cashout_${userId}`)
+      .setLabel(`💰 Cash Out — ${multiplier}x`)
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(game.currentFloor === 0) // Can't cash out on floor 0
+  );
+  rows.push(cashoutRow);
+
+  return rows;
+}
+
+function createTowerDisabledButtons(game, userId) {
+  const config = game.config;
+  const rows = [];
+
+  const doorRow = new ActionRowBuilder();
+  for (let d = 0; d < config.doors; d++) {
+    doorRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`tower_door_${userId}_${d}`)
+        .setLabel(`🚪 ${d + 1}`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true)
+    );
+  }
+  rows.push(doorRow);
+
+  const cashoutRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tower_cashout_${userId}`)
+      .setLabel('Game Over')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(true)
+  );
+  rows.push(cashoutRow);
+
+  return rows;
+}
+
+function finishTowerGame(game, won) {
+  game.finished = true;
+  if (game.timeout) {
+    clearTimeout(game.timeout);
+    game.timeout = null;
+  }
+  activeTowerGames.delete(game.userId);
+
+  if (won) {
+    const multiplier = calculateTowerMultiplier(game.difficulty, game.currentFloor);
+    const payout = Math.floor(game.bet * multiplier);
+    if (!isSuperAdmin(game.userId)) {
+      addBalance(game.userId, payout);
+      const xp = Math.min(30 + game.currentFloor * 8, 100);
+      addXP(game.userId, xp);
+      recordWin(game.userId);
+    }
+    return payout;
+  } else {
+    if (!isSuperAdmin(game.userId)) {
+      addXP(game.userId, XP_LOSE);
+      recordLoss(game.userId);
+    }
+    return 0;
+  }
+}
+
+async function autoTowerCashout(game) {
+  if (game.finished) return;
+
+  if (game.currentFloor === 0) {
+    // No floors cleared, forfeit
+    game.finished = true;
+    activeTowerGames.delete(game.userId);
+    if (!isSuperAdmin(game.userId)) {
+      addXP(game.userId, XP_LOSE);
+      recordLoss(game.userId);
+    }
+    if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
+    try {
+      const embed = new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle('Tower | ⏰ Time Expired')
+        .setDescription(`No floors cleared. You lose **${game.bet.toLocaleString()} Kryztal**.`)
+        .setTimestamp();
+      await game.messageRef.edit({ embeds: [embed], components: createTowerDisabledButtons(game, game.userId) });
+    } catch {}
+    return;
+  }
+
+  game.cashedOut = true;
+  const payout = finishTowerGame(game, true);
+  const multiplier = calculateTowerMultiplier(game.difficulty, game.currentFloor);
+
+  const embed = createTowerEmbed(game);
+  embed.setFooter({ text: '⏰ Auto Cash Out — Time expired' });
+  const components = createTowerDisabledButtons(game, game.userId);
+
+  try { await game.messageRef.edit({ embeds: [embed], components }); } catch {}
+}
+
+
 
 // ============================================================
 // LEADERBOARD
@@ -2129,6 +3055,394 @@ async function handleButton(interaction) {
 
     return interaction.channel.send({ embeds: [visibleEmbed] });
   }
+
+  // --- Mines tile click ---
+  if (customId.startsWith('mines_tile_')) {
+    const parts = customId.split('_');
+    const targetUserId = parts[2];
+    const tileIdx = parseInt(parts[3]);
+
+    if (interaction.user.id !== targetUserId) {
+      return interaction.reply({ content: 'This is not your game.', ephemeral: true });
+    }
+
+    const game = activeMinesGames.get(targetUserId);
+    if (!game || game.finished) {
+      return interaction.deferUpdate();
+    }
+
+    if (game.processing) {
+      return interaction.deferUpdate();
+    }
+    game.processing = true;
+
+    try {
+      // Already revealed
+      if (game.revealedTiles.has(tileIdx)) {
+        game.processing = false;
+        return interaction.deferUpdate();
+      }
+
+      // Hit a mine!
+      if (game.minePositions.has(tileIdx)) {
+        game.revealedTiles.add(tileIdx);
+        const multiplier = calculateMinesMultiplier(game.totalTiles, game.minesCount, game.revealedTiles.size - 1);
+        finishMinesGame(game, false, multiplier);
+
+        const embed = createMinesEmbed(game, multiplier, true, true);
+        const components = createMinesDisabledButtons(game, targetUserId);
+        game.processing = false;
+        return interaction.update({ embeds: [embed], components });
+      }
+
+      // Safe tile
+      game.revealedTiles.add(tileIdx);
+      const safeTiles = game.totalTiles - game.minesCount;
+      const multiplier = calculateMinesMultiplier(game.totalTiles, game.minesCount, game.revealedTiles.size);
+
+      // Check if all safe tiles revealed
+      if (game.revealedTiles.size >= safeTiles) {
+        const payout = finishMinesGame(game, true, multiplier);
+        const embed = createMinesEmbed(game, multiplier, true);
+        const components = createMinesDisabledButtons(game, targetUserId);
+        game.processing = false;
+        return interaction.update({ embeds: [embed], components });
+      }
+
+      // Continue game
+      // Reset timeout
+      if (game.timeout) clearTimeout(game.timeout);
+      game.timeout = setTimeout(() => { autoMinesCashout(game); }, 120000);
+
+      const embed = createMinesEmbed(game, multiplier, false);
+      const components = createMinesButtons(game, targetUserId);
+      game.processing = false;
+      return interaction.update({ embeds: [embed], components });
+    } catch (error) {
+      game.processing = false;
+      throw error;
+    }
+  }
+
+  // --- Mines cash out ---
+  if (customId.startsWith('mines_cashout_')) {
+    const targetUserId = customId.replace('mines_cashout_', '');
+
+    if (interaction.user.id !== targetUserId) {
+      return interaction.reply({ content: 'This is not your game.', ephemeral: true });
+    }
+
+    const game = activeMinesGames.get(targetUserId);
+    if (!game || game.finished) {
+      return interaction.deferUpdate();
+    }
+
+    if (game.revealedTiles.size === 0) {
+      return interaction.deferUpdate(); // Can't cash out without revealing
+    }
+
+    if (game.processing) {
+      return interaction.deferUpdate();
+    }
+    game.processing = true;
+
+    game.cashedOut = true;
+    const multiplier = calculateMinesMultiplier(game.totalTiles, game.minesCount, game.revealedTiles.size);
+    const payout = finishMinesGame(game, true, multiplier);
+
+    const embed = createMinesEmbed(game, multiplier, true);
+    const components = createMinesDisabledButtons(game, targetUserId);
+    return interaction.update({ embeds: [embed], components });
+  }
+
+  // --- Hi-Lo guess buttons ---
+  if (customId.startsWith('hilo_higher_') || customId.startsWith('hilo_lower_') || customId.startsWith('hilo_same_')) {
+    let guess, targetUserId;
+    if (customId.startsWith('hilo_higher_')) {
+      guess = 'higher';
+      targetUserId = customId.replace('hilo_higher_', '');
+    } else if (customId.startsWith('hilo_lower_')) {
+      guess = 'lower';
+      targetUserId = customId.replace('hilo_lower_', '');
+    } else {
+      guess = 'same';
+      targetUserId = customId.replace('hilo_same_', '');
+    }
+
+    if (interaction.user.id !== targetUserId) {
+      return interaction.reply({ content: 'This is not your game.', ephemeral: true });
+    }
+
+    const game = activeHiloGames.get(targetUserId);
+    if (!game || game.finished) {
+      return interaction.deferUpdate();
+    }
+
+    if (game.processing) {
+      return interaction.deferUpdate();
+    }
+    game.processing = true;
+
+    try {
+      // Validate guess is possible
+      const guessMultiplier = hiloGuessMultiplier(game.currentCard.value, guess);
+      if (guessMultiplier === 0) {
+        game.processing = false;
+        return interaction.reply({ content: 'This guess is impossible with the current card.', ephemeral: true });
+      }
+
+      // Draw next card
+      const nextCard = hiloDrawCard();
+      game.history.push(nextCard.display);
+
+      // Check if guess is correct
+      let correct = false;
+      if (guess === 'higher' && nextCard.value > game.currentCard.value) correct = true;
+      if (guess === 'lower' && nextCard.value < game.currentCard.value) correct = true;
+      if (guess === 'same' && nextCard.value === game.currentCard.value) correct = true;
+
+      if (!correct) {
+        // Wrong guess — lose
+        finishHiloGame(game, false);
+
+        const embed = new EmbedBuilder()
+          .setColor(0xed4245)
+          .setTitle('Hi-Lo | ❌ Wrong Guess!')
+          .setDescription(
+            `Previous: **${game.currentCard.display}** → Drew: **${nextCard.display}**\n` +
+            `You guessed: **${guess}** — Wrong!\n\n` +
+            `Cards: ${game.history.join(' → ')}\n` +
+            `Streak: **${game.streak}**\n\n` +
+            `Lost: **-${game.bet.toLocaleString()}** Kryztal`
+          )
+          .setTimestamp();
+
+        game.processing = false;
+        return interaction.update({ embeds: [embed], components: createHiloDisabledButtons(targetUserId) });
+      }
+
+      // Correct guess!
+      game.streak += 1;
+      game.multiplier = parseFloat((game.multiplier * guessMultiplier).toFixed(2));
+      game.currentCard = nextCard;
+
+      // Max streak check (10 rounds)
+      if (game.streak >= 10) {
+        game.cashedOut = true;
+        const payout = finishHiloGame(game, true);
+
+        const embed = new EmbedBuilder()
+          .setColor(0xf1c40f)
+          .setTitle('Hi-Lo | 🏆 MAX STREAK!')
+          .setDescription(
+            `Cards: ${game.history.join(' → ')}\n\n` +
+            `Streak: **${game.streak}** — Maximum reached!\n` +
+            `Multiplier: **${game.multiplier}x**\n\n` +
+            `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
+            `Payout: **+${payout.toLocaleString()}** Kryztal`
+          )
+          .setTimestamp();
+
+        game.processing = false;
+        return interaction.update({ embeds: [embed], components: createHiloDisabledButtons(targetUserId) });
+      }
+
+      // Show animation: card reveal
+      const animEmbed = new EmbedBuilder()
+        .setColor(0xfee75c)
+        .setTitle(`Hi-Lo | 🃏 Drawing next card...`)
+        .setDescription(
+          `Previous: **${game.history[game.history.length - 2]}** — Guessed: **${guess}**\n\n` +
+          `🎴 *Revealing...*`
+        )
+        .setTimestamp();
+
+      await interaction.update({ embeds: [animEmbed], components: createHiloDisabledButtons(targetUserId) });
+      await new Promise((r) => setTimeout(r, 1200));
+
+      // Show result
+      const embed = new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle(`Hi-Lo | ✅ Correct! Streak: ${game.streak}`)
+        .setDescription(
+          `Drew: **${nextCard.display}** (Value: ${nextCard.value}) — **${guess}** was correct!\n\n`
+        )
+        .setTimestamp();
+
+      // Reset timeout
+      if (game.timeout) clearTimeout(game.timeout);
+      game.timeout = setTimeout(() => { autoHiloCashout(game); }, 60000);
+
+      // Then update with proper game embed
+      const gameEmbed = createHiloEmbed(game);
+      const components = createHiloButtons(game, targetUserId);
+
+      game.processing = false;
+      try { await game.messageRef.edit({ embeds: [gameEmbed], components }); } catch {}
+      return;
+    } catch (error) {
+      game.processing = false;
+      throw error;
+    }
+  }
+
+  // --- Hi-Lo cash out ---
+  if (customId.startsWith('hilo_cashout_')) {
+    const targetUserId = customId.replace('hilo_cashout_', '');
+
+    if (interaction.user.id !== targetUserId) {
+      return interaction.reply({ content: 'This is not your game.', ephemeral: true });
+    }
+
+    const game = activeHiloGames.get(targetUserId);
+    if (!game || game.finished) {
+      return interaction.deferUpdate();
+    }
+
+    if (game.streak === 0) {
+      return interaction.deferUpdate(); // Can't cash out without a streak
+    }
+
+    if (game.processing) {
+      return interaction.deferUpdate();
+    }
+    game.processing = true;
+
+    game.cashedOut = true;
+    const payout = finishHiloGame(game, true);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('Hi-Lo | 💰 Cashed Out!')
+      .setDescription(
+        `Cards: ${game.history.join(' → ')}\n\n` +
+        `Streak: **${game.streak}** | Multiplier: **${game.multiplier}x**\n\n` +
+        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
+        `Payout: **+${payout.toLocaleString()}** Kryztal`
+      )
+      .setTimestamp();
+
+    return interaction.update({ embeds: [embed], components: createHiloDisabledButtons(targetUserId) });
+  }
+
+  // --- Tower door pick ---
+  if (customId.startsWith('tower_door_')) {
+    const parts = customId.split('_');
+    const targetUserId = parts[2];
+    const doorIdx = parseInt(parts[3]);
+
+    if (interaction.user.id !== targetUserId) {
+      return interaction.reply({ content: 'This is not your game.', ephemeral: true });
+    }
+
+    const game = activeTowerGames.get(targetUserId);
+    if (!game || game.finished) {
+      return interaction.deferUpdate();
+    }
+
+    if (game.processing) {
+      return interaction.deferUpdate();
+    }
+    game.processing = true;
+
+    try {
+      const floor = game.floors[game.currentFloor];
+      floor.revealed = true;
+      floor.chosenDoor = doorIdx;
+
+      // Hit a trap!
+      if (floor.trapPositions.has(doorIdx)) {
+        finishTowerGame(game, false);
+
+        // Show animation: reveal doors
+        const animEmbed = new EmbedBuilder()
+          .setColor(0xfee75c)
+          .setTitle(`Tower | 🚪 Opening door ${doorIdx + 1}...`)
+          .setDescription('*The door creaks open...*')
+          .setTimestamp();
+
+        await interaction.update({ embeds: [animEmbed], components: createTowerDisabledButtons(game, targetUserId) });
+        await new Promise((r) => setTimeout(r, 1000));
+
+        const embed = createTowerEmbed(game, true);
+        const components = createTowerDisabledButtons(game, targetUserId);
+        game.processing = false;
+        try { await game.messageRef.edit({ embeds: [embed], components }); } catch {}
+        return;
+      }
+
+      // Safe door! Advance floor
+      game.currentFloor += 1;
+
+      // Animation: door opening
+      const nextFloorDisplay = game.currentFloor >= game.maxFloors ? game.maxFloors : game.currentFloor + 1;
+      const animEmbed = new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle(game.currentFloor >= game.maxFloors
+          ? `Tower | 🏆 All floors cleared!`
+          : `Tower | ✅ Safe! Climbing to Floor ${nextFloorDisplay}...`)
+        .setDescription(`Door ${doorIdx + 1} was safe! 🎉`)
+        .setTimestamp();
+
+      await interaction.update({ embeds: [animEmbed], components: createTowerDisabledButtons(game, targetUserId) });
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // Max floor check
+      if (game.currentFloor >= game.maxFloors) {
+        game.cashedOut = true;
+        const payout = finishTowerGame(game, true);
+        const embed = createTowerEmbed(game);
+        const components = createTowerDisabledButtons(game, targetUserId);
+        game.processing = false;
+        try { await game.messageRef.edit({ embeds: [embed], components }); } catch {}
+        return;
+      }
+
+      // Reset timeout
+      if (game.timeout) clearTimeout(game.timeout);
+      game.timeout = setTimeout(() => { autoTowerCashout(game); }, 120000);
+
+      const embed = createTowerEmbed(game);
+      const components = createTowerButtons(game, targetUserId);
+      game.processing = false;
+      try { await game.messageRef.edit({ embeds: [embed], components }); } catch {}
+      return;
+    } catch (error) {
+      game.processing = false;
+      throw error;
+    }
+  }
+
+  // --- Tower cash out ---
+  if (customId.startsWith('tower_cashout_')) {
+    const targetUserId = customId.replace('tower_cashout_', '');
+
+    if (interaction.user.id !== targetUserId) {
+      return interaction.reply({ content: 'This is not your game.', ephemeral: true });
+    }
+
+    const game = activeTowerGames.get(targetUserId);
+    if (!game || game.finished) {
+      return interaction.deferUpdate();
+    }
+
+    if (game.currentFloor === 0) {
+      return interaction.deferUpdate(); // Can't cash out on floor 0
+    }
+
+    if (game.processing) {
+      return interaction.deferUpdate();
+    }
+    game.processing = true;
+
+    game.cashedOut = true;
+    const payout = finishTowerGame(game, true);
+    const multiplier = calculateTowerMultiplier(game.difficulty, game.currentFloor);
+
+    const embed = createTowerEmbed(game);
+    const components = createTowerDisabledButtons(game, targetUserId);
+    return interaction.update({ embeds: [embed], components });
+  }
 }
 
 async function autoStandButton(interaction, game) {
@@ -2215,7 +3529,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'lb', 'leaderboard', 'help', 'maintenance', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'maintenance', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
@@ -2233,30 +3547,50 @@ function createHelpEmbed() {
       'All commands can be used with **slash commands** or **prefix commands**.\n' +
       'Prefix commands start with `ky` followed by the command name.\n\n' +
       '```\n' +
-      'GAMES\n' +
-      '/kyriz blackjack [bet]    ky bj [bet]\n' +
+      '━━━ GAMES ━━━\n\n' +
+      'Blackjack\n' +
+      '  /kyriz blackjack [bet]      ky bj [bet]\n' +
       '  Play Blackjack. Default bet: 1. Max: 500,000.\n\n' +
-      '/kyriz coinflip [bet] [side]  ky cf [bet] [h/t]\n' +
+      'Coinflip\n' +
+      '  /kyriz coinflip [bet] [side]  ky cf [bet] [h/t]\n' +
       '  Flip a coin. Side: heads/head/h, tails/tail/t.\n\n' +
-      '/kyriz slots [bet]        ky slots [bet]\n' +
+      'Slots\n' +
+      '  /kyriz slots [bet]          ky slots [bet]\n' +
       '  Spin the slot machine.\n\n' +
-      '/kyriz dice [bet] [guess] ky dice [bet] [1-6/even/odd]\n' +
+      'Dice\n' +
+      '  /kyriz dice [bet] [guess]   ky dice [bet] [1-6/even/odd]\n' +
       '  Roll a dice and bet on the result.\n\n' +
-      '/kyriz crash [bet]        ky crash [bet]\n' +
+      'Crash\n' +
+      '  /kyriz crash [bet]          ky crash [bet]\n' +
       '  Cash out before the multiplier crashes.\n\n' +
-      '/kyriz roulette [bet] [choice]  ky rl [bet] [choice]\n' +
-      '  Roulette: red/black/even/odd/1-18/19-36/0-36.\n\n' +
-      'ECONOMY\n' +
-      '/kyriz wallet             ky wallet\n' +
+      'Roulette\n' +
+      '  /kyriz roulette [bet] [choice]  ky rl [bet] [choice]\n' +
+      '  Bet: red/black/even/odd/1-18/19-36/0-36.\n\n' +
+      'Mines\n' +
+      '  /kyriz mines [bet] [mines]  ky mines [bet] [1-12]\n' +
+      '  Reveal tiles and avoid the mines!\n\n' +
+      'Hi-Lo\n' +
+      '  /kyriz hilo [bet]           ky hl [bet]\n' +
+      '  Guess if the next card is higher or lower.\n\n' +
+      'Tower\n' +
+      '  /kyriz tower [bet] [diff]   ky tw [bet] [easy/med/hard]\n' +
+      '  Climb floors by picking safe doors.\n\n' +
+      '━━━ ECONOMY ━━━\n\n' +
+      'Wallet\n' +
+      '  /kyriz wallet               ky wallet\n' +
       '  Check your Kryztal balance and stats.\n\n' +
-      '/kyriz daily              ky daily\n' +
+      'Daily\n' +
+      '  /kyriz daily                ky daily\n' +
       '  Claim your daily reward (resets 00:00 WIB).\n\n' +
-      '/kyriz transfer           ky transfer @user [amount]\n' +
+      'Transfer\n' +
+      '  /kyriz transfer             ky tf @user [amount]\n' +
       '  Send Kryztal to another user.\n\n' +
-      '/kyriz leaderboard        ky lb\n' +
+      'Leaderboard\n' +
+      '  /kyriz leaderboard          ky lb\n' +
       '  Server top 10. Use "ky lb all" for global.\n\n' +
-      'INFO\n' +
-      '/kyriz help               ky help\n' +
+      '━━━ INFO ━━━\n\n' +
+      'Help\n' +
+      '  /kyriz help                 ky help\n' +
       '  Show this help message.\n' +
       '```'
     )
