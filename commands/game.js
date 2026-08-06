@@ -1650,13 +1650,13 @@ function generateCrashPoint() {
     { step: 1.8, survive: 0.70 },   // 70%
     { step: 2.0, survive: 0.60 },   // 60% ← CHANGED (was 58%)
     { step: 2.5, survive: 0.50 },   // 50% ← CHANGED (was 50%)
-    { step: 3.0, survive: 0.42 },   // 42%
-    { step: 3.5, survive: 0.35 },   // 35%
-    { step: 4.0, survive: 0.35 },   // 35%
-    { step: 5.0, survive: 0.35 },   // 35%
-    { step: 6.0, survive: 0.30 },   // 30%
-    { step: 7.0, survive: 0.20 },   // 20%
-    { step: 8.0, survive: 0.15 },   // 15%
+    { step: 3.0, survive: 0.50 },   // 50%
+    { step: 3.5, survive: 0.45 },   // 45%
+    { step: 4.0, survive: 0.40 },   // 40%
+    { step: 5.0, survive: 0.40 },   // 40%
+    { step: 6.0, survive: 0.35 },   // 35%
+    { step: 7.0, survive: 0.50 },   // 50%
+    { step: 8.0, survive: 0.20 },   // 20%
     { step: 9.0, survive: 0.10 },   // 10%
     { step: 10.0, survive: 1.0 },   // auto cashout at 10x
   ];
