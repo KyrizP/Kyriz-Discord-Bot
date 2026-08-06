@@ -1646,7 +1646,7 @@ function generateCrashPoint() {
   // Each step rolls independently — only 1.50x changed (78% → 50%)
   const checks = [
     { step: 1.2, survive: 0.92 },   // 92%
-    { step: 1.5, survive: 0.50 },   // 50% ← CHANGED (was 78%)
+    { step: 1.5, survive: 0.45 },   // 45% ← CHANGED (was 78%)
     { step: 1.8, survive: 0.70 },   // 70%
     { step: 2.0, survive: 0.60 },   // 60% ← CHANGED (was 58%)
     { step: 2.5, survive: 0.50 },   // 50% ← CHANGED (was 50%)
