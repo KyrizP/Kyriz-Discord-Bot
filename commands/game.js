@@ -671,6 +671,7 @@ function parseBet(betStr, userId) {
 }
 
 async function handleBlackjack(interaction, userId) {
+  const username = interaction.user.username;
   const betStr = interaction.options.getString('bet') || '1';
   const bet = parseBet(betStr, userId);
 
@@ -703,7 +704,7 @@ async function handleBlackjack(interaction, userId) {
   }
 
   // Start game
-  const game = startBlackjackGame(userId, bet);
+  const game = startBlackjackGame(userId, bet, username);
 
   // Check for instant blackjack
   if (game.playerBlackjack) {
@@ -724,6 +725,7 @@ async function handleBlackjack(interaction, userId) {
 }
 
 async function handleBlackjackPrefix(message, userId, args) {
+  const username = message.author.username;
   const betStr = args[0] || '1';
   const bet = parseBet(betStr, userId);
 
@@ -746,7 +748,7 @@ async function handleBlackjackPrefix(message, userId, args) {
     removeBalance(userId, bet);
   }
 
-  const game = startBlackjackGame(userId, bet);
+  const game = startBlackjackGame(userId, bet, username);
 
   if (game.playerBlackjack) {
     return finishBlackjack(message, game, 'reply');
@@ -763,7 +765,7 @@ async function handleBlackjackPrefix(message, userId, args) {
   }, 60000);
 }
 
-function startBlackjackGame(userId, bet) {
+function startBlackjackGame(userId, bet, username) {
   let deck = createDeck();
 
   const playerHand = [];
@@ -781,6 +783,7 @@ function startBlackjackGame(userId, bet) {
 
   const game = {
     userId,
+    username,
     bet,
     deck,
     playerHand,
@@ -805,6 +808,7 @@ function createGameEmbed(game, revealDealer) {
     : calculateHand([game.dealerHand[1]]); // Only visible card
 
   const embed = new EmbedBuilder()
+    .setAuthor({ name: `${game.username}'s game` })
     .setTitle(`Blackjack | Bet: ${game.bet.toLocaleString()} Kryztal`)
     .setTimestamp();
 
@@ -1327,6 +1331,7 @@ async function handleCoinflipPrefix(message, userId, args) {
 }
 
 async function playCoinflip(context, userId, betStr, sideStr, method) {
+  const username = context.user?.username || context.author?.username || 'Player';
   const side = parseSide(sideStr);
   if (side === null) {
     return context.reply({ content: 'Invalid side. Please choose `heads` or `tails`.\n\nUsage: `ky cf [bet] [heads/tails]`' });
@@ -1349,6 +1354,7 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
 
   // Animation: flipping coin
   const flipEmbed = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Coinflip | Flipping...')
     .setDescription(`🪙 *The coin is in the air...*\n\nYour pick: **${side}**`)
@@ -1365,6 +1371,7 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
       recordWin(userId);
     }
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${username}'s game` })
       .setColor(0x57f287)
       .setTitle('Coinflip | You Win! 🎉')
       .setDescription(
@@ -1381,6 +1388,7 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
       recordLoss(userId);
     }
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${username}'s game` })
       .setColor(0xed4245)
       .setTitle('Coinflip | You Lose')
       .setDescription(
@@ -1416,6 +1424,7 @@ async function handleSlotsPrefix(message, userId, args) {
 }
 
 async function playSlots(context, userId, betStr) {
+  const username = context.user?.username || context.author?.username || 'Player';
   const bet = parseBet(betStr, userId);
   if (bet === null) {
     return context.reply({ content: 'Invalid bet. Use a positive number or `all`. Max: 500,000.\n\nUsage: `ky slots [bet]`' });
@@ -1433,6 +1442,7 @@ async function playSlots(context, userId, betStr) {
 
   // Animation step 1: all spinning
   const spin1 = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Slots | Spinning... 🎰')
     .setDescription(`**[ ${randSym()} | ${randSym()} | ${randSym()} ]**\n\nBet: **${bet.toLocaleString()}** Kryztal`)
@@ -1442,6 +1452,7 @@ async function playSlots(context, userId, betStr) {
   // Animation step 2: first reel locked
   await new Promise((r) => setTimeout(r, 1000));
   const spin2 = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Slots | Spinning... 🎰')
     .setDescription(`**[ ${reels[0]} | ${randSym()} | ${randSym()} ]**\n\nBet: **${bet.toLocaleString()}** Kryztal`)
@@ -1451,6 +1462,7 @@ async function playSlots(context, userId, betStr) {
   // Animation step 3: second reel locked
   await new Promise((r) => setTimeout(r, 1000));
   const spin3 = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Slots | Spinning... 🎰')
     .setDescription(`**[ ${reels[0]} | ${reels[1]} | ${randSym()} ]**\n\nBet: **${bet.toLocaleString()}** Kryztal`)
@@ -1500,6 +1512,7 @@ async function playSlots(context, userId, betStr) {
       recordWin(userId);
     }
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${username}'s game` })
       .setColor(color)
       .setTitle(title)
       .setDescription(
@@ -1517,6 +1530,7 @@ async function playSlots(context, userId, betStr) {
       recordLoss(userId);
     }
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${username}'s game` })
       .setColor(color)
       .setTitle(title)
       .setDescription(
@@ -1553,6 +1567,7 @@ async function handleDicePrefix(message, userId, args) {
 }
 
 async function playDice(context, userId, betStr, guessStr) {
+  const username = context.user?.username || context.author?.username || 'Player';
   const guess = parseDiceGuess(guessStr);
   if (!guess) {
     return context.reply({ content: 'Invalid guess. Use a number `1-6`, `even`, or `odd`.\n\nUsage: `ky dice [bet] [1-6/even/odd]`' });
@@ -1577,6 +1592,7 @@ async function playDice(context, userId, betStr, guessStr) {
   // Animation: rolling dice
   const randFace = () => diceEmojis[Math.floor(Math.random() * 6) + 1];
   const rollEmbed = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Dice Roll | Rolling... 🎲')
     .setDescription(`${randFace()} ${randFace()} ${randFace()}\n\nYour guess: ${guessDisplay}`)
@@ -1607,6 +1623,7 @@ async function playDice(context, userId, betStr, guessStr) {
       recordWin(userId);
     }
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${username}'s game` })
       .setColor(0x57f287)
       .setTitle('Dice Roll | You Win! 🎲')
       .setDescription(
@@ -1624,6 +1641,7 @@ async function playDice(context, userId, betStr, guessStr) {
       recordLoss(userId);
     }
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${username}'s game` })
       .setColor(0xed4245)
       .setTitle('Dice Roll | You Lose 🎲')
       .setDescription(
@@ -1684,6 +1702,7 @@ async function handleCrashPrefix(message, userId, args) {
 }
 
 async function playCrash(context, userId, betStr, source) {
+  const username = context.user?.username || context.author?.username || 'Player';
   if (activeCrashGames.has(userId)) {
     return context.reply({ content: 'You already have an active crash game. Cash out or wait for it to end.' });
   }
@@ -1704,6 +1723,7 @@ async function playCrash(context, userId, betStr, source) {
 
   const game = {
     userId,
+    username,
     bet,
     crashPoint,
     currentMultiplier: 1.0,
@@ -1725,6 +1745,7 @@ async function playCrash(context, userId, betStr, source) {
     }
 
     const crashEmbed = new EmbedBuilder()
+      .setAuthor({ name: `${username}'s game` })
       .setColor(0xed4245)
       .setTitle('Crash | 💥 Instant CRASH!')
       .setDescription(
@@ -1738,6 +1759,7 @@ async function playCrash(context, userId, betStr, source) {
 
   // Create initial embed
   const embed = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0x5865f2)
     .setTitle('Crash | 🚀 Game Started')
     .setDescription(
@@ -1784,6 +1806,7 @@ async function runCrashLoop(game, msg) {
       }
 
       const embed = new EmbedBuilder()
+        .setAuthor({ name: `${game.username}'s game` })
         .setColor(0xed4245)
         .setTitle('Crash | 💥 CRASHED!')
         .setDescription(
@@ -1809,6 +1832,7 @@ async function runCrashLoop(game, msg) {
     const potential = Math.floor(game.bet * step);
 
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${game.username}'s game` })
       .setColor(0xfee75c)
       .setTitle('Crash | 🚀 Running...')
       .setDescription(
@@ -1836,6 +1860,7 @@ async function runCrashLoop(game, msg) {
     const payout = handleCrashCashout(game);
 
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${game.username}'s game` })
       .setColor(0x57f287)
       .setTitle('Crash | 💰 Auto Cash Out — 10.00x!')
       .setDescription(
@@ -1913,6 +1938,7 @@ async function handleRoulettePrefix(message, userId, args) {
 }
 
 async function playRoulette(context, userId, betStr, choiceStr) {
+  const username = context.user?.username || context.author?.username || 'Player';
   const choice = parseRouletteChoice(choiceStr);
   if (!choice) {
     return context.reply({
@@ -1941,6 +1967,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
   const rn1 = randNum(); const rn2 = randNum(); const rn3 = randNum();
 
   const spinEmbed1 = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Roulette | 🎡 Spinning...')
     .setDescription(`${getRouletteColor(rn1)} **${rn1}** ← ball bouncing...\n\nYour bet: ${choiceDisplay}`)
@@ -1949,6 +1976,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
 
   await new Promise((r) => setTimeout(r, 1000));
   const spinEmbed2 = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Roulette | 🎡 Spinning...')
     .setDescription(`${getRouletteColor(rn2)} **${rn2}** ← ball bouncing...\n\nYour bet: ${choiceDisplay}`)
@@ -1957,6 +1985,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
 
   await new Promise((r) => setTimeout(r, 1000));
   const spinEmbed3 = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Roulette | 🎡 Slowing down...')
     .setDescription(`${getRouletteColor(rn3)} **${rn3}** ← almost there...\n\nYour bet: ${choiceDisplay}`)
@@ -2001,6 +2030,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
       recordWin(userId);
     }
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${username}'s game` })
       .setColor(0x57f287)
       .setTitle('Roulette | You Win! 🎡')
       .setDescription(
@@ -2019,6 +2049,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
       recordLoss(userId);
     }
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${username}'s game` })
       .setColor(0xed4245)
       .setTitle('Roulette | You Lose 🎡')
       .setDescription(
@@ -2069,6 +2100,7 @@ async function handleMinesPrefix(message, userId, args) {
 }
 
 async function playMines(context, userId, betStr, minesCount, source) {
+  const username = context.user?.username || context.author?.username || 'Player';
   // Validate mines count
   if (minesCount < 1 || minesCount > 12) {
     return context.reply({ content: 'Invalid mines count. Must be between 1 and 12.\n\nUsage: `ky mines [bet] [mines: 1-12]`' });
@@ -2101,6 +2133,7 @@ async function playMines(context, userId, betStr, minesCount, source) {
 
   const game = {
     userId,
+    username,
     bet,
     minesCount,
     totalTiles,
@@ -2152,7 +2185,7 @@ function createMinesEmbed(game, multiplier, gameOver, hitMine = false) {
     gridDisplay += '\n';
   }
 
-  const embed = new EmbedBuilder().setTimestamp();
+  const embed = new EmbedBuilder().setAuthor({ name: `${game.username}'s game` }).setTimestamp();
 
   if (hitMine) {
     embed
@@ -2310,6 +2343,7 @@ async function autoMinesCashout(game) {
     if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
     try {
       const embed = new EmbedBuilder()
+        .setAuthor({ name: `${game.username}'s game` })
         .setColor(0xfee75c)
         .setTitle('Mines | ⏰ Time Expired')
         .setDescription('No tiles revealed. Your bet has been returned.')
@@ -2376,6 +2410,7 @@ async function handleHiloPrefix(message, userId, args) {
 }
 
 async function playHilo(context, userId, betStr, source) {
+  const username = context.user?.username || context.author?.username || 'Player';
   if (activeHiloGames.has(userId)) {
     return context.reply({ content: 'You already have an active Hi-Lo game. Finish it first.' });
   }
@@ -2396,6 +2431,7 @@ async function playHilo(context, userId, betStr, source) {
 
   const game = {
     userId,
+    username,
     bet,
     currentCard: firstCard,
     streak: 0,
@@ -2412,6 +2448,7 @@ async function playHilo(context, userId, betStr, source) {
 
   // Animation: card reveal
   const animEmbed = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Hi-Lo | 🃏 Drawing card...')
     .setDescription('🎴 *Shuffling the deck...*')
@@ -2450,6 +2487,7 @@ function createHiloEmbed(game) {
   ].join('\n');
 
   return new EmbedBuilder()
+    .setAuthor({ name: `${game.username}'s game` })
     .setColor(0x5865f2)
     .setTitle(`Hi-Lo | 🃏 Streak: ${game.streak}`)
     .setDescription(
@@ -2549,6 +2587,7 @@ async function autoHiloCashout(game) {
     if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
     try {
       const embed = new EmbedBuilder()
+        .setAuthor({ name: `${game.username}'s game` })
         .setColor(0xed4245)
         .setTitle('Hi-Lo | ⏰ Time Expired')
         .setDescription(`No guesses made. You lose **${game.bet.toLocaleString()} Kryztal**.`)
@@ -2562,6 +2601,7 @@ async function autoHiloCashout(game) {
   const payout = finishHiloGame(game, true);
 
   const embed = new EmbedBuilder()
+    .setAuthor({ name: `${game.username}'s game` })
     .setColor(0x57f287)
     .setTitle('Hi-Lo | 💰 Auto Cash Out!')
     .setDescription(
@@ -2616,6 +2656,7 @@ async function handleTowerPrefix(message, userId, args) {
 }
 
 async function playTower(context, userId, betStr, difficulty, source) {
+  const username = context.user?.username || context.author?.username || 'Player';
   if (activeTowerGames.has(userId)) {
     return context.reply({ content: 'You already have an active Tower game. Finish it first.' });
   }
@@ -2651,6 +2692,7 @@ async function playTower(context, userId, betStr, difficulty, source) {
 
   const game = {
     userId,
+    username,
     bet,
     difficulty,
     config,
@@ -2725,7 +2767,7 @@ function createTowerEmbed(game, hitTrap = false) {
     towerDisplay = `Floor 1: ${doorDisplay}  ← Pick a door!\n`;
   }
 
-  const embed = new EmbedBuilder().setTimestamp();
+  const embed = new EmbedBuilder().setAuthor({ name: `${game.username}'s game` }).setTimestamp();
 
   if (hitTrap) {
     embed
@@ -2867,6 +2909,7 @@ async function autoTowerCashout(game) {
     if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
     try {
       const embed = new EmbedBuilder()
+        .setAuthor({ name: `${game.username}'s game` })
         .setColor(0xed4245)
         .setTitle('Tower | ⏰ Time Expired')
         .setDescription(`No floors cleared. You lose **${game.bet.toLocaleString()} Kryztal**.`)
@@ -3143,6 +3186,7 @@ async function handleButton(interaction) {
     const payout = handleCrashCashout(game);
 
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${game.username}'s game` })
       .setColor(0x57f287)
       .setTitle('Crash | 💰 Cashed Out!')
       .setDescription(
@@ -3395,6 +3439,7 @@ async function handleButton(interaction) {
         finishHiloGame(game, false);
 
         const embed = new EmbedBuilder()
+          .setAuthor({ name: `${game.username}'s game` })
           .setColor(0xed4245)
           .setTitle('Hi-Lo | ❌ Wrong Guess!')
           .setDescription(
@@ -3423,6 +3468,7 @@ async function handleButton(interaction) {
         const payout = finishHiloGame(game, true);
 
         const embed = new EmbedBuilder()
+          .setAuthor({ name: `${game.username}'s game` })
           .setColor(0xf1c40f)
           .setTitle('Hi-Lo | 🏆 MAX STREAK!')
           .setDescription(
@@ -3442,6 +3488,7 @@ async function handleButton(interaction) {
 
       // Show animation: card reveal
       const animEmbed = new EmbedBuilder()
+        .setAuthor({ name: `${game.username}'s game` })
         .setColor(0xfee75c)
         .setTitle(`Hi-Lo | 🃏 Drawing next card...`)
         .setDescription(
@@ -3455,6 +3502,7 @@ async function handleButton(interaction) {
 
       // Show result
       const embed = new EmbedBuilder()
+        .setAuthor({ name: `${game.username}'s game` })
         .setColor(0x57f287)
         .setTitle(`Hi-Lo | ✅ Correct! Streak: ${game.streak}`)
         .setDescription(
@@ -3505,6 +3553,7 @@ async function handleButton(interaction) {
     const payout = finishHiloGame(game, true);
 
     const embed = new EmbedBuilder()
+      .setAuthor({ name: `${game.username}'s game` })
       .setColor(0x57f287)
       .setTitle('Hi-Lo | 💰 Cashed Out!')
       .setDescription(
@@ -3551,6 +3600,7 @@ async function handleButton(interaction) {
 
         // Show animation: reveal doors
         const animEmbed = new EmbedBuilder()
+          .setAuthor({ name: `${game.username}'s game` })
           .setColor(0xfee75c)
           .setTitle(`Tower | 🚪 Opening door ${doorIdx + 1}...`)
           .setDescription('*The door creaks open...*')
@@ -3573,6 +3623,7 @@ async function handleButton(interaction) {
       // Animation: door opening
       const nextFloorDisplay = game.currentFloor >= game.maxFloors ? game.maxFloors : game.currentFloor + 1;
       const animEmbed = new EmbedBuilder()
+        .setAuthor({ name: `${game.username}'s game` })
         .setColor(0x57f287)
         .setTitle(game.currentFloor >= game.maxFloors
           ? `Tower | 🏆 All floors cleared!`
@@ -3884,8 +3935,8 @@ function createOddsPage(page) {
       'Cash out at    Chance\n' +
       '─────────────────────────────\n' +
       '  1.2x         almost always\n' +
-      '  1.5x         very likely\n' +
-      '  2.0x         better than 50/50\n' +
+      '  1.5x         risky (spike)\n' +
+      '  2.0x         over 50%\n' +
       '  3.0x         risky\n' +
       '  5.0x         high risk\n' +
       ' 10.0x         very rare\n' +
