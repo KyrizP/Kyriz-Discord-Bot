@@ -1642,24 +1642,36 @@ async function playDice(context, userId, betStr, guessStr) {
 const activeCrashGames = new Map(); // userId -> crash game state
 
 function generateCrashPoint() {
-  // Table-based crash odds — player-friendly
-  // Survival rates: 1.2x=92%, 1.5x=78%, 2.0x=58%, 3.0x=42%, 5.0x=23%, 10.0x=10%
-  const r = Math.random();
-  if (r < 0.02) return 1.0;    // 2%  — instant crash
-  if (r < 0.08) return 1.1;    // 6%  — crash before 1.2x
-  if (r < 0.22) return 1.3;    // 14% — crash before 1.5x  (survive to 1.5x = 78%)
-  if (r < 0.33) return 1.6;    // 11% — crash before 1.8x
-  if (r < 0.42) return 1.9;    // 9%  — crash before 2.0x  (survive to 2.0x = 58%)
-  if (r < 0.50) return 2.2;    // 8%  — crash before 2.5x
-  if (r < 0.58) return 2.7;    // 8%  — crash before 3.0x  (survive to 3.0x = 42%)
-  if (r < 0.65) return 3.2;    // 7%  — crash before 3.5x
-  if (r < 0.72) return 3.7;    // 7%  — crash before 4.0x
-  if (r < 0.77) return 4.5;    // 5%  — crash before 5.0x  (survive to 5.0x = 23%)
-  if (r < 0.82) return 5.5;    // 5%  — crash before 6.0x
-  if (r < 0.86) return 6.5;    // 4%  — crash before 7.0x
-  if (r < 0.88) return 7.5;    // 2%  — crash before 8.0x
-  if (r < 0.90) return 8.5;    // 2%  — crash before 9.0x  (survive to 10.0x = 10%)
-  return 10.1;                  // 10% — survive all → auto cashout at 10x
+  // Per-step independent survival checks
+  // Each step rolls independently — only 1.50x changed (78% → 50%)
+  const checks = [
+    { step: 1.2, survive: 0.92 },   // 92%
+    { step: 1.5, survive: 0.50 },   // 50% ← CHANGED (was 78%)
+    { step: 1.8, survive: 0.70 },   // 70%
+    { step: 2.0, survive: 0.60 },   // 60% ← CHANGED (was 58%)
+    { step: 2.5, survive: 0.50 },   // 50% ← CHANGED (was 50%)
+    { step: 3.0, survive: 0.42 },   // 42%
+    { step: 3.5, survive: 0.35 },   // 35%
+    { step: 4.0, survive: 0.35 },   // 35%
+    { step: 5.0, survive: 0.35 },   // 35%
+    { step: 6.0, survive: 0.30 },   // 30%
+    { step: 7.0, survive: 0.20 },   // 20%
+    { step: 8.0, survive: 0.15 },   // 15%
+    { step: 9.0, survive: 0.10 },   // 10%
+    { step: 10.0, survive: 1.0 },   // auto cashout at 10x
+  ];
+
+  let prev = 1.0;
+  for (const { step, survive } of checks) {
+    if (Math.random() > survive) {
+      // Crashed before reaching this step
+      if (prev <= 1.0) return 1.0; // Instant crash
+      const crashAt = prev + Math.random() * (step - prev - 0.01);
+      return parseFloat(Math.max(prev, crashAt).toFixed(2));
+    }
+    prev = step;
+  }
+  return 10.1; // Survived all → auto cashout at 10x
 }
 
 async function handleCrash(interaction, userId) {
