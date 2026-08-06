@@ -32,6 +32,7 @@ const activeTowerGames = new Map(); // userId -> tower game state
 // ============================================================
 
 let maintenanceMode = { active: false, message: 'Bot is currently under maintenance. Please try again later.' };
+let pendingBansos = { active: false, amount: 0, message: '', claimedUsers: new Set() };
 
 // ============================================================
 // XP rewards constants
@@ -115,8 +116,7 @@ function attachGameSubcommands(commandBuilder) {
           .setRequired(false)
       )
   );
-
-  // /kyriz wallet [user]
+  // /kyriz wallet [user] [userid]
   commandBuilder.addSubcommand((sub) =>
     sub
       .setName('wallet')
@@ -125,6 +125,12 @@ function attachGameSubcommands(commandBuilder) {
         opt
           .setName('user')
           .setDescription('Check another user\'s balance (Superadmin only)')
+          .setRequired(false)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName('userid')
+          .setDescription('Check by user ID — works cross-server (Superadmin only)')
           .setRequired(false)
       )
   );
@@ -293,6 +299,11 @@ function attachGameSubcommands(commandBuilder) {
   commandBuilder.addSubcommand((sub) =>
     sub.setName('help').setDescription('View available commands')
   );
+
+  // /kyriz odds
+  commandBuilder.addSubcommand((sub) =>
+    sub.setName('odds').setDescription('View win rates & odds for all games')
+  );
 }
 
 // ============================================================
@@ -339,6 +350,23 @@ async function execute(interaction) {
   // Maintenance check (superadmin bypasses)
   if (maintenanceMode.active && !isSuperAdmin(userId)) {
     return interaction.reply({ content: maintenanceMode.message, ephemeral: true });
+  }
+
+  // Bansos check — one-time reward claim
+  if (pendingBansos.active && isRegistered(userId) && !isSuperAdmin(userId) && !pendingBansos.claimedUsers.has(userId)) {
+    pendingBansos.claimedUsers.add(userId);
+    addBalance(userId, pendingBansos.amount);
+    const bansosEmbed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('🎁 Compensation Reward!')
+      .setDescription(
+        `${pendingBansos.message}\n\n` +
+        `You received **+${pendingBansos.amount.toLocaleString()} Kryztal**!\n` +
+        `New balance: **${getBalance(userId).toLocaleString()} Kryztal**`
+      )
+      .setTimestamp();
+    // Send bansos notification, then continue with normal command
+    try { await interaction.channel.send({ content: `<@${userId}>`, embeds: [bansosEmbed] }); } catch {}
   }
 
   // Update username on every interaction
@@ -395,6 +423,8 @@ async function execute(interaction) {
       return handleTower(interaction, userId);
     case 'help':
       return handleHelp(interaction);
+    case 'odds':
+      return handleOdds(interaction);
   }
 }
 
@@ -406,14 +436,42 @@ async function handlePrefixCommand(message, command, args) {
   const userId = message.author.id;
   const username = message.author.username;
 
-  // Maintenance command (superadmin only)
+  // Superadmin commands (before maintenance block)
   if (command === 'maintenance') {
     return handleMaintenance(message, userId, args);
+  }
+  if (command === 'bansos') {
+    return handleBansos(message, userId, args);
   }
 
   // Maintenance check (superadmin bypasses)
   if (maintenanceMode.active && !isSuperAdmin(userId)) {
-    return; // Silently ignore during maintenance for prefix
+    // Rate limit maintenance replies (reuse cooldown system)
+    const remaining = checkCooldown(userId, 'maintenance_reply');
+    if (remaining > 0) return; // Silently ignore if already replied recently
+    setCooldown(userId, 'maintenance_reply');
+    const embed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle('🔧 Maintenance Mode')
+      .setDescription(maintenanceMode.message)
+      .setTimestamp();
+    return message.reply({ embeds: [embed] });
+  }
+
+  // Bansos check — one-time reward claim
+  if (pendingBansos.active && isRegistered(userId) && !isSuperAdmin(userId) && !pendingBansos.claimedUsers.has(userId)) {
+    pendingBansos.claimedUsers.add(userId);
+    addBalance(userId, pendingBansos.amount);
+    const bansosEmbed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('🎁 Compensation Reward!')
+      .setDescription(
+        `${pendingBansos.message}\n\n` +
+        `You received **+${pendingBansos.amount.toLocaleString()} Kryztal**!\n` +
+        `New balance: **${getBalance(userId).toLocaleString()} Kryztal**`
+      )
+      .setTimestamp();
+    try { await message.channel.send({ content: `<@${userId}>`, embeds: [bansosEmbed] }); } catch {}
   }
 
   // Update username
@@ -474,10 +532,11 @@ async function handlePrefixCommand(message, command, args) {
     case 'tower':
       return handleTowerPrefix(message, userId, args);
     case 'help':
-      if (args.length > 0) return; // Only exact "ky help", ignore "ky help aku dong"
+      if (args.length > 0) return;
       return handleHelpPrefix(message);
+    case 'odds':
+      return handleOddsPrefix(message);
     default:
-      // Invalid command, silently ignore
       return;
   }
 }
@@ -485,6 +544,57 @@ async function handlePrefixCommand(message, command, args) {
 // ============================================================
 // MAINTENANCE MODE
 // ============================================================
+
+async function handleBansos(message, userId, args) {
+  if (!isSuperAdmin(userId)) return;
+
+  const action = args[0]?.toLowerCase();
+
+  if (action === 'off' || action === 'stop') {
+    const claimed = pendingBansos.claimedUsers.size;
+    pendingBansos = { active: false, amount: 0, message: '', claimedUsers: new Set() };
+    return message.reply(`Bansos **stopped**. Total claimed: **${claimed}** users.`);
+  }
+
+  if (action === 'status') {
+    if (!pendingBansos.active) return message.reply('No active bansos.');
+    return message.reply(
+      `Bansos **active**: **${pendingBansos.amount.toLocaleString()} Kryztal** per user.\n` +
+      `Claimed: **${pendingBansos.claimedUsers.size}** users so far.\n` +
+      `Message: ${pendingBansos.message}`
+    );
+  }
+
+  // ky bansos [amount] [optional message]
+  const amount = parseInt(action);
+  if (isNaN(amount) || amount < 1) {
+    return message.reply(
+      'Usage:\n' +
+      '`ky bansos [amount] [message]` — Set reward for all users\n' +
+      '`ky bansos status` — Check active bansos\n' +
+      '`ky bansos off` — Stop bansos'
+    );
+  }
+
+  if (amount > 2000000) {
+    return message.reply('Maximum bansos amount is **2,000,000 Kryztal**.');
+  }
+
+  const customMessage = args.slice(1).join(' ') || 'Thank you for your patience!';
+  pendingBansos = {
+    active: true,
+    amount: amount,
+    message: customMessage,
+    claimedUsers: new Set(),
+  };
+
+  return message.reply(
+    `🎁 Bansos **activated**!\n` +
+    `Amount: **${amount.toLocaleString()} Kryztal** per user\n` +
+    `Message: ${customMessage}\n\n` +
+    `Users will receive it on their next command.`
+  );
+}
 
 async function handleMaintenance(message, userId, args) {
   if (!isSuperAdmin(userId)) return; // Only superadmin
@@ -921,9 +1031,21 @@ function dealerPlay(game) {
 
 async function handleWallet(interaction, userId) {
   const targetUser = interaction.options.getUser('user');
+  const targetUserId = interaction.options.getString('userid');
 
+  // Check by @mention
   if (targetUser && targetUser.id !== userId) {
-    // Only superadmin can check others
+    if (!isSuperAdmin(userId)) {
+      return interaction.reply({
+        content: 'Only the Superadmin can check other users\' wallets.',
+        ephemeral: true,
+      });
+    }
+    return showWallet(interaction, targetUser.id, targetUser.username);
+  }
+
+  // Check by user ID string (cross-server, superadmin only)
+  if (targetUserId && targetUserId !== userId) {
     if (!isSuperAdmin(userId)) {
       return interaction.reply({
         content: 'Only the Superadmin can check other users\' wallets.',
@@ -931,13 +1053,25 @@ async function handleWallet(interaction, userId) {
       });
     }
 
-    return showWallet(interaction, targetUser.id, targetUser.username);
+    if (!isRegistered(targetUserId)) {
+      return interaction.reply({ content: `User ID \`${targetUserId}\` is not registered.`, ephemeral: true });
+    }
+
+    const targetData = getUser(targetUserId);
+    const displayName = targetData?.username || `User ${targetUserId}`;
+    return showWallet(interaction, targetUserId, displayName);
   }
 
   return showWallet(interaction, userId, interaction.user.username);
 }
 
 async function handleWalletPrefix(message, userId) {
+  // Check if superadmin is trying to look up another user
+  const mention = message.mentions.users.first();
+  if (mention && isSuperAdmin(userId)) {
+    return showWallet(message, mention.id, mention.username, true);
+  }
+
   return showWallet(message, userId, message.author.username, true);
 }
 
@@ -945,7 +1079,7 @@ async function showWallet(context, userId, username, isPrefix = false) {
   if (!isRegistered(userId) && !isSuperAdmin(userId)) {
     const content = 'This user is not registered yet.';
     if (isPrefix) return context.reply(content);
-    return context.reply({ content });
+    return context.reply({ content, ephemeral: true });
   }
 
   const user = getUser(userId);
@@ -1331,10 +1465,15 @@ async function playSlots(context, userId, betStr) {
     title = 'Slots | Partial Match!';
     color = 0x57f287;
     xp = 25;
+  } else if (reels[1] === reels[2] || reels[0] === reels[2]) {
+    multiplier = 1.5;
+    title = 'Slots | Small Match!';
+    color = 0x57f287;
+    xp = 15;
   }
 
   if (multiplier > 0) {
-    const payout = bet * multiplier;
+    const payout = Math.floor(bet * multiplier);
     if (!isSuperAdmin(userId)) {
       addBalance(userId, payout);
       addXP(userId, xp);
@@ -1429,7 +1568,7 @@ async function playDice(context, userId, betStr, guessStr) {
 
   if (guess.type === 'number' && roll === guess.value) {
     won = true;
-    multiplier = 5;
+    multiplier = 6;
   } else if (guess.type === 'parity') {
     const isEven = roll % 2 === 0;
     if ((guess.value === 'even' && isEven) || (guess.value === 'odd' && !isEven)) {
@@ -1480,25 +1619,24 @@ async function playDice(context, userId, betStr, guessStr) {
 const activeCrashGames = new Map(); // userId -> crash game state
 
 function generateCrashPoint() {
-  // Table-based crash odds for precise control
-  // Survival rates: 1.2x=85%, 1.5x=68%, 2.0x=45%, 3.0x=28%, 5.0x=13%, 10.0x=4%
+  // Table-based crash odds — player-friendly
+  // Survival rates: 1.2x=92%, 1.5x=78%, 2.0x=58%, 3.0x=42%, 5.0x=23%, 10.0x=10%
   const r = Math.random();
-  if (r < 0.05) return 1.0;    // 5%  — instant crash
-  if (r < 0.15) return 1.1;    // 10% — crash before 1.2x
-  if (r < 0.32) return 1.3;    // 17% — crash before 1.5x  (survive to 1.5x = 68%)
-  if (r < 0.45) return 1.6;    // 13% — crash before 1.8x
-  if (r < 0.55) return 1.9;    // 10% — crash before 2.0x  (survive to 2.0x = 45%)
-  if (r < 0.63) return 2.2;    // 8%  — crash before 2.5x
-  if (r < 0.72) return 2.7;    // 9%  — crash before 3.0x  (survive to 3.0x = 28%)
-  if (r < 0.78) return 3.2;    // 6%  — crash before 3.5x
-  if (r < 0.82) return 3.7;    // 4%  — crash before 4.0x
-  if (r < 0.87) return 4.5;    // 5%  — crash before 5.0x  (survive to 5.0x = 13%)
-  if (r < 0.90) return 5.5;    // 3%  — crash before 6.0x
-  if (r < 0.92) return 6.5;    // 2%  — crash before 7.0x
-  if (r < 0.94) return 7.5;    // 2%  — crash before 8.0x
-  if (r < 0.95) return 8.5;    // 1%  — crash before 9.0x
-  if (r < 0.96) return 9.5;    // 1%  — crash before 10.0x (survive to 10.0x = 4%)
-  return 10.1;                  // 4%  — survive all → auto cashout at 10x
+  if (r < 0.02) return 1.0;    // 2%  — instant crash
+  if (r < 0.08) return 1.1;    // 6%  — crash before 1.2x
+  if (r < 0.22) return 1.3;    // 14% — crash before 1.5x  (survive to 1.5x = 78%)
+  if (r < 0.33) return 1.6;    // 11% — crash before 1.8x
+  if (r < 0.42) return 1.9;    // 9%  — crash before 2.0x  (survive to 2.0x = 58%)
+  if (r < 0.50) return 2.2;    // 8%  — crash before 2.5x
+  if (r < 0.58) return 2.7;    // 8%  — crash before 3.0x  (survive to 3.0x = 42%)
+  if (r < 0.65) return 3.2;    // 7%  — crash before 3.5x
+  if (r < 0.72) return 3.7;    // 7%  — crash before 4.0x
+  if (r < 0.77) return 4.5;    // 5%  — crash before 5.0x  (survive to 5.0x = 23%)
+  if (r < 0.82) return 5.5;    // 5%  — crash before 6.0x
+  if (r < 0.86) return 6.5;    // 4%  — crash before 7.0x
+  if (r < 0.88) return 7.5;    // 2%  — crash before 8.0x
+  if (r < 0.90) return 8.5;    // 2%  — crash before 9.0x  (survive to 10.0x = 10%)
+  return 10.1;                  // 10% — survive all → auto cashout at 10x
 }
 
 async function handleCrash(interaction, userId) {
@@ -1812,7 +1950,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
       else if (choice.value === 'high' && result >= 19 && result <= 36) { won = true; multiplier = 2; }
       break;
     case 'number':
-      if (result === choice.value) { won = true; multiplier = 35; }
+      if (result === choice.value) { won = true; multiplier = choice.value === 0 ? 45 : 35; }
       break;
   }
 
@@ -1864,7 +2002,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
  */
 function calculateMinesMultiplier(totalTiles, minesCount, revealed) {
   if (revealed === 0) return 1.0;
-  const houseEdge = 0.03;
+  const houseEdge = 0; // No house edge — fair multiplier
   let multiplier = 1.0;
   for (let i = 0; i < revealed; i++) {
     const remaining = totalTiles - i;
@@ -2167,12 +2305,12 @@ function hiloDrawCard() {
 
 /**
  * Calculate hilo multiplier based on the current card and guess type.
- * Higher: (13 / cards_higher) * 0.97
- * Lower: (13 / cards_lower) * 0.97
- * Same: (13 / cards_same) * 0.97
+ * Higher: (13 / cards_higher) — fair, no house edge
+ * Lower: (13 / cards_lower) — fair, no house edge
+ * Same: (13 / cards_same) — fair, no house edge
  */
 function hiloGuessMultiplier(currentValue, guess) {
-  const houseEdge = 0.97;
+  const houseEdge = 1.0; // No house edge — fair multiplier
   let validCount;
 
   if (guess === 'higher') {
@@ -2414,7 +2552,7 @@ const TOWER_CONFIGS = {
 function calculateTowerMultiplier(difficulty, floorsCleared) {
   if (floorsCleared === 0) return 1.0;
   const config = TOWER_CONFIGS[difficulty];
-  const houseEdge = 0.03;
+  const houseEdge = 0; // No house edge — fair multiplier
   const oddsPerFloor = config.doors / (config.doors - config.traps);
   const raw = Math.pow(oddsPerFloor, floorsCleared) * (1 - houseEdge);
   return parseFloat(raw.toFixed(2));
@@ -3443,6 +3581,21 @@ async function handleButton(interaction) {
     const components = createTowerDisabledButtons(game, targetUserId);
     return interaction.update({ embeds: [embed], components });
   }
+
+  // --- Odds pagination ---
+  if (customId.startsWith('odds_prev_') || customId.startsWith('odds_next_')) {
+    const isNext = customId.startsWith('odds_next_');
+    const targetUserId = customId.replace('odds_prev_', '').replace('odds_next_', '');
+
+    if (interaction.user.id !== targetUserId) {
+      return interaction.reply({ content: 'Use `ky odds` to view your own odds page.', ephemeral: true });
+    }
+
+    const newPage = isNext ? 2 : 1;
+    const embed = createOddsPage(newPage);
+    const buttons = createOddsButtons(targetUserId, newPage);
+    return interaction.update({ embeds: [embed], components: [buttons] });
+  }
 }
 
 async function autoStandButton(interaction, game) {
@@ -3529,7 +3682,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'maintenance', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
@@ -3591,7 +3744,10 @@ function createHelpEmbed() {
       '━━━ INFO ━━━\n\n' +
       'Help\n' +
       '  /kyriz help                 ky help\n' +
-      '  Show this help message.\n' +
+      '  Show this help message.\n\n' +
+      'Odds\n' +
+      '  /kyriz odds                 ky odds\n' +
+      '  View win rates & odds for all games.\n' +
       '```'
     )
     .setFooter({ text: 'Currency: Kryztal | Prefix: ky' })
@@ -3604,6 +3760,136 @@ async function handleHelp(interaction) {
 
 async function handleHelpPrefix(message) {
   return message.reply({ embeds: [createHelpEmbed()] });
+}
+
+// ============================================================
+// ODDS
+// ============================================================
+
+function createOddsPage(page) {
+  if (page === 1) {
+    return new EmbedBuilder()
+      .setColor(0xfee75c)
+      .setTitle('📊 Kyriz | Game Odds & Rates')
+      .setDescription(
+        '**Payouts for all games.**\n\n' +
+
+        '🪙 **Coinflip**\n' +
+        '```\n' +
+        'Heads / Tails          →   2x\n' +
+        '```\n\n' +
+
+        '🎰 **Slots**\n' +
+        '```\n' +
+        '[ 7 | 7 | 7 ]  MEGA JACKPOT   →  50x\n' +
+        '[ 💎 | 💎 | 💎 ]  JACKPOT      →  25x\n' +
+        '[ 🍒 | 🍒 | 🍒 ]  3 of a kind  →  10x\n' +
+        '[ 🍒 | 🍒 | 🍋 ]  First 2 match →   2x\n' +
+        '[ 🍊 | 🍋 | 🍊 ]  Any 2 match   → 1.5x\n' +
+        '```\n\n' +
+
+        '🎲 **Dice**\n' +
+        '```\n' +
+        'Exact number (1-6)     →   6x\n' +
+        'Even / Odd             →   2x\n' +
+        '```\n\n' +
+
+        '🎡 **Roulette**\n' +
+        '```\n' +
+        '🔴 Red / ⚫ Black      →   2x\n' +
+        'Even / Odd             →   2x\n' +
+        '1-18 / 19-36           →   2x\n' +
+        'Exact number (1-36)    →  35x\n' +
+        '🟢 Exact 0 (special!)  →  45x\n' +
+        '```\n\n' +
+
+        '🃏 **Blackjack**\n' +
+        '```\n' +
+        'Win                    →   2x\n' +
+        'Blackjack (21)         → 2.5x\n' +
+        'Push (tie)             →   1x refund\n' +
+        '```'
+      )
+      .setFooter({ text: 'Page 1/2 • ky odds' })
+      .setTimestamp();
+  }
+
+  return new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('📊 Kyriz | Game Odds & Rates')
+    .setDescription(
+      '🚀 **Crash** — cash out before it crashes!\n' +
+      '```\n' +
+      'Cash out at    Chance\n' +
+      '─────────────────────────────\n' +
+      '  1.2x         almost always\n' +
+      '  1.5x         very likely\n' +
+      '  2.0x         better than 50/50\n' +
+      '  3.0x         risky\n' +
+      '  5.0x         high risk\n' +
+      ' 10.0x         very rare\n' +
+      'Instant crash  extremely rare\n' +
+      '```\n\n' +
+
+      '💎 **Mines** — 4×4 grid, default 3 bombs\n' +
+      '```\n' +
+      'Tiles revealed   Multiplier\n' +
+      '───────────────────────────\n' +
+      '  1 tile            1.23x\n' +
+      '  3 tiles           1.96x\n' +
+      '  5 tiles           3.39x\n' +
+      '  8 tiles          10.00x\n' +
+      ' 13 tiles (all!)  560.00x\n' +
+      '```\n\n' +
+
+      '🃏 **Hi-Lo** — guess the next card\n' +
+      '```\n' +
+      'Example from card 7:\n' +
+      '  Higher       →   2.17x\n' +
+      '  Lower        →   2.17x\n' +
+      '  Same         →  13.00x\n' +
+      '\n' +
+      'Multipliers stack each round!\n' +
+      '```\n\n' +
+
+      '🏗️ **Tower** — pick the safe door\n' +
+      '```\n' +
+      'Difficulty       3 floors    5 floors\n' +
+      '──────────────────────────────────────\n' +
+      'Easy   (1/3)       3.38x       7.59x\n' +
+      'Medium (2/3)      27.00x     243.00x\n' +
+      'Hard   (3/4)      64.00x   1,024.00x\n' +
+      '```'
+    )
+    .setFooter({ text: 'Page 2/2 • Fair games • ky odds' })
+    .setTimestamp();
+}
+
+function createOddsButtons(userId, currentPage) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`odds_prev_${userId}`)
+      .setLabel('◀ Previous')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(currentPage === 1),
+    new ButtonBuilder()
+      .setCustomId(`odds_next_${userId}`)
+      .setLabel('Next ▶')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(currentPage === 2)
+  );
+}
+
+async function handleOdds(interaction) {
+  const embed = createOddsPage(1);
+  const buttons = createOddsButtons(interaction.user.id, 1);
+  return interaction.reply({ embeds: [embed], components: [buttons] });
+}
+
+async function handleOddsPrefix(message) {
+  const embed = createOddsPage(1);
+  const buttons = createOddsButtons(message.author.id, 1);
+  return message.reply({ embeds: [embed], components: [buttons] });
 }
 
 module.exports = {

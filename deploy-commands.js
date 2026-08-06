@@ -53,6 +53,7 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     console.log('  /kyriz transfer          — Transfer Kryztal');
     console.log('  /kyriz leaderboard       — Top 10 players (server/global)');
     console.log('  /kyriz help              — View available commands');
+    console.log('  /kyriz odds              — View game odds & rates');
   } catch (error) {
     console.error('Failed to register commands:', error);
   }
