@@ -44,6 +44,20 @@ const XP_BLACKJACK = 100;
 const XP_DAILY = 25;
 const MAX_BET = 500000;
 
+// Level-up notification helper
+async function sendLevelUpNotification(channel, userId, xpResult) {
+  if (!xpResult || !xpResult.leveledUp) return;
+  const embed = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('🎉 Level Up!')
+    .setDescription(
+      `<@${userId}> is now **Level ${xpResult.newLevel}**!\n\n` +
+      `💰 Reward: **+${xpResult.rewardTotal.toLocaleString()} Kryztal**`
+    )
+    .setTimestamp();
+  try { await channel.send({ embeds: [embed] }); } catch {}
+}
+
 // ============================================================
 // Cooldown system (per user, per command)
 // ============================================================
@@ -375,7 +389,7 @@ async function execute(interaction) {
   }
 
   // T&C check (skip for superadmin)
-  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower'];
+  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard'];
   if (requiresRegistration.includes(subcommand) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -480,7 +494,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -950,10 +964,6 @@ async function finishBlackjack(context, game, method) {
     }
   }
 
-  if (xpResult.leveledUp) {
-    xpText += `\nLEVEL UP! You are now Level ${xpResult.newLevel}! +${xpResult.rewardTotal.toLocaleString()} Kryztal`;
-  }
-
   // Build embed
   const embed = createGameEmbed(game, true);
   embed.setColor(color);
@@ -974,15 +984,22 @@ async function finishBlackjack(context, game, method) {
   // Clean up game
   activeGames.delete(game.userId);
 
+  // Store xpResult for level-up notification
+  game.xpResult = xpResult;
+
   const payload = { embeds: [embed], components: [disabledButtons(game.userId)] };
 
   if (method === 'reply') {
-    return context.reply(payload);
+    await context.reply(payload);
   } else if (method === 'update') {
-    return context.update(payload);
+    await context.update(payload);
   } else if (method === 'edit') {
-    return context.edit(payload);
+    await context.edit(payload);
   }
+
+  // Send separate level-up notification
+  const ch = context.channel || context.message?.channel;
+  if (ch) sendLevelUpNotification(ch, game.userId, game.xpResult);
 }
 
 async function autoStand(interaction, game) {
@@ -1139,7 +1156,7 @@ async function processDaily(context, userId) {
 
   let description = `You received **${result.amount.toLocaleString()} Kryztal**!\n+${XP_DAILY} XP`;
   if (xpResult.leveledUp) {
-    description += `\n\nLEVEL UP! You are now Level ${xpResult.newLevel}! +${xpResult.rewardTotal.toLocaleString()} Kryztal`;
+    description += `\n\n🎉 LEVEL UP! You are now **Level ${xpResult.newLevel}**! +${xpResult.rewardTotal.toLocaleString()} Kryztal`;
   }
 
   const embed = new EmbedBuilder()
@@ -1343,7 +1360,8 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
     const payout = bet * 2;
     if (!isSuperAdmin(userId)) {
       addBalance(userId, payout);
-      addXP(userId, 20);
+      const xpResult = addXP(userId, 20);
+      sendLevelUpNotification(msg.channel, userId, xpResult);
       recordWin(userId);
     }
     const embed = new EmbedBuilder()
@@ -1358,7 +1376,8 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
-      addXP(userId, 5);
+      const xpResult = addXP(userId, 5);
+      sendLevelUpNotification(msg.channel, userId, xpResult);
       recordLoss(userId);
     }
     const embed = new EmbedBuilder()
@@ -1476,7 +1495,8 @@ async function playSlots(context, userId, betStr) {
     const payout = Math.floor(bet * multiplier);
     if (!isSuperAdmin(userId)) {
       addBalance(userId, payout);
-      addXP(userId, xp);
+      const xpResultW = addXP(userId, xp);
+      sendLevelUpNotification(msg.channel, userId, xpResultW);
       recordWin(userId);
     }
     const embed = new EmbedBuilder()
@@ -1492,7 +1512,8 @@ async function playSlots(context, userId, betStr) {
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
-      addXP(userId, xp);
+      const xpResultL = addXP(userId, xp);
+      sendLevelUpNotification(msg.channel, userId, xpResultL);
       recordLoss(userId);
     }
     const embed = new EmbedBuilder()
@@ -1581,7 +1602,8 @@ async function playDice(context, userId, betStr, guessStr) {
     const payout = bet * multiplier;
     if (!isSuperAdmin(userId)) {
       addBalance(userId, payout);
-      addXP(userId, guess.type === 'number' ? 50 : 25);
+      const xpResult = addXP(userId, guess.type === 'number' ? 50 : 25);
+      sendLevelUpNotification(msg.channel, userId, xpResult);
       recordWin(userId);
     }
     const embed = new EmbedBuilder()
@@ -1597,7 +1619,8 @@ async function playDice(context, userId, betStr, guessStr) {
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
-      addXP(userId, 5);
+      const xpResult = addXP(userId, 5);
+      sendLevelUpNotification(msg.channel, userId, xpResult);
       recordLoss(userId);
     }
     const embed = new EmbedBuilder()
@@ -1684,7 +1707,8 @@ async function playCrash(context, userId, betStr, source) {
     activeCrashGames.delete(userId);
 
     if (!isSuperAdmin(userId)) {
-      addXP(userId, 10);
+      const xpResult = addXP(userId, 10);
+      sendLevelUpNotification(context.channel, userId, xpResult);
       recordLoss(userId);
     }
 
@@ -1742,7 +1766,8 @@ async function runCrashLoop(game, msg) {
       activeCrashGames.delete(game.userId);
 
       if (!isSuperAdmin(game.userId)) {
-        addXP(game.userId, 10);
+        const xpResult = addXP(game.userId, 10);
+        sendLevelUpNotification(msg.channel, game.userId, xpResult);
         recordLoss(game.userId);
       }
 
@@ -1817,6 +1842,7 @@ async function runCrashLoop(game, msg) {
     );
 
     try { await msg.edit({ embeds: [embed], components: [disabledBtn] }); } catch {}
+    sendLevelUpNotification(msg.channel, game.userId, game.xpResult);
   }
 }
 
@@ -1831,7 +1857,7 @@ function handleCrashCashout(game) {
   if (!isSuperAdmin(game.userId)) {
     addBalance(game.userId, payout);
     const xp = game.currentMultiplier >= 5 ? 100 : 30;
-    addXP(game.userId, xp);
+    game.xpResult = addXP(game.userId, xp);
     recordWin(game.userId);
   }
 
@@ -1958,7 +1984,8 @@ async function playRoulette(context, userId, betStr, choiceStr) {
     const payout = bet * multiplier;
     if (!isSuperAdmin(userId)) {
       addBalance(userId, payout);
-      addXP(userId, choice.type === 'number' ? 75 : 25);
+      const xpResult = addXP(userId, choice.type === 'number' ? 75 : 25);
+      sendLevelUpNotification(msg.channel, userId, xpResult);
       recordWin(userId);
     }
     const embed = new EmbedBuilder()
@@ -1975,7 +2002,8 @@ async function playRoulette(context, userId, betStr, choiceStr) {
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
-      addXP(userId, 5);
+      const xpResult = addXP(userId, 5);
+      sendLevelUpNotification(msg.channel, userId, xpResult);
       recordLoss(userId);
     }
     const embed = new EmbedBuilder()
@@ -2245,13 +2273,13 @@ function finishMinesGame(game, won, multiplier) {
     if (!isSuperAdmin(game.userId)) {
       addBalance(game.userId, payout);
       const xp = Math.min(30 + game.revealedTiles.size * 7, 100);
-      addXP(game.userId, xp);
+      game.xpResult = addXP(game.userId, xp);
       recordWin(game.userId);
     }
     return payout;
   } else {
     if (!isSuperAdmin(game.userId)) {
-      addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, XP_LOSE);
       recordLoss(game.userId);
     }
     return 0;
@@ -2288,6 +2316,7 @@ async function autoMinesCashout(game) {
   const components = createMinesDisabledButtons(game, game.userId);
 
   try { await game.messageRef.edit({ embeds: [embed], components }); } catch {}
+  if (game.messageRef?.channel) sendLevelUpNotification(game.messageRef.channel, game.userId, game.xpResult);
 }
 
 // ============================================================
@@ -2481,13 +2510,13 @@ function finishHiloGame(game, won) {
     if (!isSuperAdmin(game.userId)) {
       addBalance(game.userId, payout);
       const xp = Math.min(30 + game.streak * 10, 100);
-      addXP(game.userId, xp);
+      game.xpResult = addXP(game.userId, xp);
       recordWin(game.userId);
     }
     return payout;
   } else {
     if (!isSuperAdmin(game.userId)) {
-      addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, XP_LOSE);
       recordLoss(game.userId);
     }
     return 0;
@@ -2502,7 +2531,7 @@ async function autoHiloCashout(game) {
     game.finished = true;
     activeHiloGames.delete(game.userId);
     if (!isSuperAdmin(game.userId)) {
-      addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, XP_LOSE);
       recordLoss(game.userId);
     }
     if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
@@ -2533,6 +2562,7 @@ async function autoHiloCashout(game) {
     .setTimestamp();
 
   try { await game.messageRef.edit({ embeds: [embed], components: createHiloDisabledButtons(game.userId) }); } catch {}
+  if (game.messageRef?.channel) sendLevelUpNotification(game.messageRef.channel, game.userId, game.xpResult);
 }
 
 // ============================================================
@@ -2798,13 +2828,13 @@ function finishTowerGame(game, won) {
     if (!isSuperAdmin(game.userId)) {
       addBalance(game.userId, payout);
       const xp = Math.min(30 + game.currentFloor * 8, 100);
-      addXP(game.userId, xp);
+      game.xpResult = addXP(game.userId, xp);
       recordWin(game.userId);
     }
     return payout;
   } else {
     if (!isSuperAdmin(game.userId)) {
-      addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, XP_LOSE);
       recordLoss(game.userId);
     }
     return 0;
@@ -2819,7 +2849,7 @@ async function autoTowerCashout(game) {
     game.finished = true;
     activeTowerGames.delete(game.userId);
     if (!isSuperAdmin(game.userId)) {
-      addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, XP_LOSE);
       recordLoss(game.userId);
     }
     if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
@@ -2843,6 +2873,7 @@ async function autoTowerCashout(game) {
   const components = createTowerDisabledButtons(game, game.userId);
 
   try { await game.messageRef.edit({ embeds: [embed], components }); } catch {}
+  if (game.messageRef?.channel) sendLevelUpNotification(game.messageRef.channel, game.userId, game.xpResult);
 }
 
 
@@ -3117,7 +3148,9 @@ async function handleButton(interaction) {
         .setDisabled(true)
     );
 
-    return interaction.update({ embeds: [embed], components: [disabledBtn] });
+    await interaction.update({ embeds: [embed], components: [disabledBtn] });
+    sendLevelUpNotification(interaction.channel, targetUserId, game.xpResult);
+    return;
   }
 
   // --- Transfer buttons ---
@@ -3230,7 +3263,9 @@ async function handleButton(interaction) {
         const embed = createMinesEmbed(game, multiplier, true, true);
         const components = createMinesDisabledButtons(game, targetUserId);
         game.processing = false;
-        return interaction.update({ embeds: [embed], components });
+        await interaction.update({ embeds: [embed], components });
+        sendLevelUpNotification(interaction.channel, game.userId, game.xpResult);
+        return;
       }
 
       // Safe tile
@@ -3244,7 +3279,9 @@ async function handleButton(interaction) {
         const embed = createMinesEmbed(game, multiplier, true);
         const components = createMinesDisabledButtons(game, targetUserId);
         game.processing = false;
-        return interaction.update({ embeds: [embed], components });
+        await interaction.update({ embeds: [embed], components });
+        sendLevelUpNotification(interaction.channel, game.userId, game.xpResult);
+        return;
       }
 
       // Continue game
@@ -3290,7 +3327,9 @@ async function handleButton(interaction) {
 
     const embed = createMinesEmbed(game, multiplier, true);
     const components = createMinesDisabledButtons(game, targetUserId);
-    return interaction.update({ embeds: [embed], components });
+    await interaction.update({ embeds: [embed], components });
+    sendLevelUpNotification(interaction.channel, game.userId, game.xpResult);
+    return;
   }
 
   // --- Hi-Lo guess buttons ---
@@ -3356,7 +3395,9 @@ async function handleButton(interaction) {
           .setTimestamp();
 
         game.processing = false;
-        return interaction.update({ embeds: [embed], components: createHiloDisabledButtons(targetUserId) });
+        await interaction.update({ embeds: [embed], components: createHiloDisabledButtons(targetUserId) });
+        sendLevelUpNotification(interaction.channel, game.userId, game.xpResult);
+        return;
       }
 
       // Correct guess!
@@ -3382,7 +3423,9 @@ async function handleButton(interaction) {
           .setTimestamp();
 
         game.processing = false;
-        return interaction.update({ embeds: [embed], components: createHiloDisabledButtons(targetUserId) });
+        await interaction.update({ embeds: [embed], components: createHiloDisabledButtons(targetUserId) });
+        sendLevelUpNotification(interaction.channel, game.userId, game.xpResult);
+        return;
       }
 
       // Show animation: card reveal
@@ -3460,7 +3503,9 @@ async function handleButton(interaction) {
       )
       .setTimestamp();
 
-    return interaction.update({ embeds: [embed], components: createHiloDisabledButtons(targetUserId) });
+    await interaction.update({ embeds: [embed], components: createHiloDisabledButtons(targetUserId) });
+    sendLevelUpNotification(interaction.channel, game.userId, game.xpResult);
+    return;
   }
 
   // --- Tower door pick ---
@@ -3506,6 +3551,7 @@ async function handleButton(interaction) {
         const components = createTowerDisabledButtons(game, targetUserId);
         game.processing = false;
         try { await game.messageRef.edit({ embeds: [embed], components }); } catch {}
+        sendLevelUpNotification(interaction.channel, game.userId, game.xpResult);
         return;
       }
 
@@ -3533,6 +3579,7 @@ async function handleButton(interaction) {
         const components = createTowerDisabledButtons(game, targetUserId);
         game.processing = false;
         try { await game.messageRef.edit({ embeds: [embed], components }); } catch {}
+        sendLevelUpNotification(interaction.channel, game.userId, game.xpResult);
         return;
       }
 
@@ -3579,7 +3626,9 @@ async function handleButton(interaction) {
 
     const embed = createTowerEmbed(game);
     const components = createTowerDisabledButtons(game, targetUserId);
-    return interaction.update({ embeds: [embed], components });
+    await interaction.update({ embeds: [embed], components });
+    sendLevelUpNotification(interaction.channel, game.userId, game.xpResult);
+    return;
   }
 
   // --- Odds pagination ---
@@ -3647,9 +3696,6 @@ async function autoStandButton(interaction, game) {
       const user = getUser(game.userId);
       if (user) xpText += ` | Level ${user.level} (${user.xp}/${user.xpNeeded} XP)`;
     }
-    if (xpResult.leveledUp) {
-      xpText += `\nLEVEL UP! You are now Level ${xpResult.newLevel}! +${xpResult.rewardTotal.toLocaleString()} Kryztal`;
-    }
 
     embed.setColor(color);
     embed.addFields(
@@ -3672,6 +3718,9 @@ async function autoStandButton(interaction, game) {
       embeds: [embed],
       components: [disabledButtons(game.userId)],
     });
+
+    // Send separate level-up notification
+    if (interaction.channel) sendLevelUpNotification(interaction.channel, game.userId, xpResult);
   } catch (error) {
     game.finished = true;
     activeGames.delete(game.userId);

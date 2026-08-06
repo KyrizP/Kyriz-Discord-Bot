@@ -1,6 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const { isSuperAdmin, isAuthorizedUser } = require('../utils/permissionCheck');
 const { addAuthorizedUser, removeAuthorizedUser, getAuthorizedUsers } = require('../utils/dataManager');
+const { setAdmin, removeAdmin, isAdmin } = require('../utils/economyManager');
 
 // ============================================================
 // Subcommand definitions for /kyriz user
@@ -19,9 +20,15 @@ function attachUserSubcommands(commandBuilder) {
       .addSubcommand((sub) =>
         sub
           .setName('add')
-          .setDescription('Add a user who can configure the bot (Superadmin only)')
+          .setDescription('Add a user as Admin (Superadmin only)')
           .addUserOption((opt) =>
             opt.setName('target').setDescription('The user to add').setRequired(true)
+          )
+          .addIntegerOption((opt) =>
+            opt
+              .setName('amount')
+              .setDescription('Starting Kryztal bonus (default: 10,000,000, max: 50,000,000)')
+              .setRequired(false)
           )
       )
 
@@ -29,7 +36,7 @@ function attachUserSubcommands(commandBuilder) {
       .addSubcommand((sub) =>
         sub
           .setName('remove')
-          .setDescription('Remove a user\'s config access (Superadmin only)')
+          .setDescription('Remove a user\'s Admin access (Superadmin only)')
           .addUserOption((opt) =>
             opt.setName('target').setDescription('The user to remove').setRequired(true)
           )
@@ -37,7 +44,7 @@ function attachUserSubcommands(commandBuilder) {
 
       // ---- /kyriz user list ----
       .addSubcommand((sub) =>
-        sub.setName('list').setDescription('View the list of users with config access')
+        sub.setName('list').setDescription('View the list of Admins')
       )
   );
 }
@@ -65,16 +72,17 @@ async function execute(interaction) {
 async function handleUserAdd(interaction, guildId, userId) {
   if (!isSuperAdmin(userId)) {
     return interaction.reply({
-      content: 'Only the **Superadmin** can add users.',
+      content: 'Only the **Superadmin** can add admins.',
       ephemeral: true,
     });
   }
 
   const targetUser = interaction.options.getUser('target');
+  const amount = interaction.options.getInteger('amount') ?? 10000000; // Default 10M
 
   if (targetUser.bot) {
     return interaction.reply({
-      content: 'Cannot add a bot as an authorized user.',
+      content: 'Cannot add a bot as an admin.',
       ephemeral: true,
     });
   }
@@ -86,16 +94,42 @@ async function handleUserAdd(interaction, guildId, userId) {
     });
   }
 
-  const result = addAuthorizedUser(guildId, targetUser.id);
-
-  if (!result.success) {
-    return interaction.reply({ content: result.message, ephemeral: true });
+  if (amount < 0 || amount > 50000000) {
+    return interaction.reply({
+      content: 'Amount must be between **0** and **50,000,000** Kryztal.',
+      ephemeral: true,
+    });
   }
+
+  // Add to authorized users for this guild (for auto-reply access)
+  addAuthorizedUser(guildId, targetUser.id);
+
+  // Check if already a global admin (skip bonus, just add guild auth)
+  if (isAdmin(targetUser.id)) {
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('✅ Admin Authorized')
+      .setDescription(
+        `${targetUser} is already an **Admin** globally.\n` +
+        `Auto-reply access granted for this server.`
+      )
+      .setTimestamp();
+    return interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  // Set as admin in economy + add balance
+  const result = setAdmin(targetUser.id, targetUser.username, amount);
 
   const embed = new EmbedBuilder()
     .setColor(0x57f287)
-    .setTitle('User Added')
-    .setDescription(`${targetUser} can now configure Kyriz in this server.`)
+    .setTitle('✅ Admin Added')
+    .setDescription(
+      `${targetUser} is now an **Admin**.\n\n` +
+      `💰 Bonus: **+${amount.toLocaleString()} Kryztal**\n` +
+      `💳 Balance: **${result.newBalance.toLocaleString()} Kryztal**\n\n` +
+      `• Can configure auto-replies\n` +
+      `• Excluded from leaderboard`
+    )
     .setTimestamp();
 
   return interaction.reply({ embeds: [embed], ephemeral: true });
@@ -105,7 +139,7 @@ async function handleUserAdd(interaction, guildId, userId) {
 async function handleUserRemove(interaction, guildId, userId) {
   if (!isSuperAdmin(userId)) {
     return interaction.reply({
-      content: 'Only the **Superadmin** can remove users.',
+      content: 'Only the **Superadmin** can remove admins.',
       ephemeral: true,
     });
   }
@@ -119,16 +153,29 @@ async function handleUserRemove(interaction, guildId, userId) {
     });
   }
 
-  const result = removeAuthorizedUser(guildId, targetUser.id);
-
-  if (!result.success) {
-    return interaction.reply({ content: result.message, ephemeral: true });
+  // Check if target is even an admin
+  if (!isAdmin(targetUser.id) && !getAuthorizedUsers(guildId).includes(targetUser.id)) {
+    return interaction.reply({
+      content: `${targetUser} is not an Admin.`,
+      ephemeral: true,
+    });
   }
+
+  // Remove from this guild's authorized list (ignore if not in this guild)
+  removeAuthorizedUser(guildId, targetUser.id);
+
+  // Remove global admin flag
+  removeAdmin(targetUser.id);
 
   const embed = new EmbedBuilder()
     .setColor(0xed4245)
-    .setTitle('Access Removed')
-    .setDescription(`${targetUser} can no longer configure Kyriz in this server.`)
+    .setTitle('❌ Admin Removed')
+    .setDescription(
+      `${targetUser} is no longer an **Admin**.\n\n` +
+      `• Auto-reply access revoked\n` +
+      `• Back on leaderboard\n` +
+      `• Balance unchanged`
+    )
     .setTimestamp();
 
   return interaction.reply({ embeds: [embed], ephemeral: true });

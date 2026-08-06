@@ -32,6 +32,58 @@ function isSuperAdmin(userId) {
   return userId === process.env.SUPERADMIN_ID;
 }
 
+/**
+ * Check if a user is an admin (set via /kyriz user add)
+ */
+function isAdmin(userId) {
+  if (isSuperAdmin(userId)) return true;
+  const data = readJSON(ECONOMY_PATH);
+  return !!(data[userId] && data[userId].isAdmin);
+}
+
+/**
+ * Set a user as admin, register if needed, and add balance
+ */
+function setAdmin(userId, username, bonusAmount = 10000000) {
+  const data = readJSON(ECONOMY_PATH);
+
+  if (!data[userId]) {
+    // Register the user first
+    data[userId] = {
+      username: username,
+      balance: bonusAmount,
+      level: 1,
+      xp: 0,
+      xpNeeded: 400,
+      totalWins: 0,
+      totalLosses: 0,
+      totalEarned: bonusAmount,
+      totalLost: 0,
+      lastDaily: null,
+      registeredAt: new Date().toISOString(),
+      isAdmin: true,
+    };
+  } else {
+    data[userId].isAdmin = true;
+    data[userId].balance += bonusAmount;
+    data[userId].totalEarned += bonusAmount;
+  }
+
+  writeJSON(ECONOMY_PATH, data);
+  return { success: true, newBalance: data[userId].balance };
+}
+
+/**
+ * Remove admin flag from a user
+ */
+function removeAdmin(userId) {
+  const data = readJSON(ECONOMY_PATH);
+  if (data[userId]) {
+    data[userId].isAdmin = false;
+    writeJSON(ECONOMY_PATH, data);
+  }
+}
+
 // ============================================================
 // User management
 // ============================================================
@@ -219,6 +271,7 @@ function addXP(userId, amount) {
 
   let leveledUp = false;
   let levelsGained = 0;
+  let totalReward = 0;
 
   // Check for level up (could be multiple levels in theory)
   while (user.xp >= user.xpNeeded) {
@@ -229,8 +282,13 @@ function addXP(userId, amount) {
 
     user.level += 1;
     user.xpNeeded = (user.level + 1) * 200; // Next level requirement
-    user.balance += 150000; // Level up reward
-    user.totalEarned += 150000;
+
+    // Random reward: 150k-500k, weighted towards lower (Math.random()^2)
+    const reward = 150000 + Math.floor(Math.pow(Math.random(), 2) * 350000);
+    user.balance += reward;
+    user.totalEarned += reward;
+    totalReward += reward;
+
     leveledUp = true;
     levelsGained += 1;
   }
@@ -243,7 +301,7 @@ function addXP(userId, amount) {
     newLevel: user.level,
     xp: user.xp,
     xpNeeded: user.xpNeeded,
-    rewardTotal: levelsGained * 150000,
+    rewardTotal: totalReward,
   };
 }
 
@@ -342,6 +400,7 @@ function getLeaderboard(limit = 10) {
 
   const users = Object.entries(data)
     .filter(([id]) => id !== superAdminId) // Exclude superadmin
+    .filter(([id, user]) => !user.isAdmin) // Exclude admins
     .map(([id, user]) => ({
       userId: id,
       username: user.username,
@@ -356,6 +415,9 @@ function getLeaderboard(limit = 10) {
 
 module.exports = {
   isSuperAdmin,
+  isAdmin,
+  setAdmin,
+  removeAdmin,
   isRegistered,
   registerUser,
   getUser,
