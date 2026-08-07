@@ -288,39 +288,47 @@ function checkTransferLimits(fromId, toId, amount) {
   if (!sender) return { allowed: false, message: 'Sender not found.' };
   if (!receiver) return { allowed: false, message: 'Recipient is not registered yet.' };
 
-  // --- Sender checks ---
-  const senderLevel = sender.level ?? 1;
-  const sendLimit = getDailySendLimit(senderLevel);
-  if (sendLimit === 0) {
-    return { allowed: false, message: `You need to be **Level 3** or higher to transfer. You are currently Level ${senderLevel}.` };
+  // Admin (termasuk superadmin) bebas dari limit transfer/receive mereka sendiri.
+  // - Admin PENGIRIM: bebas send-limit & send-count harian.
+  // - Admin PENERIMA: bebas receive-limit harian (orang lain boleh kirim unlimited ke admin).
+  // Limit penerima NORMAL tetap berlaku saat admin kirim ke user biasa (jaga anti-muling).
+  if (!isAdmin(fromId)) {
+    // --- Sender checks ---
+    const senderLevel = sender.level ?? 1;
+    const sendLimit = getDailySendLimit(senderLevel);
+    if (sendLimit === 0) {
+      return { allowed: false, message: `You need to be **Level 3** or higher to transfer. You are currently Level ${senderLevel}.` };
+    }
+
+    const senderData = getTransferData(sender);
+
+    // Check transfer count
+    if (senderData.sentCount >= MAX_DAILY_TRANSFERS) {
+      return { allowed: false, message: `You have reached the daily transfer limit (**${MAX_DAILY_TRANSFERS}x/day**). Try again tomorrow.` };
+    }
+
+    // Check send amount
+    const remainingSend = sendLimit - senderData.sentTotal;
+    if (amount > remainingSend) {
+      return {
+        allowed: false,
+        message: `Daily send limit exceeded.\nYour limit: **${sendLimit.toLocaleString()}**/day (Level ${sender.level})\nSent today: **${senderData.sentTotal.toLocaleString()}**\nRemaining: **${remainingSend.toLocaleString()}**`,
+      };
+    }
   }
 
-  const senderData = getTransferData(sender);
-
-  // Check transfer count
-  if (senderData.sentCount >= MAX_DAILY_TRANSFERS) {
-    return { allowed: false, message: `You have reached the daily transfer limit (**${MAX_DAILY_TRANSFERS}x/day**). Try again tomorrow.` };
-  }
-
-  // Check send amount
-  const remainingSend = sendLimit - senderData.sentTotal;
-  if (amount > remainingSend) {
-    return {
-      allowed: false,
-      message: `Daily send limit exceeded.\nYour limit: **${sendLimit.toLocaleString()}**/day (Level ${sender.level})\nSent today: **${senderData.sentTotal.toLocaleString()}**\nRemaining: **${remainingSend.toLocaleString()}**`,
-    };
-  }
-
-  // --- Receiver checks (skip if sender is superadmin — already handled above) ---
-  const receiverLevel = receiver.level ?? 1;
-  const receiveLimit = getDailyReceiveLimit(receiverLevel);
-  const receiverData = getTransferData(receiver);
-  const remainingReceive = receiveLimit - receiverData.receivedTotal;
-  if (amount > remainingReceive) {
-    return {
-      allowed: false,
-      message: `Recipient has reached their daily receive limit (**${receiveLimit.toLocaleString()}**/day).\nThey can still receive: **${remainingReceive.toLocaleString()}**`,
-    };
+  if (!isAdmin(toId)) {
+    // --- Receiver checks ---
+    const receiverLevel = receiver.level ?? 1;
+    const receiveLimit = getDailyReceiveLimit(receiverLevel);
+    const receiverData = getTransferData(receiver);
+    const remainingReceive = receiveLimit - receiverData.receivedTotal;
+    if (amount > remainingReceive) {
+      return {
+        allowed: false,
+        message: `Recipient has reached their daily receive limit (**${receiveLimit.toLocaleString()}**/day).\nThey can still receive: **${remainingReceive.toLocaleString()}**`,
+      };
+    }
   }
 
   return { allowed: true, message: 'OK' };

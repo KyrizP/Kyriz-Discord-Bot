@@ -1,4 +1,6 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 const {
   isSuperAdmin,
   isRegistered,
@@ -484,6 +486,9 @@ async function handlePrefixCommand(message, command, args) {
   if (command === 'bansos') {
     return handleBansos(message, userId, args);
   }
+  if (command === 'backup') {
+    return handleBackup(message, userId);
+  }
 
   // Maintenance check (superadmin bypasses)
   if (maintenanceMode.active && !isSuperAdmin(userId)) {
@@ -679,6 +684,55 @@ async function handleMaintenance(message, userId, args) {
   // Status check
   const status = maintenanceMode.active ? 'ON' : 'OFF';
   return message.reply(`Maintenance is currently **${status}**.\nUsage: \`ky maintenance on [message]\` or \`ky maintenance off\``);
+}
+
+async function handleBackup(message, userId) {
+  if (!isSuperAdmin(userId)) return; // Only superadmin
+
+  const DATA_DIR = path.join(__dirname, '..', 'data');
+  const targets = ['economy.json', 'replies.json', 'users.json'];
+  const attachments = [];
+  const summary = [];
+  for (const name of targets) {
+    const fp = path.join(DATA_DIR, name);
+    if (fs.existsSync(fp)) {
+      attachments.push(new AttachmentBuilder(fp, { name }));
+      const kb = (fs.statSync(fp).size / 1024).toFixed(1);
+      summary.push(`• \`${name}\` — ${kb} KB`);
+    }
+  }
+
+  if (attachments.length === 0) {
+    return message.reply('⚠️ Tidak ada file data di folder `data/` untuk di-backup.');
+  }
+
+  // Hitung jumlah pemain dari economy.json (buat konfirmasi)
+  let playerCount = null;
+  try {
+    const d = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'economy.json'), 'utf-8'));
+    playerCount = Object.keys(d).length;
+  } catch { /* economy.json belum ada — abaikan */ }
+
+  const ts = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'short', timeStyle: 'short' });
+
+  // Kirim file ke DM superadmin — tersimpan di Discord (off-server), bukan di Wispbyte.
+  let owner;
+  try {
+    owner = await message.client.users.fetch(process.env.SUPERADMIN_ID);
+  } catch {
+    return message.reply('❌ Gagal mengambil user superadmin. Cek `SUPERADMIN_ID` di .env.');
+  }
+
+  try {
+    await owner.send({
+      content: `📦 **Kyriz Backup**\nDibuat: ${ts} WIB\n\nFile:\n${summary.join('\n')}${playerCount != null ? `\n\nPemain terdaftar: **${playerCount}**` : ''}\n\n_Untuk restore: taruh file-file ini di folder \`data/\` lalu restart bot._`,
+      files: attachments,
+    });
+  } catch {
+    return message.reply('❌ Gagal kirim DM (kemungkinan DM dari bot dimatikan). Aktifkan pengaturan DM dari bot ini, lalu coba `ky backup` lagi. Data sengaja TIDAK dikirim ke channel demi keamanan.');
+  }
+
+  return message.reply(`✅ Backup terkirim ke DM kamu (**${attachments.length} file**):\n${summary.join('\n')}${playerCount != null ? `\n\nPemain: **${playerCount}**` : ''}`);
 }
 
 // ============================================================
@@ -3878,7 +3932,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
@@ -4140,7 +4194,11 @@ function createPlayersPage(page) {
     desc += `**${rank}.** <@${p.userId}> • Lv.**${level}** (${xp}/${xpNeeded} XP)${adminTag}\n`;
     desc += `> 💰 **${p.balance.toLocaleString()}** | 🏆 ${wins}W/${losses}L | 📅 ${joined}\n`;
     desc += `> 📈 Earned: **${formatNumber(p.totalEarned ?? 0)}** | 📉 Lost: **${formatNumber(p.totalLost ?? 0)}**\n`;
-    if (sendLimit > 0) {
+    // Admin/superadmin bebas limit transfer — tampilan harus jujur (jangan tunjukin limit palsu).
+    const bypassLimits = p.isAdmin || isSuperAdmin(p.userId);
+    if (bypassLimits) {
+      desc += `> 📤 ∞ (Admin) | 📥 ∞ (Admin)\n`;
+    } else if (sendLimit > 0) {
       desc += `> 📤 ${formatNumber(sendLeft)}/${formatNumber(sendLimit)} left | 📥 ${formatNumber(recvLeft)}/${formatNumber(recvLimit)} left\n`;
     } else {
       desc += `> 📤 Can\'t send (Lv.${level}) | 📥 ${formatNumber(recvLeft)}/${formatNumber(recvLimit)} left\n`;
