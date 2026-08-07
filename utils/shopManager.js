@@ -4,7 +4,7 @@
 // swap I/O without touching production behavior.
 // Self-check: `node utils/shopManager.js`.
 const economyManager = require('./economyManager');
-const { getItem } = require('./shopItems');
+const { getItem, spinWheel, LUCKY_WHEEL } = require('./shopItems');
 
 // ---- Defensive accessors: existing users may lack shop fields ----
 function inv(user) { return user.inventory || (user.inventory = {}); }
@@ -96,7 +96,64 @@ function purchase(userId, itemId) {
   return { success: true, message: `Purchased **${item.name}**.`, newBalance: u.balance };
 }
 
-module.exports = { getInventoryState, equipCosmetic, purchase, inv, cosmetics, boosts };
+/**
+ * Use a consumable from inventory.
+ * - shield / daily_boost: arm a flag on activeBoosts (consumed by game hooks).
+ * - spin: resolve the wheel immediately and credit the prize.
+ * @returns {{ success: boolean, message: string, outcome?: { prize: number } }}
+ */
+function useItem(userId, itemId) {
+  if (economyManager.isSuperAdmin(userId)) return { success: true, message: 'Used (superadmin).' };
+
+  const item = getItem(itemId);
+  if (!item || item.type !== 'consumable') {
+    return { success: false, message: 'That item cannot be used.' };
+  }
+
+  const data = economyManager.readEconomy();
+  const u = data[userId];
+  if (!u) return { success: false, message: 'User not found.' };
+
+  const inventory = inv(u);
+  if (!inventory[itemId] || inventory[itemId] <= 0) {
+    return { success: false, message: 'You do not have this item.' };
+  }
+
+  const b = boosts(u);
+  const eff = item.effect;
+
+  if (eff.kind === 'shield') {
+    // One shield at a time; latest use replaces.
+    b.shield = { pct: eff.pct, cap: eff.cap };
+    inventory[itemId] -= 1;
+    if (inventory[itemId] <= 0) delete inventory[itemId];
+    economyManager.writeEconomy(data);
+    return { success: true, message: `🛡️ Shield armed (${Math.round(eff.pct * 100)}%, cap ${eff.cap.toLocaleString()}). It will refund your next loss.` };
+  }
+
+  if (eff.kind === 'daily_boost') {
+    // Queue the multiplier for the next daily claim (consumed in claimDaily).
+    b.daily_mult = eff.mult;
+    inventory[itemId] -= 1;
+    if (inventory[itemId] <= 0) delete inventory[itemId];
+    economyManager.writeEconomy(data);
+    return { success: true, message: `📅 Daily boost armed (x${eff.mult}). It applies to your next /kyriz daily.` };
+  }
+
+  if (eff.kind === 'spin') {
+    const prize = spinWheel(eff.wheel);
+    inventory[itemId] -= 1;
+    if (inventory[itemId] <= 0) delete inventory[itemId];
+    u.balance = (u.balance || 0) + prize;
+    u.totalEarned = (u.totalEarned || 0) + prize;
+    economyManager.writeEconomy(data);
+    return { success: true, message: `You won **💎 ${prize.toLocaleString()}**!`, outcome: { prize } };
+  }
+
+  return { success: false, message: 'Unknown consumable effect.' };
+}
+
+module.exports = { getInventoryState, equipCosmetic, purchase, useItem, inv, cosmetics, boosts };
 
 // ---- Self-check (run: node utils/shopManager.js) ----
 // Monkeypatches economyManager.readEconomy/writeEconomy to an in-memory store
@@ -217,6 +274,66 @@ if (require.main === module) {
     const r10b = purchase('404', 'lucky_token');
     ok(r10b.success === false, 'missing user fails {success:false}');
     ok(writes === 0, `missing user writes zero (got ${writes})`);
+
+    // 11. useItem: shield. inventory.shield_50=1 -> arms activeBoosts.shield={pct,cap}, deletes item, ONE write.
+    store = { '400': { username: 'shielded', balance: 100000, inventory: { shield_50: 1 } } };
+    writes = 0;
+    const r11 = useItem('400', 'shield_50');
+    ok(r11.success === true, 'useItem shield succeeds');
+    ok(writes === 1, `useItem shield writes once (got ${writes})`);
+    ok(store['400'].activeBoosts && store['400'].activeBoosts.shield
+       && store['400'].activeBoosts.shield.pct === 0.5 && store['400'].activeBoosts.shield.cap === 250000,
+       'shield armed as {pct:0.5, cap:250000}');
+    ok(store['400'].inventory.shield_50 === undefined, 'shield_50 deleted from inventory at qty 0');
+
+    // 12. useItem: daily_boost. daily_boost_15 (qty 2) -> daily_mult=1.5, decremented to 1 (not deleted).
+    store = { '401': { username: 'boosted', balance: 100000, inventory: { daily_boost_15: 2 } } };
+    writes = 0;
+    const r12 = useItem('401', 'daily_boost_15');
+    ok(r12.success === true, 'useItem daily_boost succeeds');
+    ok(writes === 1, `useItem daily_boost writes once (got ${writes})`);
+    ok(store['401'].activeBoosts && store['401'].activeBoosts.daily_mult === 1.5, 'daily_mult armed to 1.5');
+    ok(store['401'].inventory.daily_boost_15 === 1, 'daily_boost_15 decremented to 1 (kept at qty>0)');
+
+    // 13. useItem: spin (lucky_token). balance 100k -> balance+prize, prize in LUCKY_WHEEL;
+    //     totalEarned += prize; lucky_token deleted; ONE write. Prize is random -> assert membership + accounting.
+    store = { '402': { username: 'spinner', balance: 100000, totalEarned: 0, inventory: { lucky_token: 1 } } };
+    writes = 0;
+    const r13 = useItem('402', 'lucky_token');
+    const wheelAmts = LUCKY_WHEEL.map((s) => s.amt);
+    ok(r13.success === true, 'useItem spin succeeds');
+    ok(r13.outcome && typeof r13.outcome.prize === 'number', 'spin outcome has numeric prize');
+    ok(r13.outcome && wheelAmts.includes(r13.outcome.prize), `spin prize is a LUCKY_WHEEL amount (got ${r13.outcome && r13.outcome.prize})`);
+    ok(writes === 1, `useItem spin writes once (got ${writes})`);
+    ok(store['402'].inventory.lucky_token === undefined, 'lucky_token deleted after spin');
+    ok(store['402'].balance === 100000 + r13.outcome.prize, `balance increased by exact prize (got ${store['402'].balance})`);
+    ok(store['402'].totalEarned === r13.outcome.prize, `totalEarned increased by exact prize (got ${store['402'].totalEarned})`);
+
+    // 14. useItem: not in inventory -> {success:false}, no mutation, zero writes.
+    store = { '403': { username: 'empty', balance: 100000, inventory: {} } };
+    writes = 0;
+    const r14 = useItem('403', 'shield_50');
+    ok(r14.success === false, 'useItem on missing inventory item fails');
+    ok(writes === 0, `useItem missing item writes zero (got ${writes})`);
+    ok(Object.keys(store['403'].inventory).length === 0, 'inventory unchanged after failed use');
+
+    // 15. useItem: cosmetic id -> {success:false} (cosmetics go through equipCosmetic). Owned, still rejected.
+    store = { '410': { username: 'cos', balance: 100000, cosmetics: { title: null, badge: null, color: null, owned: ['badge_crown'] } } };
+    writes = 0;
+    const r15 = useItem('410', 'badge_crown');
+    ok(r15.success === false, 'useItem on cosmetic id fails (use equipCosmetic)');
+    ok(writes === 0, `useItem cosmetic writes zero (got ${writes})`);
+
+    // 16. useItem: unknown item / missing user -> {success:false}, zero writes.
+    store = { '405': { username: 'x', balance: 100000, inventory: { shield_50: 1 } } };
+    writes = 0;
+    const r16a = useItem('405', 'totally_fake_id');
+    ok(r16a.success === false, 'useItem unknown item fails');
+    ok(writes === 0, `useItem unknown item writes zero (got ${writes})`);
+    writes = 0;
+    const r16b = useItem('999', 'shield_50');
+    ok(r16b.success === false, 'useItem missing user fails');
+    ok(writes === 0, `useItem missing user writes zero (got ${writes})`);
   } finally {
     // Restore originals so we never leak the stub into other requires.
     economyManager.readEconomy = origRead;
