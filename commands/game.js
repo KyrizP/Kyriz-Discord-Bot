@@ -526,7 +526,7 @@ async function execute(interaction) {
     case 'players':
       return handlePlayersSlash(interaction, userId);
     case 'shop':
-      return handleShop(interaction);
+      return handleShop(interaction, userId);
     case 'inventory':
       return handleInventory(interaction, userId);
     case 'buy':
@@ -655,7 +655,7 @@ async function handlePrefixCommand(message, command, args) {
     case 'players':
       return handlePlayersPrefix(message, userId);
     case 'shop':
-      return handleShop(message);
+      return handleShop(message, userId);
     case 'inventory':
     case 'inv':
       return handleInventory(message, userId, true);
@@ -1293,7 +1293,7 @@ const SHOP_PAGES = [
   { name: 'Colors', filter: (i) => i.category === 'cosmetic' && i.effect.kind === 'color' },
 ];
 
-function buildShopPage(pageNum) {
+function buildShopPage(pageNum, userId) {
   pageNum = Math.max(0, Math.min(SHOP_PAGES.length - 1, pageNum));
   const page = SHOP_PAGES[pageNum];
   const items = listBuyable().filter(page.filter);
@@ -1311,7 +1311,7 @@ function buildShopPage(pageNum) {
 
   const selectRow = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
-      .setCustomId('shop:select')
+      .setCustomId(`shop:select:${userId}`)
       .setPlaceholder('Select an item to buy...')
       .setMinValues(1)
       .setMaxValues(1)
@@ -1326,12 +1326,12 @@ function buildShopPage(pageNum) {
 
   const navRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`shop:page:${pageNum - 1}`)
+      .setCustomId(`shop:page:${userId}:${pageNum - 1}`)
       .setLabel('◀️ Previous')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(pageNum === 0),
     new ButtonBuilder()
-      .setCustomId(`shop:page:${pageNum + 1}`)
+      .setCustomId(`shop:page:${userId}:${pageNum + 1}`)
       .setLabel('Next ▶️')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(pageNum === SHOP_PAGES.length - 1)
@@ -1340,18 +1340,19 @@ function buildShopPage(pageNum) {
   return { embeds: [embed], components: [selectRow, navRow] };
 }
 
-async function handleShop(context) {
+async function handleShop(context, userId) {
   let sent;
   try {
-    sent = await context.reply({ ...buildShopPage(0), fetchReply: true });
+    sent = await context.reply({ ...buildShopPage(0, userId), fetchReply: true });
   } catch {
     // Reply may have succeeded but the message fetch failed (transient). The shop embed is
     // still sent; pagination/buy still work centrally — we just lose the auto-expire timer.
     return;
   }
   try {
-    const collector = sent.createMessageComponentCollector({ idle: 30000 });
-    collector.on('end', async () => { try { await sent.edit({ components: [] }); } catch {} });
+    // Auto-delete the WHOLE shop message after 60s of inactivity (resets on any click by the owner).
+    const collector = sent.createMessageComponentCollector({ idle: 60000 });
+    collector.on('end', async () => { try { await sent.delete(); } catch {} });
   } catch { /* collector is best-effort; shop still works without it */ }
 }
 
@@ -1395,7 +1396,8 @@ async function handleInventory(context, userId, isPrefix = false) {
     )
     .setFooter({ text: '💡 Use: /kyriz use <item> (pick from list)  •  prefix: ky use <id>' })
     .setTimestamp();
-  return context.reply({ embeds: [embed] });
+  if (isPrefix) return context.reply({ embeds: [embed] });
+  return context.reply({ embeds: [embed], ephemeral: true });
 }
 
 // ============================================================
@@ -3434,7 +3436,11 @@ async function showLeaderboard(context, scope = 'server') {
 // Shop select-menu → routes to the (ephemeral) buy-confirm. The confirm's buttons reuse the
 // existing shop:buy/shop:cancel handler, so no purchase logic is duplicated.
 async function handleSelectMenu(interaction) {
-  if (interaction.customId !== 'shop:select') return;
+  if (!interaction.customId.startsWith('shop:select:')) return;
+  const ownerId = interaction.customId.split(':')[2];
+  if (interaction.user.id !== ownerId) {
+    return interaction.reply({ content: "This isn't your shop session — use `/kyriz shop` to open your own.", ephemeral: true });
+  }
   const itemId = interaction.values && interaction.values[0];
   const item = getItem(itemId);
   if (!item) return interaction.reply({ content: 'Item not found.', ephemeral: true });
@@ -3452,9 +3458,14 @@ async function handleButton(interaction) {
 
   // --- Shop pagination (read-only, anyone may navigate) ---
   if (customId.startsWith('shop:page:')) {
-    let page = Number(customId.split(':')[2]);
+    const parts = customId.split(':'); // ['shop','page',userId,pageNum]
+    const ownerId = parts[2];
+    if (interaction.user.id !== ownerId) {
+      return interaction.reply({ content: "This isn't your shop session — use `/kyriz shop` to open your own.", ephemeral: true });
+    }
+    let page = Number(parts[3]);
     if (!Number.isInteger(page)) page = 0;
-    return interaction.update(buildShopPage(page));
+    return interaction.update(buildShopPage(page, ownerId));
   }
 
   // --- Shop buy confirm/cancel (colon-delimited; item ids contain underscores) ---
