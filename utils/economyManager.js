@@ -537,6 +537,7 @@ function getLeaderboard(limit = 10) {
       username: user.username,
       balance: user.balance,
       level: user.level,
+      cosmetics: user.cosmetics || null,
     }))
     .sort((a, b) => b.balance - a.balance)
     .slice(0, limit);

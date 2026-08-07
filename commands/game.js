@@ -3331,7 +3331,12 @@ async function showLeaderboard(context, scope = 'server') {
     const displayName = (user.username || 'Unknown').length > 16
       ? [...(user.username || 'Unknown')].slice(0, 15).join('') + '\u2026'
       : (user.username || 'Unknown');
-    description += `${rank} **${displayName}** \u2014 💎 ${user.balance.toLocaleString()} (Lv.${user.level})\n`;
+    const c = user.cosmetics || {};
+    const titleItem = c.title ? getItem(c.title) : null;
+    const badgeItem = c.badge ? getItem(c.badge) : null;
+    const prefix = titleItem ? `[${titleItem.effect.value}] ` : '';
+    const suffix = badgeItem ? ` ${badgeItem.effect.value}` : '';
+    description += `${rank} ${prefix}**${displayName}**${suffix} \u2014 💎 ${user.balance.toLocaleString()} (Lv.${user.level})\n`;
   }
 
   const title = scope === 'all' ? 'Leaderboard | Global Top 10' : 'Leaderboard | Server Top 10';
