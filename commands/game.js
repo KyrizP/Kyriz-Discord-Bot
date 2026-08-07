@@ -24,6 +24,8 @@ const {
   isAdmin,
 } = require('../utils/economyManager');
 const { createDeck, drawCard, calculateHand, formatHand, isBlackjack } = require('../utils/cardDeck');
+const { listBuyable, getItem } = require('../utils/shopItems');
+const shopManager = require('../utils/shopManager');
 
 // ============================================================
 // Active games tracker (in-memory, per user)
@@ -345,6 +347,16 @@ function attachGameSubcommands(commandBuilder) {
   commandBuilder.addSubcommand((sub) =>
     sub.setName('players').setDescription('View all registered players (Admin only)')
   );
+
+  // /kyriz shop
+  commandBuilder.addSubcommand((sub) =>
+    sub.setName('shop').setDescription('Browse the shop')
+  );
+
+  // /kyriz inventory
+  commandBuilder.addSubcommand((sub) =>
+    sub.setName('inventory').setDescription('View your items & cosmetics')
+  );
 }
 
 // ============================================================
@@ -416,7 +428,7 @@ async function execute(interaction) {
   }
 
   // T&C check (skip for superadmin)
-  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard'];
+  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory'];
   if (requiresRegistration.includes(subcommand) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -468,6 +480,10 @@ async function execute(interaction) {
       return handleOdds(interaction);
     case 'players':
       return handlePlayersSlash(interaction, userId);
+    case 'shop':
+      return handleShop(interaction);
+    case 'inventory':
+      return handleInventory(interaction, userId);
   }
 }
 
@@ -526,7 +542,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -585,6 +601,11 @@ async function handlePrefixCommand(message, command, args) {
       return handleOddsPrefix(message);
     case 'players':
       return handlePlayersPrefix(message, userId);
+    case 'shop':
+      return handleShop(message);
+    case 'inventory':
+    case 'inv':
+      return handleInventory(message, userId, true);
     default:
       return;
   }
@@ -1207,6 +1228,74 @@ async function showWallet(context, userId, username, isPrefix = false) {
   }
 
   if (isPrefix) return context.reply({ embeds: [embed] });
+  return context.reply({ embeds: [embed] });
+}
+
+// ============================================================
+// SHOP & INVENTORY
+// ============================================================
+
+async function handleShop(context) {
+  const items = listBuyable();
+  const consumables = items.filter((i) => i.category === 'consumable');
+  const cosmetics = items.filter((i) => i.category === 'cosmetic');
+
+  const fmt = (i) => `${i.emoji} **${i.name}** — 💎 ${i.price.toLocaleString()}\n${i.description}`;
+  const consumableLines = consumables.map(fmt).join('\n\n');
+  const cosmeticLines = cosmetics.map(fmt).join('\n\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('🛒 Kyriz Shop')
+    .addFields(
+      { name: '🧪 Consumables', value: consumableLines.slice(0, 1024) || '—' },
+      { name: '🎨 Cosmetics (permanent)', value: cosmeticLines.slice(0, 1024) || '—' }
+    )
+    .setFooter({ text: 'Buy with /kyriz buy  •  Use consumables with /kyriz use' })
+    .setTimestamp();
+  return context.reply({ embeds: [embed] });
+}
+
+async function handleInventory(context, userId, isPrefix = false) {
+  const state = shopManager.getInventoryState(userId);
+  if (!state) {
+    const content = 'You are not registered yet.';
+    return isPrefix ? context.reply(content) : context.reply({ content, ephemeral: true });
+  }
+
+  // ponytail: local label fn dedups null-guard for catalog ids (catalog may drift from inventory)
+  const label = (id) => { const it = getItem(id); return it ? `${it.emoji} ${it.name}` : `❓ ${id}`; };
+
+  const invLines = Object.entries(state.inventory)
+    .map(([id, n]) => `• ${label(id)} ×${n}`)
+    .join('\n') || '_Empty — visit the shop._';
+
+  const ownedLines = state.cosmetics.owned
+    .map((id) => `• ${label(id)}`)
+    .join('\n') || '_None yet._';
+
+  const equipped = [
+    state.cosmetics.title && `Title: ${getItem(state.cosmetics.title)?.effect.value ?? state.cosmetics.title}`,
+    state.cosmetics.badge && `Badge: ${getItem(state.cosmetics.badge)?.effect.value ?? state.cosmetics.badge}`,
+    state.cosmetics.color && `Color: ${getItem(state.cosmetics.color)?.name ?? state.cosmetics.color}`,
+  ].filter(Boolean).join(' · ') || '_None_';
+
+  const boostLines = [
+    state.activeBoosts.shield && '🛡️ Shield armed',
+    state.activeBoosts.daily_mult && `📅 Daily ×${state.activeBoosts.daily_mult} queued`,
+  ].filter(Boolean).join('\n') || '_None active._';
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('🎒 Your Inventory')
+    .addFields(
+      { name: 'Consumables', value: invLines, inline: false },
+      { name: 'Active Boosts', value: boostLines, inline: false },
+      { name: 'Cosmetics Owned', value: ownedLines, inline: false },
+      { name: 'Equipped', value: equipped, inline: false }
+    )
+    .setFooter({ text: 'Use consumables or equip cosmetics with /kyriz use' })
+    .setTimestamp();
   return context.reply({ embeds: [embed] });
 }
 
@@ -3932,7 +4021,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
