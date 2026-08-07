@@ -23,8 +23,8 @@ const MYSTERY_WHEEL = [
 // effect.kind: 'shield' | 'daily_boost' | 'spin'
 const ITEMS = {
   // Consumables
-  shield_50:     { id: 'shield_50',     name: 'Shield 50%',    emoji: '🛡️', category: 'consumable', type: 'consumable', price: 175000, effect: { kind: 'shield', pct: 0.50, cap: 250000 }, description: 'Refund 50% of your next losing bet (cap 250,000).' },
-  shield_100:    { id: 'shield_100',    name: 'Shield 100%',   emoji: '🛡️', category: 'consumable', type: 'consumable', price: 325000, effect: { kind: 'shield', pct: 1.00, cap: 500000 }, description: 'Refund 100% of your next losing bet (cap 500,000).' },
+  shield_50:     { id: 'shield_50',     name: 'Shield 50%',    emoji: '🛡️', category: 'consumable', type: 'consumable', price: 175000, effect: { kind: 'shield', pct: 0.50, cap: 250000 }, description: 'Insure your next bet — recover 50% if it loses (cap 250,000).' },
+  shield_100:    { id: 'shield_100',    name: 'Shield 100%',   emoji: '🛡️', category: 'consumable', type: 'consumable', price: 325000, effect: { kind: 'shield', pct: 1.00, cap: 500000 }, description: 'Insure your next bet — recover 100% if it loses (cap 500,000).' },
   daily_boost_15:{ id: 'daily_boost_15',name: 'Daily x1.5',    emoji: '📅', category: 'consumable', type: 'consumable', price: 200000, effect: { kind: 'daily_boost', mult: 1.5 }, description: 'Your next daily reward is multiplied by 1.5.' },
   daily_boost_20:{ id: 'daily_boost_20',name: 'Daily x2',      emoji: '📅', category: 'consumable', type: 'consumable', price: 400000, effect: { kind: 'daily_boost', mult: 2.0 }, description: 'Your next daily reward is multiplied by 2.' },
   lucky_token:   { id: 'lucky_token',   name: 'Lucky Token',   emoji: '🎟️', category: 'consumable', type: 'consumable', price: 250000, effect: { kind: 'spin', wheel: 'LUCKY_WHEEL' }, description: 'Spin the lucky wheel for a random Kryztal prize.' },
