@@ -440,39 +440,45 @@ function addXP(userId, amount) {
 
 /**
  * Record a win
+ * @returns {{ shieldConsumed: boolean }} shieldConsumed is true only when a shield was actually consumed (voided) this call.
  */
 function recordWin(userId) {
-  if (isSuperAdmin(userId)) return;
+  if (isSuperAdmin(userId)) return { shieldConsumed: false };
   const data = readJSON(ECONOMY_PATH);
-  if (data[userId]) {
-    data[userId].totalWins += 1;
-    // Shield: voided on a win (consumed, no refund). A shield now covers ONE round, win or lose.
-    const boosts = data[userId].activeBoosts;
-    if (boosts && boosts.shield) delete boosts.shield;
-    writeJSON(ECONOMY_PATH, data);
-  }
+  if (!data[userId]) return { shieldConsumed: false };
+  data[userId].totalWins += 1;
+  let shieldConsumed = false;
+  // Shield: voided on a win (consumed, no refund). A shield now covers ONE round, win or lose.
+  const boosts = data[userId].activeBoosts;
+  if (boosts && boosts.shield) { delete boosts.shield; shieldConsumed = true; }
+  writeJSON(ECONOMY_PATH, data);
+  return { shieldConsumed };
 }
 
 /**
  * Record a loss
+ * @returns {{ shieldConsumed: boolean, refund: number }} shieldConsumed is true only when a shield was actually consumed (refunded) this call.
  */
 function recordLoss(userId, bet = 0) {
-  if (isSuperAdmin(userId)) return;
+  if (isSuperAdmin(userId)) return { shieldConsumed: false, refund: 0 };
   const data = readJSON(ECONOMY_PATH);
-  if (data[userId]) {
-    data[userId].totalLosses += 1;
-    // Shield: refund a fraction of THIS loss, then consume the shield.
-    const boosts = data[userId].activeBoosts;
-    if (bet > 0 && boosts && boosts.shield) {
-      const refund = computeShieldRefund(bet, boosts.shield.cap, boosts.shield.pct);
-      if (refund > 0) {
-        data[userId].balance = (data[userId].balance || 0) + refund;
-        data[userId].totalEarned = (data[userId].totalEarned || 0) + refund;
-      }
-      delete boosts.shield;
+  if (!data[userId]) return { shieldConsumed: false, refund: 0 };
+  data[userId].totalLosses += 1;
+  let shieldConsumed = false;
+  let refund = 0;
+  // Shield: refund a fraction of THIS loss, then consume the shield.
+  const boosts = data[userId].activeBoosts;
+  if (bet > 0 && boosts && boosts.shield) {
+    refund = computeShieldRefund(bet, boosts.shield.cap, boosts.shield.pct);
+    if (refund > 0) {
+      data[userId].balance = (data[userId].balance || 0) + refund;
+      data[userId].totalEarned = (data[userId].totalEarned || 0) + refund;
     }
-    writeJSON(ECONOMY_PATH, data);
+    delete boosts.shield;
+    shieldConsumed = true;
   }
+  writeJSON(ECONOMY_PATH, data);
+  return { shieldConsumed, refund };
 }
 
 // ============================================================
