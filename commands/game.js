@@ -73,9 +73,15 @@ async function sendLevelUpNotification(channel, userId, xpResult) {
 async function notifyShieldResult(channel, userId, result) {
   if (!result || !result.shieldConsumed || !channel) return;
   try {
-    if (result.refund && result.refund > 0) {
-      await channel.send({ content: `🛡️ <@${userId}> — **Shield** activated! Recovered 💎 **${result.refund.toLocaleString()}** Kryztal from that loss.` });
+    if (result.refund !== undefined) {
+      // Loss path (recordLoss always returns a refund key; may be 0 for a tiny bet).
+      if (result.refund > 0) {
+        await channel.send({ content: `🛡️ <@${userId}> — **Shield** activated! Recovered 💎 **${result.refund.toLocaleString()}** Kryztal from that loss.` });
+      } else {
+        await channel.send({ content: `🛡️ <@${userId}> — **Shield** was consumed, but the bet was too small to recover anything.` });
+      }
     } else {
+      // Win path — shield voided (no refund key from recordWin).
       await channel.send({ content: `🛡️ <@${userId}> — Your **Shield** was consumed this round (you won — nothing to recover).` });
     }
   } catch {}
@@ -1335,7 +1341,14 @@ function buildShopPage(pageNum) {
 }
 
 async function handleShop(context) {
-  const sent = await context.reply({ ...buildShopPage(0), fetchReply: true });
+  let sent;
+  try {
+    sent = await context.reply({ ...buildShopPage(0), fetchReply: true });
+  } catch {
+    // Reply may have succeeded but the message fetch failed (transient). The shop embed is
+    // still sent; pagination/buy still work centrally — we just lose the auto-expire timer.
+    return;
+  }
   try {
     const collector = sent.createMessageComponentCollector({ idle: 30000 });
     collector.on('end', async () => { try { await sent.edit({ components: [] }); } catch {} });
@@ -1364,7 +1377,7 @@ async function handleInventory(context, userId, isPrefix = false) {
     state.cosmetics.title && `Title: ${getItem(state.cosmetics.title)?.effect.value ?? state.cosmetics.title}`,
     state.cosmetics.badge && `Badge: ${getItem(state.cosmetics.badge)?.effect.value ?? state.cosmetics.badge}`,
     state.cosmetics.color && `Color: ${getItem(state.cosmetics.color)?.name ?? state.cosmetics.color}`,
-  ].filter(Boolean).join(' · ') || 'None';
+  ].filter(Boolean).join(' · ') || '_None_';
 
   const boostLines = [
     state.activeBoosts.shield && '🛡️ Shield armed',
@@ -1487,7 +1500,7 @@ async function handleProfile(context, targetId, username, avatarURL, isPrefix = 
     titleItem ? `Title [${titleItem.effect.value}]` : null,
     badgeItem ? `Badge ${badgeItem.effect.value}` : null,
     colorItem ? `Color ${colorItem.name.replace('Color: ', '')}` : null,
-  ].filter(Boolean).join(' · ') || 'None';
+  ].filter(Boolean).join(' · ') || '_None_';
 
   const rankLine = isSuperAdmin(targetId) ? '🌟 Superadmin' : (rank ? `🏆 Rank #${rank} Global` : 'Unranked');
   const banner = titleItem ? `━━━━ ✦ ${titleItem.effect.value} ✦ ━━━━\n` : '';
