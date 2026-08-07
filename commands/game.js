@@ -1237,19 +1237,22 @@ async function showWallet(context, userId, username, isPrefix = false) {
 
 async function handleShop(context) {
   const items = listBuyable();
-  const consumables = items.filter((i) => i.category === 'consumable');
-  const cosmetics = items.filter((i) => i.category === 'cosmetic');
+  const byKind = (k) => items.filter((i) => i.category === 'cosmetic' && i.effect.kind === k);
 
   const fmt = (i) => `${i.emoji} **${i.name}** — 💎 ${i.price.toLocaleString()}\n${i.description}`;
-  const consumableLines = consumables.map(fmt).join('\n\n');
-  const cosmeticLines = cosmetics.map(fmt).join('\n\n');
+  const consumableLines = items.filter((i) => i.category === 'consumable').map(fmt).join('\n\n');
+  const titleLines = byKind('title').map(fmt).join('\n\n');
+  const badgeLines = byKind('badge').map(fmt).join('\n\n');
+  const colorLines = byKind('color').map(fmt).join('\n\n');
 
   const embed = new EmbedBuilder()
     .setColor(0xfee75c)
     .setTitle('🛒 Kyriz Shop')
     .addFields(
       { name: '🧪 Consumables', value: consumableLines.slice(0, 1024) || '—' },
-      { name: '🎨 Cosmetics (permanent)', value: cosmeticLines.slice(0, 1024) || '—' }
+      { name: '🏷️ Titles', value: titleLines.slice(0, 1024) || '—' },
+      { name: '👑 Badges', value: badgeLines.slice(0, 1024) || '—' },
+      { name: '🎨 Colors', value: colorLines.slice(0, 1024) || '—' }
     )
     .setFooter({ text: 'Buy with /kyriz buy  •  Use consumables with /kyriz use' })
     .setTimestamp();
