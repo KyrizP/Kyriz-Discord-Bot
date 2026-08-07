@@ -1323,7 +1323,11 @@ function buildShopPage(pageNum) {
 }
 
 async function handleShop(context) {
-  return context.reply(buildShopPage(0));
+  const sent = await context.reply({ ...buildShopPage(0), fetchReply: true });
+  try {
+    const collector = sent.createMessageComponentCollector({ idle: 30000 });
+    collector.on('end', async () => { try { await sent.edit({ components: [] }); } catch {} });
+  } catch { /* collector is best-effort; shop still works without it */ }
 }
 
 async function handleInventory(context, userId, isPrefix = false) {
@@ -1337,23 +1341,23 @@ async function handleInventory(context, userId, isPrefix = false) {
   const label = (id) => { const it = getItem(id); return it ? `${it.emoji} ${it.name}` : `❓ ${id}`; };
 
   const invLines = Object.entries(state.inventory)
-    .map(([id, n]) => `• ${label(id)} ×${n}`)
-    .join('\n') || '_Empty — visit the shop._';
+    .map(([id, n]) => `• ${label(id)} ×${n}  — \`${id}\``)
+    .join('\n') || '_Empty — visit /kyriz shop._';
 
   const ownedLines = state.cosmetics.owned
-    .map((id) => `• ${label(id)}`)
+    .map((id) => `• ${label(id)}  — \`${id}\``)
     .join('\n') || '_None yet._';
 
   const equipped = [
     state.cosmetics.title && `Title: ${getItem(state.cosmetics.title)?.effect.value ?? state.cosmetics.title}`,
     state.cosmetics.badge && `Badge: ${getItem(state.cosmetics.badge)?.effect.value ?? state.cosmetics.badge}`,
     state.cosmetics.color && `Color: ${getItem(state.cosmetics.color)?.name ?? state.cosmetics.color}`,
-  ].filter(Boolean).join(' · ') || '_None_';
+  ].filter(Boolean).join(' · ') || 'None';
 
   const boostLines = [
     state.activeBoosts.shield && '🛡️ Shield armed',
     state.activeBoosts.daily_mult && `📅 Daily ×${state.activeBoosts.daily_mult} queued`,
-  ].filter(Boolean).join('\n') || '_None active._';
+  ].filter(Boolean).join(' · ') || '_None active._';
 
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
@@ -1364,7 +1368,7 @@ async function handleInventory(context, userId, isPrefix = false) {
       { name: 'Cosmetics Owned', value: ownedLines, inline: false },
       { name: 'Equipped', value: equipped, inline: false }
     )
-    .setFooter({ text: 'Use consumables or equip cosmetics with /kyriz use' })
+    .setFooter({ text: '💡 Use: /kyriz use <item> (pick from list)  •  prefix: ky use <id>' })
     .setTimestamp();
   return context.reply({ embeds: [embed] });
 }
@@ -1446,7 +1450,7 @@ async function handleProfile(context, targetId, username, avatarURL, isPrefix = 
   const badgeItem = state.cosmetics.badge ? getItem(state.cosmetics.badge) : null;
   const colorItem = state.cosmetics.color ? getItem(state.cosmetics.color) : null;
 
-  const display = (titleItem ? `[${titleItem.effect.value}] ` : '') + username + (badgeItem ? ` ${badgeItem.effect.value}` : '');
+  const display = username + (badgeItem ? ` ${badgeItem.effect.value}` : '');
   const embedColor = colorItem ? colorItem.effect.hex : 0x5865f2;
 
   const bal = isSuperAdmin(targetId) ? '∞' : (user.balance || 0).toLocaleString();
@@ -1473,10 +1477,13 @@ async function handleProfile(context, targetId, username, avatarURL, isPrefix = 
     colorItem ? `Color ${colorItem.name.replace('Color: ', '')}` : null,
   ].filter(Boolean).join(' · ') || 'None';
 
+  const rankLine = isSuperAdmin(targetId) ? '🌟 Superadmin' : (rank ? `🏆 Rank #${rank} Global` : 'Unranked');
+  const banner = titleItem ? `━━━━ ✦ ${titleItem.effect.value} ✦ ━━━━\n` : '';
+
   const embed = new EmbedBuilder()
     .setColor(embedColor)
     .setAuthor({ name: display, iconURL: avatarURL })
-    .setDescription(isSuperAdmin(targetId) ? '🌟 Superadmin' : (rank ? `🏆 Rank #${rank} Global` : 'Unranked'))
+    .setDescription(banner + rankLine)
     .addFields(
       { name: `⭐ Level ${level}`, value: `${bar}  ${xp}/${xpNeeded} XP (${Math.round(pct * 100)}%)` },
       { name: 'Balance', value: `💎 **${bal}** Kryztal` },
