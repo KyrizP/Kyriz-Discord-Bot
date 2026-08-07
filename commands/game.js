@@ -1396,8 +1396,7 @@ async function handleInventory(context, userId, isPrefix = false) {
     )
     .setFooter({ text: '💡 Use: /kyriz use <item> (pick from list)  •  prefix: ky use <id>' })
     .setTimestamp();
-  if (isPrefix) return context.reply({ embeds: [embed] });
-  return context.reply({ embeds: [embed], ephemeral: true });
+  return context.reply({ embeds: [embed] });
 }
 
 // ============================================================
@@ -3437,6 +3436,9 @@ async function showLeaderboard(context, scope = 'server') {
 // existing shop:buy/shop:cancel handler, so no purchase logic is duplicated.
 async function handleSelectMenu(interaction) {
   if (!interaction.customId.startsWith('shop:select:')) return;
+  if (maintenanceMode.active && !isSuperAdmin(interaction.user.id) && !isAdmin(interaction.user.id)) {
+    return interaction.reply({ content: `🛠️ ${maintenanceMode.message}`, ephemeral: true });
+  }
   const ownerId = interaction.customId.split(':')[2];
   if (interaction.user.id !== ownerId) {
     return interaction.reply({ content: "This isn't your shop session — use `/kyriz shop` to open your own.", ephemeral: true });
@@ -3456,7 +3458,14 @@ async function handleSelectMenu(interaction) {
 async function handleButton(interaction) {
   const customId = interaction.customId;
 
-  // --- Shop pagination (read-only, anyone may navigate) ---
+  // Maintenance: block shop buy/pagination for non-admins on an already-open shop embed
+  // (the command-level guard covers /shop & /buy; game buttons are left alone so in-progress
+  // rounds can still finish).
+  if ((customId.startsWith('shop:page:') || customId.startsWith('shop:buy:')) && maintenanceMode.active && !isSuperAdmin(interaction.user.id) && !isAdmin(interaction.user.id)) {
+    return interaction.reply({ content: `🛠️ ${maintenanceMode.message}`, ephemeral: true });
+  }
+
+  // --- Shop pagination (invoker-only) ---
   if (customId.startsWith('shop:page:')) {
     const parts = customId.split(':'); // ['shop','page',userId,pageNum]
     const ownerId = parts[2];
