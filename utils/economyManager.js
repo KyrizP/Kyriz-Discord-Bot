@@ -446,6 +446,9 @@ function recordWin(userId) {
   const data = readJSON(ECONOMY_PATH);
   if (data[userId]) {
     data[userId].totalWins += 1;
+    // Shield: voided on a win (consumed, no refund). A shield now covers ONE round, win or lose.
+    const boosts = data[userId].activeBoosts;
+    if (boosts && boosts.shield) delete boosts.shield;
     writeJSON(ECONOMY_PATH, data);
   }
 }
