@@ -428,7 +428,7 @@ async function execute(interaction) {
   const username = interaction.user.username;
 
   // Maintenance check (superadmin bypasses)
-  if (maintenanceMode.active && !isSuperAdmin(userId)) {
+  if (maintenanceMode.active && !isSuperAdmin(userId) && !isAdmin(userId)) {
     return interaction.reply({ content: maintenanceMode.message, ephemeral: true });
   }
 
@@ -542,7 +542,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // Maintenance check (superadmin bypasses)
-  if (maintenanceMode.active && !isSuperAdmin(userId)) {
+  if (maintenanceMode.active && !isSuperAdmin(userId) && !isAdmin(userId)) {
     // Rate limit maintenance replies (reuse cooldown system)
     const remaining = checkCooldown(userId, 'maintenance_reply');
     if (remaining > 0) return; // Silently ignore if already replied recently
