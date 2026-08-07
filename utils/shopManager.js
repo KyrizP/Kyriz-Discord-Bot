@@ -80,6 +80,11 @@ function purchase(userId, itemId) {
     return { success: false, message: 'Insufficient balance.', newBalance: u.balance || 0 };
   }
 
+  // Block re-buying an already-owned permanent cosmetic (no wasting Kryztal on a duplicate).
+  if (item.type === 'permanent' && cosmetics(u).owned.includes(itemId)) {
+    return { success: false, message: 'You already own this cosmetic.', newBalance: u.balance || 0 };
+  }
+
   // ---- single atomic mutation block ----
   u.balance -= item.price;
   u.totalLost = (u.totalLost || 0) + item.price;
@@ -233,7 +238,7 @@ if (require.main === module) {
        'atomic write payload contains reduced balance AND granted item (no gap)');
 
     // 7. purchase: permanent. badge_crown (500k) -> success, 500k, owned includes it.
-    //    Re-buy: charges again, does NOT duplicate the owned entry.
+    //    Re-buy: BLOCKED (already owned) — balance unchanged, no extra write.
     store = { '301': { username: 'buyer2', balance: 1000000, totalLost: 0 } };
     writes = 0;
     const r7a = purchase('301', 'badge_crown');
@@ -242,8 +247,10 @@ if (require.main === module) {
     ok(store['301'].cosmetics && store['301'].cosmetics.owned.includes('badge_crown'), 'badge_crown in owned');
     writes = 0;
     const r7b = purchase('301', 'badge_crown');
-    ok(r7b.success === true, 're-buy permanent succeeds (charges again)');
-    ok(store['301'].balance === 0, `re-buy deducts price again (balance ${store['301'].balance})`);
+    ok(r7b.success === false, 're-buy owned permanent is BLOCKED');
+    ok(r7b.newBalance === 500000, `re-buy returns unchanged balance (got ${r7b.newBalance})`);
+    ok(store['301'].balance === 500000, `re-buy does not deduct (balance ${store['301'].balance})`);
+    ok(writes === 0, `re-buy writes zero (got ${writes})`);
     ok(store['301'].cosmetics.owned.filter((id) => id === 'badge_crown').length === 1, 'owned lists badge_crown exactly once (no dup)');
 
     // 8. purchase: insufficient balance. balance 100 -> lucky_token -> {success:false}, no mutation, no write.

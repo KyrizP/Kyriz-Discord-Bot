@@ -63,7 +63,7 @@ async function sendLevelUpNotification(channel, userId, xpResult) {
     .setTitle('🎉 Level Up!')
     .setDescription(
       `<@${userId}> is now **Level ${xpResult.newLevel}**!\n\n` +
-      `💰 Reward: 💎 **+${xpResult.rewardTotal.toLocaleString()}**`
+      `Reward: 💎 **+${xpResult.rewardTotal.toLocaleString()}**`
     )
     .setTimestamp();
   try { await channel.send({ embeds: [embed] }); } catch {}
@@ -1431,7 +1431,7 @@ async function handleProfile(context, targetId, username, avatarURL, isPrefix = 
   const embed = new EmbedBuilder()
     .setColor(embedColor)
     .setAuthor({ name: display, iconURL: avatarURL })
-    .setDescription(rank ? `🏆 Rank #${rank} Global` : '🌟 Superadmin')
+    .setDescription(isSuperAdmin(targetId) ? '🌟 Superadmin' : (rank ? `🏆 Rank #${rank} Global` : 'Unranked'))
     .addFields(
       { name: `⭐ Level ${level}`, value: `${bar}  ${xp}/${xpNeeded} XP (${Math.round(pct * 100)}%)` },
       { name: '💎 Kryztal', value: `**${bal}**` },
@@ -4248,6 +4248,22 @@ function createHelpEmbed() {
       'Leaderboard\n' +
       '  /kyriz leaderboard          ky lb\n' +
       '  Server top 10. Use "ky lb all" for global.\n\n' +
+      '━━━ SHOP ━━━\n\n' +
+      'Shop\n' +
+      '  /kyriz shop                 ky shop\n' +
+      '  Browse the shop catalog.\n\n' +
+      'Buy\n' +
+      '  /kyriz buy <item>           ky buy <id>\n' +
+      '  Buy an item (slash: pick from list + confirm; prefix: ky buy <id>).\n\n' +
+      'Use\n' +
+      '  /kyriz use <item>           ky use <id>\n' +
+      '  Use a consumable or equip a cosmetic.\n\n' +
+      'Inventory\n' +
+      '  /kyriz inventory            ky inv\n' +
+      '  View your items, cosmetics & active boosts.\n\n' +
+      'Profile\n' +
+      '  /kyriz profile [user]       ky profile [@user]\n' +
+      '  View your (or someone\'s) profile card.\n\n' +
       '━━━ INFO ━━━\n\n' +
       'Help\n' +
       '  /kyriz help                 ky help\n' +
