@@ -357,6 +357,15 @@ function attachGameSubcommands(commandBuilder) {
   commandBuilder.addSubcommand((sub) =>
     sub.setName('inventory').setDescription('View your items & cosmetics')
   );
+
+  // /kyriz buy
+  commandBuilder.addSubcommand((sub) =>
+    sub.setName('buy').setDescription('Buy an item from the shop')
+      .addStringOption((opt) =>
+        opt.setName('item').setDescription('Item to buy').setRequired(true)
+          .addChoices(...listBuyable().map((i) => ({ name: `${i.emoji} ${i.name} — 💎${i.price.toLocaleString()}`, value: i.id })))
+      )
+  );
 }
 
 // ============================================================
@@ -428,7 +437,7 @@ async function execute(interaction) {
   }
 
   // T&C check (skip for superadmin)
-  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory'];
+  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory', 'buy'];
   if (requiresRegistration.includes(subcommand) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -484,6 +493,8 @@ async function execute(interaction) {
       return handleShop(interaction);
     case 'inventory':
       return handleInventory(interaction, userId);
+    case 'buy':
+      return handleBuySlash(interaction, userId);
   }
 }
 
@@ -542,7 +553,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -606,6 +617,8 @@ async function handlePrefixCommand(message, command, args) {
     case 'inventory':
     case 'inv':
       return handleInventory(message, userId, true);
+    case 'buy':
+      return handleBuyPrefix(message, userId, args);
     default:
       return;
   }
@@ -1303,8 +1316,46 @@ async function handleInventory(context, userId, isPrefix = false) {
 }
 
 // ============================================================
-// DAILY
+// BUY (slash = confirm buttons; prefix = instant)
 // ============================================================
+
+async function handleBuySlash(interaction, userId) {
+  const itemId = interaction.options.getString('item', true);
+  const item = getItem(itemId);
+  if (!item) return interaction.reply({ content: 'Item not found.', ephemeral: true });
+
+  const balance = getBalance(userId);
+  const balStr = balance === Infinity ? '∞' : balance.toLocaleString();
+  const afterStr = balance === Infinity ? '∞' : (balance - item.price).toLocaleString();
+  if (balance !== Infinity && balance < item.price) {
+    return interaction.reply({ content: `Insufficient balance. You need 💎 ${item.price.toLocaleString()}.`, ephemeral: true });
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(0xfee75c)
+    .setTitle('🛒 Confirm Purchase')
+    .setDescription(`${item.emoji} **${item.name}**\nPrice: 💎 ${item.price.toLocaleString()}\nBalance: 💎 ${balStr} → ${afterStr}`)
+    .setTimestamp();
+
+  // ponytail: colon-delimited customId — item ids contain underscores (shield_50, daily_boost_15),
+  // so underscore-split would corrupt itemId. Colon never appears in discord user/snowflake ids.
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`shop:buy:${userId}:${itemId}`).setLabel('Buy').setStyle(ButtonStyle.Success).setEmoji('✅'),
+    new ButtonBuilder().setCustomId(`shop:cancel:${userId}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+  );
+  return interaction.reply({ embeds: [embed], components: [row] });
+}
+
+async function handleBuyPrefix(message, userId, args) {
+  const itemId = (args[0] || '').toLowerCase();
+  const item = getItem(itemId);
+  if (!item) return message.reply(`Unknown item. Browse with \`ky shop\`, then \`ky buy <id>\` (e.g. \`ky buy lucky_token\`).`);
+  const res = shopManager.purchase(userId, itemId); // atomic + re-validates balance
+  if (!res.success) return message.reply(res.message);
+  return message.reply(`✅ ${res.message} Saldo: 💎 ${res.newBalance.toLocaleString()}`);
+}
+
+
 
 async function handleDaily(interaction, userId) {
   return processDaily(interaction, userId);
@@ -3212,6 +3263,26 @@ async function showLeaderboard(context, scope = 'server') {
 async function handleButton(interaction) {
   const customId = interaction.customId;
 
+  // --- Shop buy confirm/cancel (colon-delimited; item ids contain underscores) ---
+  if (customId.startsWith('shop:buy:') || customId.startsWith('shop:cancel:')) {
+    const parts = customId.split(':'); // ['shop', 'buy'|'cancel', userId, itemId?]
+    const buyerId = parts[2];
+    const itemId = parts[3];
+    if (interaction.user.id !== buyerId) {
+      return interaction.reply({ content: 'This is not your purchase.', ephemeral: true });
+    }
+    if (customId.startsWith('shop:cancel:')) {
+      return interaction.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
+    }
+    // Confirm: re-validate at click time. purchase() re-checks balance, so a buyer whose
+    // balance dropped between the confirm screen and the click is rejected.
+    const res = shopManager.purchase(buyerId, itemId);
+    if (!res.success) {
+      return interaction.update({ content: `❌ ${res.message}`, embeds: [], components: [] });
+    }
+    return interaction.update({ content: `✅ ${res.message} Saldo: 💎 ${res.newBalance.toLocaleString()}`, embeds: [], components: [] });
+  }
+
   // --- T&C Accept ---
   if (customId.startsWith('tc_accept_')) {
     const targetUserId = customId.replace('tc_accept_', '');
@@ -4024,7 +4095,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
