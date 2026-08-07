@@ -19,6 +19,11 @@ function boosts(user) { return user.activeBoosts || (user.activeBoosts = {}); }
  * Snapshot of a user's shop state for display (does not mutate).
  */
 function getInventoryState(userId) {
+  if (economyManager.isSuperAdmin(userId)) {
+    // Superadmin isn't in economy.json (unlimited mode) — return a synthetic empty
+    // state so /inventory shows an empty bag instead of "not registered yet".
+    return { inventory: {}, cosmetics: { title: null, badge: null, color: null, owned: [] }, activeBoosts: {} };
+  }
   const data = economyManager.readEconomy();
   const u = data[userId];
   if (!u) return null;
@@ -190,6 +195,19 @@ if (require.main === module) {
     ok(snap && typeof snap.inventory === 'object' && Object.keys(snap.inventory).length === 0, 'bare user inventory {}');
     ok(snap && typeof snap.activeBoosts === 'object' && Object.keys(snap.activeBoosts).length === 0, 'bare user activeBoosts {}');
     ok(snap && getInventoryState('404') === null, 'non-existent user snapshot null');
+
+    // 1b. superadmin: getInventoryState returns a synthetic EMPTY state and does NOT
+    // touch economy.json (superadmin isn't stored there). Fixes the "/inventory says
+    // not registered" bug for superadmin.
+    process.env.SUPERADMIN_ID = 'SUPER1';
+    economyManager.readEconomy = () => { throw new Error('superadmin must not read economy'); };
+    const superSnap = getInventoryState('SUPER1');
+    ok(superSnap !== null, 'superadmin snapshot non-null (not "not registered")');
+    ok(superSnap && Object.keys(superSnap.inventory).length === 0, 'superadmin inventory empty {}');
+    ok(superSnap && superSnap.cosmetics && superSnap.cosmetics.owned.length === 0, 'superadmin cosmetics empty');
+    ok(superSnap && superSnap.activeBoosts && Object.keys(superSnap.activeBoosts).length === 0, 'superadmin activeBoosts empty');
+    economyManager.readEconomy = () => store; // restore
+    delete process.env.SUPERADMIN_ID;
 
     // 2. equipCosmetic on an OWNED badge succeeds, sets cosmetics.badge, writes once.
     store = { '200': { username: 'owner', balance: 100, cosmetics: { title: null, badge: null, color: null, owned: ['badge_crown'] } } };
