@@ -506,7 +506,14 @@ function claimDaily(userId) {
   }
 
   // Daily reward: random between 150,000 - 500,000
-  const dailyAmount = Math.floor(Math.random() * 350001) + 150000;
+  let dailyAmount = Math.floor(Math.random() * 350001) + 150000;
+
+  // Apply queued daily boost from shop, then consume it (one-shot).
+  const boosts = user.activeBoosts || {};
+  if (boosts.daily_mult) {
+    dailyAmount = Math.floor(dailyAmount * boosts.daily_mult);
+    delete boosts.daily_mult;
+  }
 
   user.balance += dailyAmount;
   user.totalEarned += dailyAmount;
