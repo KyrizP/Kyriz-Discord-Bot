@@ -114,6 +114,20 @@ function getAuthorizedUsers(guildId) {
 }
 
 /**
+ * Get ALL authorized user IDs across all servers (deduplicated)
+ */
+function getAllAuthorizedUsers() {
+  const data = readJSON(USERS_PATH);
+  const allIds = new Set();
+  for (const guildId of Object.keys(data)) {
+    if (Array.isArray(data[guildId])) {
+      data[guildId].forEach(id => allIds.add(id));
+    }
+  }
+  return [...allIds];
+}
+
+/**
  * Add an authorized user
  * @returns {{ success: boolean, message: string }}
  */
@@ -156,6 +170,7 @@ module.exports = {
   removeReply,
   editReply,
   getAuthorizedUsers,
+  getAllAuthorizedUsers,
   addAuthorizedUser,
   removeAuthorizedUser,
 };

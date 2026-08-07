@@ -14,6 +14,12 @@ const {
   recordLoss,
   claimDaily,
   getLeaderboard,
+  checkTransferLimits,
+  getAllPlayers,
+  getDailySendLimit,
+  getDailyReceiveLimit,
+  getTransferData,
+  isAdmin,
 } = require('../utils/economyManager');
 const { createDeck, drawCard, calculateHand, formatHand, isBlackjack } = require('../utils/cardDeck');
 
@@ -58,13 +64,27 @@ async function sendLevelUpNotification(channel, userId, xpResult) {
   try { await channel.send({ embeds: [embed] }); } catch {}
 }
 
+/**
+ * Calculate XP with bet-based tier multiplier
+ * Higher bets = more XP to prevent low-bet farming
+ */
+function calculateXP(baseXP, bet) {
+  let multiplier;
+  if (bet >= 500000) multiplier = 1.0;
+  else if (bet >= 100000) multiplier = 0.75;
+  else if (bet >= 10000) multiplier = 0.50;
+  else if (bet >= 1000) multiplier = 0.25;
+  else multiplier = 0.05;
+  return Math.max(1, Math.ceil(baseXP * multiplier));
+}
+
 // ============================================================
 // Cooldown system (per user, per command)
 // ============================================================
 
 const cooldowns = new Map(); // `${userId}_${command}` -> timestamp
 const COOLDOWN_BJ = 5000;    // 5 seconds for blackjack
-const COOLDOWN_CMD = 3000;   // 3 seconds for other commands
+const COOLDOWN_CMD = 4000;   // 4 seconds for other commands
 const COOLDOWN_HELP = 1000;  // 1 second for help
 
 /**
@@ -318,6 +338,11 @@ function attachGameSubcommands(commandBuilder) {
   commandBuilder.addSubcommand((sub) =>
     sub.setName('odds').setDescription('View win rates & odds for all games')
   );
+
+  // /kyriz players (admin only)
+  commandBuilder.addSubcommand((sub) =>
+    sub.setName('players').setDescription('View all registered players (Admin only)')
+  );
 }
 
 // ============================================================
@@ -439,6 +464,8 @@ async function execute(interaction) {
       return handleHelp(interaction);
     case 'odds':
       return handleOdds(interaction);
+    case 'players':
+      return handlePlayersSlash(interaction, userId);
   }
 }
 
@@ -505,8 +532,9 @@ async function handlePrefixCommand(message, command, args) {
   if (!isSuperAdmin(userId)) {
     const remaining = checkCooldown(userId, command);
     if (remaining > 0) {
-      // Silently ignore for prefix commands (no spam reply)
-      return;
+      return message.reply({ content: `Please wait **${remaining}s** before using this command again.` }).then(msg => {
+        setTimeout(() => { msg.delete().catch(() => {}); }, remaining * 1000);
+      }).catch(() => {});
     }
     setCooldown(userId, command);
   }
@@ -550,6 +578,8 @@ async function handlePrefixCommand(message, command, args) {
       return handleHelpPrefix(message);
     case 'odds':
       return handleOddsPrefix(message);
+    case 'players':
+      return handlePlayersPrefix(message, userId);
     default:
       return;
   }
@@ -956,11 +986,11 @@ async function finishBlackjack(context, game, method) {
     addBalance(game.userId, winnings);
   }
 
-  // Add XP
-  const xpResult = addXP(game.userId, xpGained);
+  const actualXP = calculateXP(xpGained, game.bet);
+  const xpResult = addXP(game.userId, actualXP);
 
   // Build result text with XP info
-  let xpText = `+${xpGained} XP`;
+  let xpText = `+${actualXP} XP`;
   if (!isSuperAdmin(game.userId)) {
     const user = getUser(game.userId);
     if (user) {
@@ -1366,7 +1396,7 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
     const payout = bet * 2;
     if (!isSuperAdmin(userId)) {
       addBalance(userId, payout);
-      const xpResult = addXP(userId, 20);
+      const xpResult = addXP(userId, calculateXP(20, bet));
       sendLevelUpNotification(msg.channel, userId, xpResult);
       recordWin(userId);
     }
@@ -1383,7 +1413,7 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
-      const xpResult = addXP(userId, 5);
+      const xpResult = addXP(userId, calculateXP(5, bet));
       sendLevelUpNotification(msg.channel, userId, xpResult);
       recordLoss(userId);
     }
@@ -1507,7 +1537,7 @@ async function playSlots(context, userId, betStr) {
     const payout = Math.floor(bet * multiplier);
     if (!isSuperAdmin(userId)) {
       addBalance(userId, payout);
-      const xpResultW = addXP(userId, xp);
+      const xpResultW = addXP(userId, calculateXP(xp, bet));
       sendLevelUpNotification(msg.channel, userId, xpResultW);
       recordWin(userId);
     }
@@ -1525,7 +1555,7 @@ async function playSlots(context, userId, betStr) {
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
-      const xpResultL = addXP(userId, xp);
+      const xpResultL = addXP(userId, calculateXP(xp, bet));
       sendLevelUpNotification(msg.channel, userId, xpResultL);
       recordLoss(userId);
     }
@@ -1618,7 +1648,7 @@ async function playDice(context, userId, betStr, guessStr) {
     const payout = bet * multiplier;
     if (!isSuperAdmin(userId)) {
       addBalance(userId, payout);
-      const xpResult = addXP(userId, guess.type === 'number' ? 50 : 25);
+      const xpResult = addXP(userId, calculateXP(guess.type === 'number' ? 50 : 25, bet));
       sendLevelUpNotification(msg.channel, userId, xpResult);
       recordWin(userId);
     }
@@ -1636,7 +1666,7 @@ async function playDice(context, userId, betStr, guessStr) {
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
-      const xpResult = addXP(userId, 5);
+      const xpResult = addXP(userId, calculateXP(5, bet));
       sendLevelUpNotification(msg.channel, userId, xpResult);
       recordLoss(userId);
     }
@@ -1664,16 +1694,16 @@ function generateCrashPoint() {
   // Each step rolls independently — only 1.50x changed (78% → 50%)
   const checks = [
     { step: 1.2, survive: 0.95 },   // 95%
-    { step: 1.5, survive: 0.45 },   // 45% ← CHANGED (was 78%)
+    { step: 1.5, survive: 0.45 },   // 45% - Spike
     { step: 1.8, survive: 0.70 },   // 70%
-    { step: 2.0, survive: 0.60 },   // 60% ← CHANGED (was 58%)
-    { step: 2.5, survive: 0.50 },   // 50% ← CHANGED (was 50%)
+    { step: 2.0, survive: 0.60 },   // 60%
+    { step: 2.5, survive: 0.50 },   // 50%
     { step: 3.0, survive: 0.50 },   // 50%
-    { step: 3.5, survive: 0.45 },   // 45%
-    { step: 4.0, survive: 0.40 },   // 40%
-    { step: 5.0, survive: 0.40 },   // 40%
+    { step: 3.5, survive: 0.55 },   // 55%
+    { step: 4.0, survive: 0.50 },   // 50%
+    { step: 5.0, survive: 0.45 },   // 45%
     { step: 6.0, survive: 0.35 },   // 35%
-    { step: 7.0, survive: 0.50 },   // 50%
+    { step: 7.0, survive: 0.70 },   // 70% - Save Point
     { step: 8.0, survive: 0.20 },   // 20%
     { step: 9.0, survive: 0.10 },   // 10%
     { step: 10.0, survive: 1.0 },   // auto cashout at 10x
@@ -1739,7 +1769,7 @@ async function playCrash(context, userId, betStr, source) {
     activeCrashGames.delete(userId);
 
     if (!isSuperAdmin(userId)) {
-      const xpResult = addXP(userId, 10);
+      const xpResult = addXP(userId, calculateXP(10, bet));
       sendLevelUpNotification(context.channel, userId, xpResult);
       recordLoss(userId);
     }
@@ -1800,7 +1830,7 @@ async function runCrashLoop(game, msg) {
       activeCrashGames.delete(game.userId);
 
       if (!isSuperAdmin(game.userId)) {
-        const xpResult = addXP(game.userId, 10);
+        const xpResult = addXP(game.userId, calculateXP(10, game.bet));
         sendLevelUpNotification(msg.channel, game.userId, xpResult);
         recordLoss(game.userId);
       }
@@ -1894,7 +1924,7 @@ function handleCrashCashout(game) {
   if (!isSuperAdmin(game.userId)) {
     addBalance(game.userId, payout);
     const xp = game.currentMultiplier >= 5 ? 100 : 30;
-    game.xpResult = addXP(game.userId, xp);
+    game.xpResult = addXP(game.userId, calculateXP(xp, game.bet));
     recordWin(game.userId);
   }
 
@@ -2025,7 +2055,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
     const payout = bet * multiplier;
     if (!isSuperAdmin(userId)) {
       addBalance(userId, payout);
-      const xpResult = addXP(userId, choice.type === 'number' ? 75 : 25);
+      const xpResult = addXP(userId, calculateXP(choice.type === 'number' ? 75 : 25, bet));
       sendLevelUpNotification(msg.channel, userId, xpResult);
       recordWin(userId);
     }
@@ -2044,7 +2074,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
   } else {
     if (!isSuperAdmin(userId)) {
-      const xpResult = addXP(userId, 5);
+      const xpResult = addXP(userId, calculateXP(5, bet));
       sendLevelUpNotification(msg.channel, userId, xpResult);
       recordLoss(userId);
     }
@@ -2318,13 +2348,13 @@ function finishMinesGame(game, won, multiplier) {
     if (!isSuperAdmin(game.userId)) {
       addBalance(game.userId, payout);
       const xp = Math.min(30 + game.revealedTiles.size * 7, 100);
-      game.xpResult = addXP(game.userId, xp);
+      game.xpResult = addXP(game.userId, calculateXP(xp, game.bet));
       recordWin(game.userId);
     }
     return payout;
   } else {
     if (!isSuperAdmin(game.userId)) {
-      game.xpResult = addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
       recordLoss(game.userId);
     }
     return 0;
@@ -2560,13 +2590,13 @@ function finishHiloGame(game, won) {
     if (!isSuperAdmin(game.userId)) {
       addBalance(game.userId, payout);
       const xp = Math.min(30 + game.streak * 10, 100);
-      game.xpResult = addXP(game.userId, xp);
+      game.xpResult = addXP(game.userId, calculateXP(xp, game.bet));
       recordWin(game.userId);
     }
     return payout;
   } else {
     if (!isSuperAdmin(game.userId)) {
-      game.xpResult = addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
       recordLoss(game.userId);
     }
     return 0;
@@ -2581,7 +2611,7 @@ async function autoHiloCashout(game) {
     game.finished = true;
     activeHiloGames.delete(game.userId);
     if (!isSuperAdmin(game.userId)) {
-      game.xpResult = addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
       recordLoss(game.userId);
     }
     if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
@@ -2882,13 +2912,13 @@ function finishTowerGame(game, won) {
     if (!isSuperAdmin(game.userId)) {
       addBalance(game.userId, payout);
       const xp = Math.min(30 + game.currentFloor * 8, 100);
-      game.xpResult = addXP(game.userId, xp);
+      game.xpResult = addXP(game.userId, calculateXP(xp, game.bet));
       recordWin(game.userId);
     }
     return payout;
   } else {
     if (!isSuperAdmin(game.userId)) {
-      game.xpResult = addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
       recordLoss(game.userId);
     }
     return 0;
@@ -2903,7 +2933,7 @@ async function autoTowerCashout(game) {
     game.finished = true;
     activeTowerGames.delete(game.userId);
     if (!isSuperAdmin(game.userId)) {
-      game.xpResult = addXP(game.userId, XP_LOSE);
+      game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
       recordLoss(game.userId);
     }
     if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
@@ -3242,6 +3272,18 @@ async function handleButton(interaction) {
         ],
         components: [disabledRow],
       });
+    }
+
+    // Check transfer limits
+    const limitCheck = checkTransferLimits(pending.fromId, pending.toId, pending.amount);
+    if (!limitCheck.allowed) {
+      // Edit the message to show limit error
+      const limitEmbed = new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle('Transfer Failed')
+        .setDescription(limitCheck.message)
+        .setTimestamp();
+      return interaction.update({ embeds: [limitEmbed], components: [] });
     }
 
     // Execute transfer
@@ -3708,6 +3750,23 @@ async function handleButton(interaction) {
     const buttons = createOddsButtons(targetUserId, newPage);
     return interaction.update({ embeds: [embed], components: [buttons] });
   }
+
+  // --- Players pagination ---
+  if (customId.startsWith('pl_prev_') || customId.startsWith('pl_next_')) {
+    const parts = customId.split('_');
+    const direction = parts[1]; // 'prev' or 'next'
+    const targetUserId = parts[2];
+    const currentPage = parseInt(parts[3]);
+
+    if (interaction.user.id !== targetUserId) {
+      return interaction.reply({ content: 'Only the command user can navigate pages.', ephemeral: true });
+    }
+
+    const newPage = direction === 'next' ? currentPage + 1 : currentPage - 1;
+    const { embed, totalPages } = createPlayersPage(newPage);
+    const buttons = createPlayersButtons(targetUserId, newPage, totalPages);
+    return interaction.update({ embeds: [embed], components: [buttons] });
+  }
 }
 
 async function autoStandButton(interaction, game) {
@@ -3752,9 +3811,10 @@ async function autoStandButton(interaction, game) {
     }
 
     if (winnings > 0) addBalance(game.userId, winnings);
-    const xpResult = addXP(game.userId, xpGained);
+    const actualXP = calculateXP(xpGained, game.bet);
+    const xpResult = addXP(game.userId, actualXP);
 
-    let xpText = `+${xpGained} XP`;
+    let xpText = `+${actualXP} XP`;
     if (!isSuperAdmin(game.userId)) {
       const user = getUser(game.userId);
       if (user) xpText += ` | Level ${user.level} (${user.xp}/${user.xpNeeded} XP)`;
@@ -3794,7 +3854,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
@@ -4002,6 +4062,105 @@ async function handleOddsPrefix(message) {
   const embed = createOddsPage(1);
   const buttons = createOddsButtons(message.author.id, 1);
   return message.reply({ embeds: [embed], components: [buttons] });
+}
+
+// ============================================================
+// PLAYERS LIST (Admin/Superadmin only)
+// ============================================================
+
+const PLAYERS_PER_PAGE = 10;
+
+function formatNumber(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return n.toLocaleString();
+}
+
+function createPlayersPage(page) {
+  const players = getAllPlayers();
+  const totalPages = Math.max(1, Math.ceil(players.length / PLAYERS_PER_PAGE));
+  const safePage = Math.max(1, Math.min(page, totalPages));
+  const start = (safePage - 1) * PLAYERS_PER_PAGE;
+  const pagePlayers = players.slice(start, start + PLAYERS_PER_PAGE);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('📋 Registered Players')
+    .setFooter({ text: `Page ${safePage}/${totalPages} • Total: ${players.length} players` })
+    .setTimestamp();
+
+  if (pagePlayers.length === 0) {
+    embed.setDescription('_No registered players yet._');
+    return { embed, totalPages: safePage };
+  }
+
+  let desc = '';
+  pagePlayers.forEach((p, i) => {
+    const rank = start + i + 1;
+    const level = p.level ?? 1;
+    const xp = p.xp ?? 0;
+    const xpNeeded = p.xpNeeded ?? 400;
+    const adminTag = p.isAdmin ? ' `[Admin]`' : '';
+    const wins = p.totalWins ?? 0;
+    const losses = p.totalLosses ?? 0;
+
+    // Transfer remaining today
+    const sendLimit = getDailySendLimit(level);
+    const recvLimit = getDailyReceiveLimit(level);
+    const td = getTransferData(p);
+    const sendLeft = Math.max(0, sendLimit - td.sentTotal);
+    const recvLeft = Math.max(0, recvLimit - td.receivedTotal);
+
+    // Joined date
+    const joined = p.registeredAt ? new Date(p.registeredAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+
+    desc += `**${rank}.** <@${p.userId}> • Lv.**${level}** (${xp}/${xpNeeded} XP)${adminTag}\n`;
+    desc += `> 💰 **${p.balance.toLocaleString()}** | 🏆 ${wins}W/${losses}L | 📅 ${joined}\n`;
+    desc += `> 📈 Earned: **${formatNumber(p.totalEarned ?? 0)}** | 📉 Lost: **${formatNumber(p.totalLost ?? 0)}**\n`;
+    if (sendLimit > 0) {
+      desc += `> 📤 ${formatNumber(sendLeft)}/${formatNumber(sendLimit)} left | 📥 ${formatNumber(recvLeft)}/${formatNumber(recvLimit)} left\n`;
+    } else {
+      desc += `> 📤 Can\'t send (Lv.${level}) | 📥 ${formatNumber(recvLeft)}/${formatNumber(recvLimit)} left\n`;
+    }
+    desc += '\n';
+  });
+
+  embed.setDescription(desc.trim());
+  return { embed, totalPages };
+}
+
+function createPlayersButtons(userId, currentPage, totalPages) {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`pl_prev_${userId}_${currentPage}`)
+      .setLabel('◀ Prev')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(currentPage <= 1),
+    new ButtonBuilder()
+      .setCustomId(`pl_next_${userId}_${currentPage}`)
+      .setLabel('Next ▶')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(currentPage >= totalPages),
+  );
+  return row;
+}
+
+async function handlePlayersPrefix(message, userId) {
+  if (!isSuperAdmin(userId) && !isAdmin(userId)) {
+    return message.reply({ content: 'Only admins can use this command.' });
+  }
+  const { embed, totalPages } = createPlayersPage(1);
+  const buttons = createPlayersButtons(userId, 1, totalPages);
+  return message.reply({ embeds: [embed], components: [buttons] });
+}
+
+async function handlePlayersSlash(interaction, userId) {
+  if (!isSuperAdmin(userId) && !isAdmin(userId)) {
+    return interaction.reply({ content: 'Only admins can use this command.', ephemeral: true });
+  }
+  const { embed, totalPages } = createPlayersPage(1);
+  const buttons = createPlayersButtons(userId, 1, totalPages);
+  return interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
 }
 
 module.exports = {

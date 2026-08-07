@@ -8,6 +8,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { handleAutoReply } = require('./handlers/autoReply');
+const { getAllPlayers } = require('./utils/economyManager');
 
 // ============================================================
 // Load Commands
@@ -38,11 +39,13 @@ const client = new Client({
 // Event: Ready
 // ============================================================
 client.once('ready', () => {
+  const playerCount = getAllPlayers().length;
   console.log('╔══════════════════════════════════════════╗');
   console.log('║   Kyriz — Personal Assistant Bot         ║');
   console.log('╠══════════════════════════════════════════╣');
   console.log(`║   Online as: ${client.user.tag.padEnd(26)} ║`);
   console.log(`║   Servers: ${String(client.guilds.cache.size).padEnd(28)} ║`);
+  console.log(`║   Players: ${String(playerCount).padEnd(28)} ║`);
   console.log('╚══════════════════════════════════════════╝');
 });
 

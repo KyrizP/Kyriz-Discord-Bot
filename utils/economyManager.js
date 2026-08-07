@@ -214,6 +214,119 @@ function getBalance(userId) {
 }
 
 // ============================================================
+// Transfer Limits (per level, daily)
+// ============================================================
+
+const MAX_DAILY_TRANSFERS = 3; // Max number of transfers per day
+
+/**
+ * Get WIB date string for today
+ */
+function getWIBDate() {
+  const wibOffset = 7 * 60 * 60 * 1000;
+  const wibNow = new Date(Date.now() + wibOffset);
+  return wibNow.toISOString().split('T')[0];
+}
+
+/**
+ * Get daily send limit based on user level
+ */
+function getDailySendLimit(level) {
+  level = level ?? 1;
+  if (level < 3) return 0;
+  if (level <= 4) return 500000;
+  if (level <= 9) return 1000000;
+  if (level <= 14) return 2000000;
+  if (level <= 19) return 3000000;
+  if (level <= 49) return 4500000;
+  return 6000000; // Level 50+
+}
+
+/**
+ * Get daily receive limit based on user level
+ */
+function getDailyReceiveLimit(level) {
+  level = level ?? 1;
+  if (level <= 2) return 500000;
+  if (level <= 4) return 1000000;
+  if (level <= 9) return 2000000;
+  if (level <= 14) return 3000000;
+  if (level <= 19) return 5000000;
+  if (level <= 49) return 7500000;
+  return 10000000; // Level 50+
+}
+
+/**
+ * Get or initialize transfer tracking data for a user
+ * Resets if date has changed (WIB)
+ */
+function getTransferData(user) {
+  const today = getWIBDate();
+  if (!user.transferData || user.transferData.date !== today) {
+    user.transferData = {
+      date: today,
+      sentTotal: 0,
+      sentCount: 0,
+      receivedTotal: 0,
+    };
+  }
+  return user.transferData;
+}
+
+/**
+ * Check transfer limits for sender and receiver
+ * @returns {{ allowed: boolean, message: string }}
+ */
+function checkTransferLimits(fromId, toId, amount) {
+  // Superadmin bypasses ALL limits
+  if (isSuperAdmin(fromId)) return { allowed: true, message: 'OK' };
+
+  const data = readJSON(ECONOMY_PATH);
+  const sender = data[fromId];
+  const receiver = data[toId];
+
+  if (!sender) return { allowed: false, message: 'Sender not found.' };
+  if (!receiver) return { allowed: false, message: 'Recipient is not registered yet.' };
+
+  // --- Sender checks ---
+  const senderLevel = sender.level ?? 1;
+  const sendLimit = getDailySendLimit(senderLevel);
+  if (sendLimit === 0) {
+    return { allowed: false, message: `You need to be **Level 3** or higher to transfer. You are currently Level ${senderLevel}.` };
+  }
+
+  const senderData = getTransferData(sender);
+
+  // Check transfer count
+  if (senderData.sentCount >= MAX_DAILY_TRANSFERS) {
+    return { allowed: false, message: `You have reached the daily transfer limit (**${MAX_DAILY_TRANSFERS}x/day**). Try again tomorrow.` };
+  }
+
+  // Check send amount
+  const remainingSend = sendLimit - senderData.sentTotal;
+  if (amount > remainingSend) {
+    return {
+      allowed: false,
+      message: `Daily send limit exceeded.\nYour limit: **${sendLimit.toLocaleString()}**/day (Level ${sender.level})\nSent today: **${senderData.sentTotal.toLocaleString()}**\nRemaining: **${remainingSend.toLocaleString()}**`,
+    };
+  }
+
+  // --- Receiver checks (skip if sender is superadmin — already handled above) ---
+  const receiverLevel = receiver.level ?? 1;
+  const receiveLimit = getDailyReceiveLimit(receiverLevel);
+  const receiverData = getTransferData(receiver);
+  const remainingReceive = receiveLimit - receiverData.receivedTotal;
+  if (amount > remainingReceive) {
+    return {
+      allowed: false,
+      message: `Recipient has reached their daily receive limit (**${receiveLimit.toLocaleString()}**/day).\nThey can still receive: **${remainingReceive.toLocaleString()}**`,
+    };
+  }
+
+  return { allowed: true, message: 'OK' };
+}
+
+// ============================================================
 // Transfer
 // ============================================================
 
@@ -247,6 +360,16 @@ function transfer(fromId, toId, amount) {
   // Add to receiver
   data[toId].balance += amount;
   data[toId].totalEarned += amount;
+
+  // Record transfer tracking (skip for superadmin sender)
+  if (!isSuperAdmin(fromId)) {
+    const senderData = getTransferData(data[fromId]);
+    senderData.sentTotal += amount;
+    senderData.sentCount += 1;
+
+    const receiverData = getTransferData(data[toId]);
+    receiverData.receivedTotal += amount;
+  }
 
   writeJSON(ECONOMY_PATH, data);
   return { success: true, message: 'Transfer successful.' };
@@ -413,6 +536,20 @@ function getLeaderboard(limit = 10) {
   return users;
 }
 
+/**
+ * Get all registered players (excludes superadmin)
+ * @returns {Array<{ userId: string, ...userData }>}
+ */
+function getAllPlayers() {
+  const data = readJSON(ECONOMY_PATH);
+  const superAdminId = process.env.SUPERADMIN_ID;
+
+  return Object.entries(data)
+    .filter(([id]) => id !== superAdminId)
+    .map(([id, user]) => ({ userId: id, ...user }))
+    .sort((a, b) => b.balance - a.balance);
+}
+
 module.exports = {
   isSuperAdmin,
   isAdmin,
@@ -431,4 +568,9 @@ module.exports = {
   recordLoss,
   claimDaily,
   getLeaderboard,
+  checkTransferLimits,
+  getDailySendLimit,
+  getDailyReceiveLimit,
+  getTransferData,
+  getAllPlayers,
 };

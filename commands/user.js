@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { isSuperAdmin, isAuthorizedUser } = require('../utils/permissionCheck');
-const { addAuthorizedUser, removeAuthorizedUser, getAuthorizedUsers } = require('../utils/dataManager');
+const { addAuthorizedUser, removeAuthorizedUser, getAuthorizedUsers, getAllAuthorizedUsers } = require('../utils/dataManager');
 const { setAdmin, removeAdmin, isAdmin } = require('../utils/economyManager');
 
 // ============================================================
@@ -190,7 +190,7 @@ async function handleUserList(interaction, guildId, userId) {
     });
   }
 
-  const authorizedUsers = getAuthorizedUsers(guildId);
+  const authorizedUsers = getAllAuthorizedUsers();
   const superAdminId = process.env.SUPERADMIN_ID;
 
   const embed = new EmbedBuilder()

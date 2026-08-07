@@ -54,6 +54,7 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     console.log('  /kyriz leaderboard       — Top 10 players (server/global)');
     console.log('  /kyriz help              — View available commands');
     console.log('  /kyriz odds              — View game odds & rates');
+    console.log('  /kyriz players           — View all players (Admin)');
   } catch (error) {
     console.error('Failed to register commands:', error);
   }
