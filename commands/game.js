@@ -366,6 +366,15 @@ function attachGameSubcommands(commandBuilder) {
           .addChoices(...listBuyable().map((i) => ({ name: `${i.emoji} ${i.name} — 💎${i.price.toLocaleString()}`, value: i.id })))
       )
   );
+
+  // /kyriz use
+  commandBuilder.addSubcommand((sub) =>
+    sub.setName('use').setDescription('Use a consumable or equip a cosmetic')
+      .addStringOption((opt) =>
+        opt.setName('item').setDescription('Item to use/equip').setRequired(true)
+          .addChoices(...listBuyable().map((i) => ({ name: `${i.emoji} ${i.name}`, value: i.id })))
+      )
+  );
 }
 
 // ============================================================
@@ -437,7 +446,7 @@ async function execute(interaction) {
   }
 
   // T&C check (skip for superadmin)
-  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory', 'buy'];
+  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory', 'buy', 'use'];
   if (requiresRegistration.includes(subcommand) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -495,6 +504,8 @@ async function execute(interaction) {
       return handleInventory(interaction, userId);
     case 'buy':
       return handleBuySlash(interaction, userId);
+    case 'use':
+      return handleUse(interaction, userId);
   }
 }
 
@@ -553,7 +564,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -619,6 +630,8 @@ async function handlePrefixCommand(message, command, args) {
       return handleInventory(message, userId, true);
     case 'buy':
       return handleBuyPrefix(message, userId, args);
+    case 'use':
+      return handleUse(message, userId, args, true);
     default:
       return;
   }
@@ -1353,6 +1366,20 @@ async function handleBuyPrefix(message, userId, args) {
   const res = shopManager.purchase(userId, itemId); // atomic + re-validates balance
   if (!res.success) return message.reply(res.message);
   return message.reply(`✅ ${res.message} Saldo: 💎 ${res.newBalance.toLocaleString()}`);
+}
+
+// USE: consumable -> shopManager.useItem; permanent cosmetic -> shopManager.equipCosmetic.
+async function handleUse(context, userId, args, isPrefix = false) {
+  const itemId = isPrefix ? (args[0] || '').toLowerCase() : context.options.getString('item', true);
+  const item = getItem(itemId);
+  if (!item) {
+    const m = 'Unknown item. Browse with `ky shop`, then `ky use <id>` (e.g. `ky use lucky_token`).';
+    return isPrefix ? context.reply(m) : context.reply({ content: m, ephemeral: true });
+  }
+  const res = item.type === 'permanent'
+    ? shopManager.equipCosmetic(userId, itemId)
+    : shopManager.useItem(userId, itemId);
+  return context.reply(res.message);
 }
 
 
@@ -4095,7 +4122,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
