@@ -63,7 +63,7 @@ async function sendLevelUpNotification(channel, userId, xpResult) {
     .setTitle('🎉 Level Up!')
     .setDescription(
       `<@${userId}> is now **Level ${xpResult.newLevel}**!\n\n` +
-      `💰 Reward: **+${xpResult.rewardTotal.toLocaleString()} Kryztal**`
+      `💰 Reward: 💎 **+${xpResult.rewardTotal.toLocaleString()}**`
     )
     .setTimestamp();
   try { await channel.send({ embeds: [embed] }); } catch {}
@@ -404,7 +404,7 @@ function createTCEmbed() {
         '**4.** The developer reserves the right to modify values, rules, or the economy system at any time without prior notice.\n\n' +
         '**5.** By accepting, you confirm that you are at least 13 years old and take responsibility for your use of this bot.\n\n' +
         '**6.** Your username will be publicly displayed on the leaderboard across all servers. By accepting, you consent to this visibility.\n\n' +
-        '**Starting balance: 100,000 Kryztal**'
+        '**Starting balance: 💎 100,000**'
     )
     .setTimestamp();
 }
@@ -441,8 +441,8 @@ async function execute(interaction) {
       .setTitle('🎁 Compensation Reward!')
       .setDescription(
         `${pendingBansos.message}\n\n` +
-        `You received **+${pendingBansos.amount.toLocaleString()} Kryztal**!\n` +
-        `New balance: **${getBalance(userId).toLocaleString()} Kryztal**`
+        `You received 💎 **+${pendingBansos.amount.toLocaleString()}**!\n` +
+        `New balance: 💎 **${getBalance(userId).toLocaleString()}**`
       )
       .setTimestamp();
     // Send bansos notification, then continue with normal command
@@ -564,8 +564,8 @@ async function handlePrefixCommand(message, command, args) {
       .setTitle('🎁 Compensation Reward!')
       .setDescription(
         `${pendingBansos.message}\n\n` +
-        `You received **+${pendingBansos.amount.toLocaleString()} Kryztal**!\n` +
-        `New balance: **${getBalance(userId).toLocaleString()} Kryztal**`
+        `You received 💎 **+${pendingBansos.amount.toLocaleString()}**!\n` +
+        `New balance: 💎 **${getBalance(userId).toLocaleString()}**`
       )
       .setTimestamp();
     try { await message.channel.send({ content: `<@${userId}>`, embeds: [bansosEmbed] }); } catch {}
@@ -672,7 +672,7 @@ async function handleBansos(message, userId, args) {
   if (action === 'status') {
     if (!pendingBansos.active) return message.reply('No active bansos.');
     return message.reply(
-      `Bansos **active**: **${pendingBansos.amount.toLocaleString()} Kryztal** per user.\n` +
+      `Bansos **active**: 💎 **${pendingBansos.amount.toLocaleString()}** per user.\n` +
       `Claimed: **${pendingBansos.claimedUsers.size}** users so far.\n` +
       `Message: ${pendingBansos.message}`
     );
@@ -690,7 +690,7 @@ async function handleBansos(message, userId, args) {
   }
 
   if (amount > 2000000) {
-    return message.reply('Maximum bansos amount is **2,000,000 Kryztal**.');
+    return message.reply('Maximum bansos amount is 💎 **2,000,000**.');
   }
 
   const customMessage = args.slice(1).join(' ') || 'Thank you for your patience!';
@@ -703,7 +703,7 @@ async function handleBansos(message, userId, args) {
 
   return message.reply(
     `🎁 Bansos **activated**!\n` +
-    `Amount: **${amount.toLocaleString()} Kryztal** per user\n` +
+    `Amount: 💎 **${amount.toLocaleString()}** per user\n` +
     `Message: ${customMessage}\n\n` +
     `Users will receive it on their next command.`
   );
@@ -840,7 +840,7 @@ async function handleBlackjack(interaction, userId) {
     const balance = getBalance(userId);
     if (balance < bet) {
       return interaction.reply({
-        content: `Insufficient balance. You have **${balance.toLocaleString()} Kryztal** but tried to bet **${bet.toLocaleString()} Kryztal**.`,
+        content: `Insufficient balance. You have 💎 **${balance.toLocaleString()}** but tried to bet 💎 **${bet.toLocaleString()}**.`,
         ephemeral: true,
       });
     }
@@ -887,7 +887,7 @@ async function handleBlackjackPrefix(message, userId, args) {
     const balance = getBalance(userId);
     if (balance < bet) {
       return message.reply(
-        `Insufficient balance. You have **${balance.toLocaleString()} Kryztal** but tried to bet **${bet.toLocaleString()} Kryztal**.`
+        `Insufficient balance. You have 💎 **${balance.toLocaleString()}** but tried to bet 💎 **${bet.toLocaleString()}**.`
       );
     }
   }
@@ -957,7 +957,7 @@ function createGameEmbed(game, revealDealer) {
 
   const embed = new EmbedBuilder()
     .setAuthor({ name: `${game.username}'s game` })
-    .setTitle(`Blackjack | Bet: ${game.bet.toLocaleString()} Kryztal`)
+    .setTitle(`Blackjack | Bet: 💎 ${game.bet.toLocaleString()}`)
     .setTimestamp();
 
   // Dealer hand
@@ -1055,39 +1055,39 @@ async function finishBlackjack(context, game, method) {
   } else if (game.playerBlackjack) {
     // Player blackjack
     winnings = Math.floor(game.bet * 2.5);
-    resultText = `BLACKJACK! You win ${winnings.toLocaleString()} Kryztal!`;
+    resultText = `BLACKJACK! You win 💎 ${winnings.toLocaleString()}!`;
     color = 0xf1c40f; // Gold
     xpGained = XP_BLACKJACK;
     recordWin(game.userId);
   } else if (game.dealerBlackjack) {
     // Dealer blackjack
-    resultText = `Dealer has Blackjack! You lose ${game.bet.toLocaleString()} Kryztal.`;
+    resultText = `Dealer has Blackjack! You lose 💎 ${game.bet.toLocaleString()}.`;
     color = 0xed4245; // Red
     xpGained = XP_LOSE;
     recordLoss(game.userId);
   } else if (playerValue > 21) {
     // Player bust
-    resultText = `Bust! You lose ${game.bet.toLocaleString()} Kryztal.`;
+    resultText = `Bust! You lose 💎 ${game.bet.toLocaleString()}.`;
     color = 0xed4245;
     xpGained = XP_LOSE;
     recordLoss(game.userId);
   } else if (dealerValue > 21) {
     // Dealer bust
     winnings = game.bet * 2;
-    resultText = `Dealer busts! You win ${winnings.toLocaleString()} Kryztal!`;
+    resultText = `Dealer busts! You win 💎 ${winnings.toLocaleString()}!`;
     color = 0x57f287; // Green
     xpGained = XP_WIN;
     recordWin(game.userId);
   } else if (playerValue > dealerValue) {
     // Player wins
     winnings = game.bet * 2;
-    resultText = `You win ${winnings.toLocaleString()} Kryztal!`;
+    resultText = `You win 💎 ${winnings.toLocaleString()}!`;
     color = 0x57f287;
     xpGained = XP_WIN;
     recordWin(game.userId);
   } else if (playerValue < dealerValue) {
     // Dealer wins
-    resultText = `Dealer wins. You lose ${game.bet.toLocaleString()} Kryztal.`;
+    resultText = `Dealer wins. You lose 💎 ${game.bet.toLocaleString()}.`;
     color = 0xed4245;
     xpGained = XP_LOSE;
     recordLoss(game.userId);
@@ -1128,9 +1128,9 @@ async function finishBlackjack(context, game, method) {
   // Show new balance
   if (!isSuperAdmin(game.userId)) {
     const newBalance = getBalance(game.userId);
-    embed.setFooter({ text: `Balance: ${newBalance.toLocaleString()} Kryztal` });
+    embed.setFooter({ text: `Balance: 💎 ${newBalance.toLocaleString()}` });
   } else {
-    embed.setFooter({ text: 'Balance: \u221e Kryztal' });
+    embed.setFooter({ text: 'Balance: 💎 \u221e' });
   }
 
   // Clean up game
@@ -1257,20 +1257,9 @@ async function showWallet(context, userId, username, isPrefix = false) {
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle(`${username}'s Wallet`)
-    .addFields(
-      { name: 'Balance', value: `**${balanceDisplay}** Kryztal`, inline: true },
-      { name: 'Level', value: isSuperAdmin(userId) ? '\u221e' : `${user.level}`, inline: true }
-    )
+    .addFields({ name: '\ud83d\udc8e Kryztal', value: `**${balanceDisplay}**`, inline: false })
+    .setFooter({ text: 'Full stats & flex: /kyriz profile' })
     .setTimestamp();
-
-  if (!isSuperAdmin(userId) && user) {
-    embed.addFields(
-      { name: 'XP', value: `${user.xp}/${user.xpNeeded}`, inline: true },
-      { name: 'W/L', value: `${user.totalWins}/${user.totalLosses}`, inline: true }
-    );
-  }
-
-  if (isPrefix) return context.reply({ embeds: [embed] });
   return context.reply({ embeds: [embed] });
 }
 
@@ -1485,16 +1474,16 @@ async function processDaily(context, userId) {
   const xpResult = addXP(userId, XP_DAILY);
   const user = getUser(userId);
 
-  let description = `You received **${result.amount.toLocaleString()} Kryztal**!\n+${XP_DAILY} XP`;
+  let description = `You received 💎 **${result.amount.toLocaleString()}**!\n+${XP_DAILY} XP`;
   if (xpResult.leveledUp) {
-    description += `\n\n🎉 LEVEL UP! You are now **Level ${xpResult.newLevel}**! +${xpResult.rewardTotal.toLocaleString()} Kryztal`;
+    description += `\n\n🎉 LEVEL UP! You are now **Level ${xpResult.newLevel}**! 💎 +${xpResult.rewardTotal.toLocaleString()}`;
   }
 
   const embed = new EmbedBuilder()
     .setColor(0x57f287)
     .setTitle('Daily Reward')
     .setDescription(description)
-    .setFooter({ text: `Balance: ${user.balance.toLocaleString()} Kryztal | Level ${user.level} (${user.xp}/${user.xpNeeded} XP)` })
+    .setFooter({ text: `Balance: 💎 ${user.balance.toLocaleString()} | Level ${user.level} (${user.xp}/${user.xpNeeded} XP)` })
     .setTimestamp();
 
   return context.reply({ embeds: [embed] });
@@ -1528,7 +1517,7 @@ async function handleTransfer(interaction, userId) {
     const balance = getBalance(userId);
     if (balance < amount) {
       return interaction.reply({
-        content: `Insufficient balance. You have **${balance.toLocaleString()} Kryztal**.`,
+        content: `Insufficient balance. You have 💎 **${balance.toLocaleString()}**.`,
         ephemeral: true,
       });
     }
@@ -1542,7 +1531,7 @@ async function handleTransfer(interaction, userId) {
     .setColor(0xfee75c)
     .setTitle('Confirm Transfer')
     .setDescription(
-      `Are you sure you want to send **${amount.toLocaleString()} Kryztal** to **${targetUser.username}**?`
+      `Are you sure you want to send 💎 **${amount.toLocaleString()}** to **${targetUser.username}**?`
     )
     .setTimestamp();
 
@@ -1591,7 +1580,7 @@ async function handleTransferPrefix(message, userId, args) {
   if (!isSuperAdmin(userId)) {
     const balance = getBalance(userId);
     if (balance < amount) {
-      return message.reply(`Insufficient balance. You have **${balance.toLocaleString()} Kryztal**.`);
+      return message.reply(`Insufficient balance. You have 💎 **${balance.toLocaleString()}**.`);
     }
   }
 
@@ -1606,7 +1595,7 @@ async function handleTransferPrefix(message, userId, args) {
     .setColor(0xfee75c)
     .setTitle('Confirm Transfer')
     .setDescription(
-      `Are you sure you want to send **${amount.toLocaleString()} Kryztal** to **${targetUser.username}**?`
+      `Are you sure you want to send 💎 **${amount.toLocaleString()}** to **${targetUser.username}**?`
     )
     .setTimestamp();
 
@@ -1703,8 +1692,8 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
       .setTitle('Coinflip | You Win! 🎉')
       .setDescription(
         `🪙 The coin landed on **${result}**! You chose **${side}**.\n\n` +
-        `Bet: **${bet.toLocaleString()}** Kryztal\n` +
-        `Payout: **+${payout.toLocaleString()}** Kryztal`
+        `Bet: 💎 **${bet.toLocaleString()}**\n` +
+        `Payout: 💎 **+${payout.toLocaleString()}**`
       )
       .setTimestamp();
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
@@ -1720,7 +1709,7 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
       .setTitle('Coinflip | You Lose')
       .setDescription(
         `🪙 The coin landed on **${result}**. You chose **${side}**.\n\n` +
-        `Lost: **-${bet.toLocaleString()}** Kryztal`
+        `Lost: 💎 **-${bet.toLocaleString()}**`
       )
       .setTimestamp();
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
@@ -1772,7 +1761,7 @@ async function playSlots(context, userId, betStr) {
     .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Slots | Spinning... 🎰')
-    .setDescription(`**[ ${randSym()} | ${randSym()} | ${randSym()} ]**\n\nBet: **${bet.toLocaleString()}** Kryztal`)
+    .setDescription(`**[ ${randSym()} | ${randSym()} | ${randSym()} ]**\n\nBet: 💎 **${bet.toLocaleString()}**`)
     .setTimestamp();
   const msg = await context.reply({ embeds: [spin1], fetchReply: true });
 
@@ -1782,7 +1771,7 @@ async function playSlots(context, userId, betStr) {
     .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Slots | Spinning... 🎰')
-    .setDescription(`**[ ${reels[0]} | ${randSym()} | ${randSym()} ]**\n\nBet: **${bet.toLocaleString()}** Kryztal`)
+    .setDescription(`**[ ${reels[0]} | ${randSym()} | ${randSym()} ]**\n\nBet: 💎 **${bet.toLocaleString()}**`)
     .setTimestamp();
   try { await msg.edit({ embeds: [spin2] }); } catch {}
 
@@ -1792,7 +1781,7 @@ async function playSlots(context, userId, betStr) {
     .setAuthor({ name: `${username}'s game` })
     .setColor(0xfee75c)
     .setTitle('Slots | Spinning... 🎰')
-    .setDescription(`**[ ${reels[0]} | ${reels[1]} | ${randSym()} ]**\n\nBet: **${bet.toLocaleString()}** Kryztal`)
+    .setDescription(`**[ ${reels[0]} | ${reels[1]} | ${randSym()} ]**\n\nBet: 💎 **${bet.toLocaleString()}**`)
     .setTimestamp();
   try { await msg.edit({ embeds: [spin3] }); } catch {}
 
@@ -1844,9 +1833,9 @@ async function playSlots(context, userId, betStr) {
       .setTitle(title)
       .setDescription(
         `${display}\n\n` +
-        `Bet: **${bet.toLocaleString()}** Kryztal\n` +
+        `Bet: 💎 **${bet.toLocaleString()}**\n` +
         `Multiplier: **${multiplier}x**\n` +
-        `Payout: **+${payout.toLocaleString()}** Kryztal`
+        `Payout: 💎 **+${payout.toLocaleString()}**`
       )
       .setTimestamp();
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
@@ -1862,7 +1851,7 @@ async function playSlots(context, userId, betStr) {
       .setTitle(title)
       .setDescription(
         `${display}\n\n` +
-        `Lost: **-${bet.toLocaleString()}** Kryztal`
+        `Lost: 💎 **-${bet.toLocaleString()}**`
       )
       .setTimestamp();
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
@@ -1955,9 +1944,9 @@ async function playDice(context, userId, betStr, guessStr) {
       .setTitle('Dice Roll | You Win! 🎲')
       .setDescription(
         `${diceEmojis[roll]} Rolled: **${roll}** | Your guess: ${guessDisplay}\n\n` +
-        `Bet: **${bet.toLocaleString()}** Kryztal\n` +
+        `Bet: 💎 **${bet.toLocaleString()}**\n` +
         `Multiplier: **${multiplier}x**\n` +
-        `Payout: **+${payout.toLocaleString()}** Kryztal`
+        `Payout: 💎 **+${payout.toLocaleString()}**`
       )
       .setTimestamp();
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
@@ -1973,7 +1962,7 @@ async function playDice(context, userId, betStr, guessStr) {
       .setTitle('Dice Roll | You Lose 🎲')
       .setDescription(
         `${diceEmojis[roll]} Rolled: **${roll}** | Your guess: ${guessDisplay}\n\n` +
-        `Lost: **-${bet.toLocaleString()}** Kryztal`
+        `Lost: 💎 **-${bet.toLocaleString()}**`
       )
       .setTimestamp();
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
@@ -2058,7 +2047,7 @@ async function playCrash(context, userId, betStr, source) {
       .setTitle('Crash | 💥 Instant CRASH!')
       .setDescription(
         `Crashed at **1.00x** instantly!\n\n` +
-        `Lost: **-${bet.toLocaleString()}** Kryztal`
+        `Lost: 💎 **-${bet.toLocaleString()}**`
       )
       .setTimestamp();
 
@@ -2071,9 +2060,9 @@ async function playCrash(context, userId, betStr, source) {
     .setColor(0x5865f2)
     .setTitle('Crash | 🚀 Game Started')
     .setDescription(
-      `Bet: **${bet.toLocaleString()}** Kryztal\n\n` +
+      `Bet: 💎 **${bet.toLocaleString()}**\n\n` +
       `Current Multiplier: **1.00x**\n` +
-      `Potential Payout: **${bet.toLocaleString()}** Kryztal\n\n` +
+      `Potential Payout: 💎 **${bet.toLocaleString()}**\n\n` +
       `Click **Cash Out** before it crashes!`
     )
     .setTimestamp();
@@ -2129,9 +2118,9 @@ async function runCrashLoop(game, msg) {
           game.cashedOut
             ? `Crashed at **${game.crashPoint.toFixed(2)}x**!\n\n` +
               `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅\n` +
-              `Payout: **+${game.payout.toLocaleString()}** Kryztal`
+              `Payout: 💎 **+${game.payout.toLocaleString()}**`
             : `Crashed at **${game.crashPoint.toFixed(2)}x**!\n\n` +
-              `Lost: **-${game.bet.toLocaleString()}** Kryztal`
+              `Lost: 💎 **-${game.bet.toLocaleString()}**`
         )
         .setTimestamp();
 
@@ -2166,13 +2155,13 @@ async function runCrashLoop(game, msg) {
       )
       .setDescription(
         game.cashedOut
-          ? `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅ — locked in **+${game.payout.toLocaleString()}** Kryztal\n\n` +
+          ? `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅ — locked in 💎 **+${game.payout.toLocaleString()}**\n\n` +
             `Still climbing: **${step.toFixed(2)}x** ${tier.emoji}\n` +
-            `If you had held: **${potential.toLocaleString()}** Kryztal\n\n` +
+            `If you had held: 💎 **${potential.toLocaleString()}**\n\n` +
             `Will it crash or moon? 🫣`
-          : `Bet: **${game.bet.toLocaleString()}** Kryztal\n\n` +
+          : `Bet: 💎 **${game.bet.toLocaleString()}**\n\n` +
             `Current Multiplier: **${step.toFixed(2)}x** ${tier.emoji}\n` +
-            `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
+            `Potential Payout: 💎 **${potential.toLocaleString()}**\n\n` +
             `Click **Cash Out** before it crashes!`
       )
       .setTimestamp();
@@ -2209,11 +2198,11 @@ async function runCrashLoop(game, msg) {
       .setDescription(
         autoCashed
           ? `Reached maximum multiplier!\n\n` +
-            `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
-            `Payout: **+${game.payout.toLocaleString()}** Kryztal`
+            `Bet: 💎 **${game.bet.toLocaleString()}**\n` +
+            `Payout: 💎 **+${game.payout.toLocaleString()}**`
           : `It climbed all the way to **10.00x**!\n\n` +
             `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅\n` +
-            `Payout: **+${game.payout.toLocaleString()}** Kryztal`
+            `Payout: 💎 **+${game.payout.toLocaleString()}**`
       )
       .setTimestamp();
 
@@ -2385,9 +2374,9 @@ async function playRoulette(context, userId, betStr, choiceStr) {
       .setDescription(
         `${resultColor} Ball landed on **${result}**\n` +
         `Your bet: ${choiceDisplay}\n\n` +
-        `Bet: **${bet.toLocaleString()}** Kryztal\n` +
+        `Bet: 💎 **${bet.toLocaleString()}**\n` +
         `Multiplier: **${multiplier}x**\n` +
-        `Payout: **+${payout.toLocaleString()}** Kryztal`
+        `Payout: 💎 **+${payout.toLocaleString()}**`
       )
       .setTimestamp();
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
@@ -2404,7 +2393,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
       .setDescription(
         `${resultColor} Ball landed on **${result}**\n` +
         `Your bet: ${choiceDisplay}\n\n` +
-        `Lost: **-${bet.toLocaleString()}** Kryztal`
+        `Lost: 💎 **-${bet.toLocaleString()}**`
       )
       .setTimestamp();
     try { return await msg.edit({ embeds: [embed] }); } catch { return; }
@@ -2469,7 +2458,7 @@ async function playMines(context, userId, betStr, minesCount, source) {
   if (!isSuperAdmin(userId)) {
     const result = removeBalance(userId, bet);
     if (!result.success) {
-      return context.reply({ content: `Insufficient balance. You have **${getBalance(userId).toLocaleString()} Kryztal**.` });
+      return context.reply({ content: `Insufficient balance. You have 💎 **${getBalance(userId).toLocaleString()}**.` });
     }
   }
 
@@ -2543,7 +2532,7 @@ function createMinesEmbed(game, multiplier, gameOver, hitMine = false) {
       .setDescription(
         `${gridDisplay}\n` +
         `Mines: **${game.minesCount}** | Revealed: **${revealed}**\n\n` +
-        `Lost: **-${game.bet.toLocaleString()}** Kryztal`
+        `Lost: 💎 **-${game.bet.toLocaleString()}**`
       );
   } else if (game.cashedOut) {
     embed
@@ -2553,8 +2542,8 @@ function createMinesEmbed(game, multiplier, gameOver, hitMine = false) {
         `${gridDisplay}\n` +
         `Mines: **${game.minesCount}** | Revealed: **${revealed}/${safeTiles}**\n\n` +
         `Multiplier: **${multiplier}x**\n` +
-        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
-        `Payout: **+${potential.toLocaleString()}** Kryztal`
+        `Bet: 💎 **${game.bet.toLocaleString()}**\n` +
+        `Payout: 💎 **+${potential.toLocaleString()}**`
       );
   } else if (revealed >= safeTiles) {
     embed
@@ -2564,8 +2553,8 @@ function createMinesEmbed(game, multiplier, gameOver, hitMine = false) {
         `${gridDisplay}\n` +
         `You found every safe tile!\n\n` +
         `Multiplier: **${multiplier}x**\n` +
-        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
-        `Payout: **+${potential.toLocaleString()}** Kryztal`
+        `Bet: 💎 **${game.bet.toLocaleString()}**\n` +
+        `Payout: 💎 **+${potential.toLocaleString()}**`
       );
   } else {
     embed
@@ -2575,7 +2564,7 @@ function createMinesEmbed(game, multiplier, gameOver, hitMine = false) {
         `${gridDisplay}\n` +
         `Mines: **${game.minesCount}** | Revealed: **${revealed}/${safeTiles}**\n\n` +
         `Current Multiplier: **${multiplier}x**\n` +
-        `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
+        `Potential Payout: 💎 **${potential.toLocaleString()}**\n\n` +
         `Click tiles to reveal, or **Cash Out** to collect!`
       );
   }
@@ -2772,7 +2761,7 @@ async function playHilo(context, userId, betStr, source) {
   if (!isSuperAdmin(userId)) {
     const result = removeBalance(userId, bet);
     if (!result.success) {
-      return context.reply({ content: `Insufficient balance. You have **${getBalance(userId).toLocaleString()} Kryztal**.` });
+      return context.reply({ content: `Insufficient balance. You have 💎 **${getBalance(userId).toLocaleString()}**.` });
     }
   }
 
@@ -2844,7 +2833,7 @@ function createHiloEmbed(game) {
       `${oddsDisplay}\n\n` +
       `Cards: ${historyStr}\n\n` +
       `Current Multiplier: **${game.multiplier}x**\n` +
-      `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
+      `Potential Payout: 💎 **${potential.toLocaleString()}**\n\n` +
       `Guess the next card, or **Cash Out**!`
     )
     .setTimestamp();
@@ -2939,7 +2928,7 @@ async function autoHiloCashout(game) {
         .setAuthor({ name: `${game.username}'s game` })
         .setColor(0xed4245)
         .setTitle('Hi-Lo | ⏰ Time Expired')
-        .setDescription(`No guesses made. You lose **${game.bet.toLocaleString()} Kryztal**.`)
+        .setDescription(`No guesses made. You lose 💎 **${game.bet.toLocaleString()}**.`)
         .setTimestamp();
       await game.messageRef.edit({ embeds: [embed], components: createHiloDisabledButtons(game.userId) });
     } catch {}
@@ -2956,8 +2945,8 @@ async function autoHiloCashout(game) {
     .setDescription(
       `Cards: ${game.history.join(' → ')}\n\n` +
       `Streak: **${game.streak}** | Multiplier: **${game.multiplier}x**\n\n` +
-      `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
-      `Payout: **+${payout.toLocaleString()}** Kryztal`
+      `Bet: 💎 **${game.bet.toLocaleString()}**\n` +
+      `Payout: 💎 **+${payout.toLocaleString()}**`
     )
     .setFooter({ text: '⏰ Auto Cash Out — Time expired' })
     .setTimestamp();
@@ -3022,7 +3011,7 @@ async function playTower(context, userId, betStr, difficulty, source) {
   if (!isSuperAdmin(userId)) {
     const result = removeBalance(userId, bet);
     if (!result.success) {
-      return context.reply({ content: `Insufficient balance. You have **${getBalance(userId).toLocaleString()} Kryztal**.` });
+      return context.reply({ content: `Insufficient balance. You have 💎 **${getBalance(userId).toLocaleString()}**.` });
     }
   }
 
@@ -3126,7 +3115,7 @@ function createTowerEmbed(game, hitTrap = false) {
         `**${config.label}** difficulty\n\n` +
         `${towerDisplay}\n` +
         `You hit a trap on Floor ${floorNum}!\n\n` +
-        `Lost: **-${game.bet.toLocaleString()}** Kryztal`
+        `Lost: 💎 **-${game.bet.toLocaleString()}**`
       );
   } else if (game.cashedOut || game.currentFloor >= game.maxFloors) {
     embed
@@ -3139,8 +3128,8 @@ function createTowerEmbed(game, hitTrap = false) {
         `${towerDisplay}\n` +
         `Floors cleared: **${game.currentFloor}/${game.maxFloors}**\n\n` +
         `Multiplier: **${multiplier}x**\n` +
-        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
-        `Payout: **+${potential.toLocaleString()}** Kryztal`
+        `Bet: 💎 **${game.bet.toLocaleString()}**\n` +
+        `Payout: 💎 **+${potential.toLocaleString()}**`
       );
   } else {
     embed
@@ -3151,7 +3140,7 @@ function createTowerEmbed(game, hitTrap = false) {
         `${towerDisplay}\n` +
         `Floors cleared: **${game.currentFloor}/${game.maxFloors}**\n` +
         `Current Multiplier: **${multiplier}x**\n` +
-        `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
+        `Potential Payout: 💎 **${potential.toLocaleString()}**\n\n` +
         `Pick a safe door to climb higher!`
       );
   }
@@ -3261,7 +3250,7 @@ async function autoTowerCashout(game) {
         .setAuthor({ name: `${game.username}'s game` })
         .setColor(0xed4245)
         .setTitle('Tower | ⏰ Time Expired')
-        .setDescription(`No floors cleared. You lose **${game.bet.toLocaleString()} Kryztal**.`)
+        .setDescription(`No floors cleared. You lose 💎 **${game.bet.toLocaleString()}**.`)
         .setTimestamp();
       await game.messageRef.edit({ embeds: [embed], components: createTowerDisabledButtons(game, game.userId) });
     } catch {}
@@ -3342,7 +3331,7 @@ async function showLeaderboard(context, scope = 'server') {
     const displayName = (user.username || 'Unknown').length > 16
       ? [...(user.username || 'Unknown')].slice(0, 15).join('') + '\u2026'
       : (user.username || 'Unknown');
-    description += `${rank} **${displayName}** \u2014 ${user.balance.toLocaleString()} Kryztal (Lv.${user.level})\n`;
+    description += `${rank} **${displayName}** \u2014 💎 ${user.balance.toLocaleString()} (Lv.${user.level})\n`;
   }
 
   const title = scope === 'all' ? 'Leaderboard | Global Top 10' : 'Leaderboard | Server Top 10';
@@ -3402,7 +3391,7 @@ async function handleButton(interaction) {
       .setTitle('Welcome to Kyriz Games!')
       .setDescription(
         `You have been registered successfully.\n\n` +
-          `**Starting balance:** 100,000 Kryztal\n` +
+          `**Starting balance:** 💎 100,000\n` +
           `**Level:** 1\n\n` +
           `Use \`ky bj [bet]\` or \`/kyriz blackjack\` to start playing!`
       )
@@ -3561,7 +3550,7 @@ async function handleButton(interaction) {
       .setColor(0x57f287)
       .setTitle(`Crash | ✅ Cashed @ ${game.cashoutMultiplier.toFixed(2)}x — ${tier.emoji} ${tier.label}`)
       .setDescription(
-        `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅ — locked in **+${game.payout.toLocaleString()}** Kryztal\n\n` +
+        `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅ — locked in 💎 **+${game.payout.toLocaleString()}**\n\n` +
         `Still climbing: **${game.currentMultiplier.toFixed(2)}x** ${tier.emoji}\n\n` +
         `Watch it ride… will it crash or moon? 🫣`
       )
@@ -3659,7 +3648,7 @@ async function handleButton(interaction) {
       .setColor(0x57f287)
       .setTitle('Transfer')
       .setDescription(
-        `<@${pending.fromId}> sent **${pending.amount.toLocaleString()} Kryztal** to <@${pending.toId}>.`
+        `<@${pending.fromId}> sent 💎 **${pending.amount.toLocaleString()}** to <@${pending.toId}>.`
       )
       .setTimestamp();
 
@@ -3830,7 +3819,7 @@ async function handleButton(interaction) {
             `You guessed: **${guess}** — Wrong!\n\n` +
             `Cards: ${game.history.join(' → ')}\n` +
             `Streak: **${game.streak}**\n\n` +
-            `Lost: **-${game.bet.toLocaleString()}** Kryztal`
+            `Lost: 💎 **-${game.bet.toLocaleString()}**`
           )
           .setTimestamp();
 
@@ -3858,8 +3847,8 @@ async function handleButton(interaction) {
             `Cards: ${game.history.join(' → ')}\n\n` +
             `Streak: **${game.streak}** — Maximum reached!\n` +
             `Multiplier: **${game.multiplier}x**\n\n` +
-            `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
-            `Payout: **+${payout.toLocaleString()}** Kryztal`
+            `Bet: 💎 **${game.bet.toLocaleString()}**\n` +
+            `Payout: 💎 **+${payout.toLocaleString()}**`
           )
           .setTimestamp();
 
@@ -3942,8 +3931,8 @@ async function handleButton(interaction) {
       .setDescription(
         `Cards: ${game.history.join(' → ')}\n\n` +
         `Streak: **${game.streak}** | Multiplier: **${game.multiplier}x**\n\n` +
-        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
-        `Payout: **+${payout.toLocaleString()}** Kryztal`
+        `Bet: 💎 **${game.bet.toLocaleString()}**\n` +
+        `Payout: 💎 **+${payout.toLocaleString()}**`
       )
       .setTimestamp();
 
@@ -4126,23 +4115,23 @@ async function autoStandButton(interaction, game) {
     let xpGained = XP_LOSE;
 
     if (playerValue > 21) {
-      resultText = `Bust! You lose ${game.bet.toLocaleString()} Kryztal.`;
+      resultText = `Bust! You lose 💎 ${game.bet.toLocaleString()}.`;
       color = 0xed4245;
       recordLoss(game.userId);
     } else if (dealerValue > 21) {
       winnings = game.bet * 2;
-      resultText = `Dealer busts! You win ${winnings.toLocaleString()} Kryztal!`;
+      resultText = `Dealer busts! You win 💎 ${winnings.toLocaleString()}!`;
       color = 0x57f287;
       xpGained = XP_WIN;
       recordWin(game.userId);
     } else if (playerValue > dealerValue) {
       winnings = game.bet * 2;
-      resultText = `You win ${winnings.toLocaleString()} Kryztal! (Auto-stand: time expired)`;
+      resultText = `You win 💎 ${winnings.toLocaleString()}! (Auto-stand: time expired)`;
       color = 0x57f287;
       xpGained = XP_WIN;
       recordWin(game.userId);
     } else if (playerValue < dealerValue) {
-      resultText = `Dealer wins. You lose ${game.bet.toLocaleString()} Kryztal. (Auto-stand: time expired)`;
+      resultText = `Dealer wins. You lose 💎 ${game.bet.toLocaleString()}. (Auto-stand: time expired)`;
       color = 0xed4245;
       recordLoss(game.userId);
     } else {
@@ -4170,9 +4159,9 @@ async function autoStandButton(interaction, game) {
 
     if (!isSuperAdmin(game.userId)) {
       const newBalance = getBalance(game.userId);
-      embed.setFooter({ text: `Balance: ${newBalance.toLocaleString()} Kryztal` });
+      embed.setFooter({ text: `Balance: 💎 ${newBalance.toLocaleString()}` });
     } else {
-      embed.setFooter({ text: 'Balance: \u221e Kryztal' });
+      embed.setFooter({ text: 'Balance: 💎 \u221e' });
     }
 
     game.finished = true;
