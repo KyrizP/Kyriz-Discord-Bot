@@ -558,6 +558,17 @@ function getAllPlayers() {
     .sort((a, b) => b.balance - a.balance);
 }
 
+/**
+ * Get a user's global rank (1-based) by balance. Returns null if not ranked.
+ * Excludes superadmin & admins, matching getLeaderboard.
+ */
+function getGlobalRank(userId) {
+  const players = getAllPlayers().filter((u) => !u.isAdmin); // getAllPlayers already excludes superadmin
+  const sorted = players.sort((a, b) => b.balance - a.balance);
+  const idx = sorted.findIndex((u) => u.userId === userId);
+  return idx === -1 ? null : idx + 1;
+}
+
 module.exports = {
   isSuperAdmin,
   isAdmin,
@@ -581,4 +592,8 @@ module.exports = {
   getDailyReceiveLimit,
   getTransferData,
   getAllPlayers,
+  getGlobalRank,
+  ECONOMY_PATH,
+  readEconomy: readJSON.bind(null, ECONOMY_PATH),
+  writeEconomy: writeJSON.bind(null, ECONOMY_PATH),
 };
