@@ -1510,24 +1510,24 @@ async function playSlots(context, userId, betStr) {
 
   if (reels[0] === reels[1] && reels[1] === reels[2]) {
     if (reels[0] === '7️⃣') {
-      multiplier = 50;
+      multiplier = 40;
       title = 'Slots | 🎰 MEGA JACKPOT!!! 🎰';
     } else if (reels[0] === '💎') {
-      multiplier = 25;
+      multiplier = 20;
       title = 'Slots | 💎 JACKPOT! 💎';
     } else {
-      multiplier = 10;
+      multiplier = 9;
       title = 'Slots | Jackpot!';
     }
     color = 0xfee75c;
     xp = 75;
   } else if (reels[0] === reels[1]) {
-    multiplier = 2;
+    multiplier = 1.5;
     title = 'Slots | Partial Match!';
     color = 0x57f287;
     xp = 25;
   } else if (reels[1] === reels[2] || reels[0] === reels[2]) {
-    multiplier = 1.5;
+    multiplier = 1.0;
     title = 'Slots | Small Match!';
     color = 0x57f287;
     xp = 15;
@@ -1690,36 +1690,14 @@ async function playDice(context, userId, betStr, guessStr) {
 const activeCrashGames = new Map(); // userId -> crash game state
 
 function generateCrashPoint() {
-  // Per-step independent survival checks
-  // Each step rolls independently — only 1.50x changed (78% → 50%)
-  const checks = [
-    { step: 1.2, survive: 0.95 },   // 95%
-    { step: 1.5, survive: 0.45 },   // 45% - Spike
-    { step: 1.8, survive: 0.70 },   // 70%
-    { step: 2.0, survive: 0.60 },   // 60%
-    { step: 2.5, survive: 0.50 },   // 50%
-    { step: 3.0, survive: 0.50 },   // 50%
-    { step: 3.5, survive: 0.55 },   // 55%
-    { step: 4.0, survive: 0.50 },   // 50%
-    { step: 5.0, survive: 0.45 },   // 45%
-    { step: 6.0, survive: 0.35 },   // 35%
-    { step: 7.0, survive: 0.70 },   // 70% - Save Point
-    { step: 8.0, survive: 0.20 },   // 20%
-    { step: 9.0, survive: 0.10 },   // 10%
-    { step: 10.0, survive: 1.0 },   // auto cashout at 10x
-  ];
-
-  let prev = 1.0;
-  for (const { step, survive } of checks) {
-    if (Math.random() > survive) {
-      // Crashed before reaching this step
-      if (prev <= 1.0) return 1.0; // Instant crash
-      const crashAt = prev + Math.random() * (step - prev - 0.01);
-      return parseFloat(Math.max(prev, crashAt).toFixed(2));
-    }
-    prev = step;
-  }
-  return 10.1; // Survived all → auto cashout at 10x
+  // Rumus crash: P(crash >= x) = (1 - edge) / x  →  RTP seragam (1 - edge) di SEMUA titik.
+  // Konsekuensi: tidak ada titik cash-out yang +EV (anti-farming). Lihat diskusi/GAME_ODDS.
+  // edge = house edge; cap = auto-cashout maksimum (loop berhenti di 10x).
+  const edge = 0.02; // 2% house edge
+  const cap = 10;    // auto-cashout di 10x
+  const r = Math.random();           // r di [0,1) → (1 - r) selalu > 0, tidak ada bagi nol
+  const raw = (1 - edge) / (1 - r);
+  return Math.min(cap, Math.max(1.0, parseFloat(raw.toFixed(2))));
 }
 
 async function handleCrash(interaction, userId) {
@@ -1758,6 +1736,9 @@ async function playCrash(context, userId, betStr, source) {
     crashPoint,
     currentMultiplier: 1.0,
     cashedOut: false,
+    cashoutMultiplier: null,
+    payout: null,
+    xpResult: null,
     finished: false,
   };
 
@@ -1814,22 +1795,30 @@ async function playCrash(context, userId, betStr, source) {
   runCrashLoop(game, msg);
 }
 
+function crashTierVisual(mult) {
+  if (mult >= 7) return { emoji: '🌙', color: 0xf1c40f, label: 'To the moon!' };
+  if (mult >= 4) return { emoji: '💎', color: 0x57f287, label: 'Diamond hands!' };
+  if (mult >= 2) return { emoji: '🔥', color: 0xe67e22, label: 'Catching fire!' };
+  return { emoji: '🚀', color: 0x5865f2, label: 'Lifting off…' };
+}
+
 async function runCrashLoop(game, msg) {
-  const steps = [1.2, 1.5, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+  const steps = [1.10, 1.25, 1.50, 1.75, 2.00, 2.50, 3.00, 4.00, 5.00, 7.00, 10.00];
   
   for (const step of steps) {
-    if (game.finished || game.cashedOut) return;
+    if (game.finished) return;
     
     await new Promise((resolve) => setTimeout(resolve, 1500));
     
-    if (game.finished || game.cashedOut) return;
+    if (game.finished) return;
 
     if (step > game.crashPoint) {
       // CRASHED
       game.finished = true;
       activeCrashGames.delete(game.userId);
 
-      if (!isSuperAdmin(game.userId)) {
+      // Hanya yang TIDAK cash-out yang kena loss. Yang cash-out sudah recordWin di handleCrashCashout.
+      if (!game.cashedOut && !isSuperAdmin(game.userId)) {
         const xpResult = addXP(game.userId, calculateXP(10, game.bet));
         sendLevelUpNotification(msg.channel, game.userId, xpResult);
         recordLoss(game.userId);
@@ -1837,19 +1826,27 @@ async function runCrashLoop(game, msg) {
 
       const embed = new EmbedBuilder()
         .setAuthor({ name: `${game.username}'s game` })
-        .setColor(0xed4245)
-        .setTitle('Crash | 💥 CRASHED!')
+        .setColor(game.cashedOut ? 0x57f287 : 0xed4245)
+        .setTitle(game.cashedOut ? 'Crash | 💥 Crashed — but you cashed out!' : 'Crash | 💥 CRASHED!')
         .setDescription(
-          `Crashed at **${game.crashPoint.toFixed(2)}x**!\n\n` +
-          `Lost: **-${game.bet.toLocaleString()}** Kryztal`
+          game.cashedOut
+            ? `Crashed at **${game.crashPoint.toFixed(2)}x**!\n\n` +
+              `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅\n` +
+              `Payout: **+${game.payout.toLocaleString()}** Kryztal`
+            : `Crashed at **${game.crashPoint.toFixed(2)}x**!\n\n` +
+              `Lost: **-${game.bet.toLocaleString()}** Kryztal`
         )
         .setTimestamp();
 
       const disabledBtn = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`crash_cashout_${game.userId}`)
-          .setLabel(`Crashed at ${game.crashPoint.toFixed(2)}x`)
-          .setStyle(ButtonStyle.Danger)
+          .setLabel(
+            game.cashedOut
+              ? `✅ ${game.cashoutMultiplier.toFixed(2)}x → crashed ${game.crashPoint.toFixed(2)}x`
+              : `Crashed at ${game.crashPoint.toFixed(2)}x`
+          )
+          .setStyle(game.cashedOut ? ButtonStyle.Success : ButtonStyle.Danger)
           .setDisabled(true)
       );
 
@@ -1857,69 +1854,94 @@ async function runCrashLoop(game, msg) {
       return;
     }
 
-    // Update multiplier
+    // Step aman tercapai — update multiplier & tampilan
     game.currentMultiplier = step;
     const potential = Math.floor(game.bet * step);
+    const tier = crashTierVisual(step);
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: `${game.username}'s game` })
-      .setColor(0xfee75c)
-      .setTitle('Crash | 🚀 Running...')
+      .setColor(game.cashedOut ? 0x57f287 : tier.color)
+      .setTitle(
+        game.cashedOut
+          ? `Crash | ✅ Cashed @ ${game.cashoutMultiplier.toFixed(2)}x — ${tier.emoji} ${tier.label}`
+          : `Crash | ${tier.emoji} ${tier.label}`
+      )
       .setDescription(
-        `Bet: **${game.bet.toLocaleString()}** Kryztal\n\n` +
-        `Current Multiplier: **${step.toFixed(2)}x**\n` +
-        `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
-        `Click **Cash Out** before it crashes!`
+        game.cashedOut
+          ? `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅ — locked in **+${game.payout.toLocaleString()}** Kryztal\n\n` +
+            `Still climbing: **${step.toFixed(2)}x** ${tier.emoji}\n` +
+            `If you had held: **${potential.toLocaleString()}** Kryztal\n\n` +
+            `Will it crash or moon? 🫣`
+          : `Bet: **${game.bet.toLocaleString()}** Kryztal\n\n` +
+            `Current Multiplier: **${step.toFixed(2)}x** ${tier.emoji}\n` +
+            `Potential Payout: **${potential.toLocaleString()}** Kryztal\n\n` +
+            `Click **Cash Out** before it crashes!`
       )
       .setTimestamp();
 
     const button = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`crash_cashout_${game.userId}`)
-        .setLabel(`Cash Out — ${step.toFixed(2)}x`)
+        .setLabel(
+          game.cashedOut
+            ? `✅ Cashed @ ${game.cashoutMultiplier.toFixed(2)}x`
+            : `Cash Out — ${step.toFixed(2)}x`
+        )
         .setStyle(ButtonStyle.Success)
+        .setDisabled(game.cashedOut)
     );
 
     try { await msg.edit({ embeds: [embed], components: [button] }); } catch {}
   }
 
-  // Reached max 10x without crash (shouldn't happen often since crashPoint ≤ 10)
-  if (!game.finished && !game.cashedOut) {
-    game.currentMultiplier = 10.0;
-    // Auto cash out at 10x
-    const payout = handleCrashCashout(game);
+  // Loop selesai tanpa crash = cap 10x tercapai (crashPoint >= 10)
+  if (!game.finished) {
+    const autoCashed = !game.cashedOut; // pemain hold sampai moon tanpa cash-out?
+    if (autoCashed) {
+      game.currentMultiplier = 10.0;
+      handleCrashCashout(game); // bayar 10x dulu (finished masih false), set payout/cashoutMultiplier
+    }
+    game.finished = true;
+    activeCrashGames.delete(game.userId);
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: `${game.username}'s game` })
       .setColor(0x57f287)
-      .setTitle('Crash | 💰 Auto Cash Out — 10.00x!')
+      .setTitle(autoCashed ? 'Crash | 🌙 Auto Cash Out — 10.00x!' : 'Crash | 🌙 Reached 10.00x!')
       .setDescription(
-        `Reached maximum multiplier!\n\n` +
-        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
-        `Payout: **+${payout.toLocaleString()}** Kryztal`
+        autoCashed
+          ? `Reached maximum multiplier!\n\n` +
+            `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
+            `Payout: **+${game.payout.toLocaleString()}** Kryztal`
+          : `It climbed all the way to **10.00x**!\n\n` +
+            `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅\n` +
+            `Payout: **+${game.payout.toLocaleString()}** Kryztal`
       )
       .setTimestamp();
 
     const disabledBtn = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`crash_cashout_${game.userId}`)
-        .setLabel('Auto Cashed Out at 10.00x')
+        .setLabel(autoCashed ? 'Auto Cashed Out at 10.00x' : `✅ ${game.cashoutMultiplier.toFixed(2)}x → hit 10.00x`)
         .setStyle(ButtonStyle.Success)
         .setDisabled(true)
     );
 
     try { await msg.edit({ embeds: [embed], components: [disabledBtn] }); } catch {}
-    sendLevelUpNotification(msg.channel, game.userId, game.xpResult);
+    if (autoCashed) sendLevelUpNotification(msg.channel, game.userId, game.xpResult);
   }
 }
 
 function handleCrashCashout(game) {
-  if (game.finished || game.cashedOut) return;
+  // Kunci payout di currentMultiplier. TIDAK mengakhiri game — loop tetap mereveal sampai crash (Opsi B).
+  // Guard di bawah mencegah double-pay (dipanggil sekali per game).
+  if (game.finished || game.cashedOut) return undefined;
   game.cashedOut = true;
-  game.finished = true;
-  activeCrashGames.delete(game.userId);
+  game.cashoutMultiplier = game.currentMultiplier;
 
   const payout = Math.floor(game.bet * game.currentMultiplier);
+  game.payout = payout;
 
   if (!isSuperAdmin(game.userId)) {
     addBalance(game.userId, payout);
@@ -2047,7 +2069,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
       else if (choice.value === 'high' && result >= 19 && result <= 36) { won = true; multiplier = 2; }
       break;
     case 'number':
-      if (result === choice.value) { won = true; multiplier = choice.value === 0 ? 45 : 35; }
+      if (result === choice.value) { won = true; multiplier = 36; }
       break;
   }
 
@@ -3213,23 +3235,25 @@ async function handleButton(interaction) {
       return interaction.deferUpdate();
     }
 
-    const payout = handleCrashCashout(game);
+    // Kunci payout di currentMultiplier. Game TIDAK selesai — loop lanjut mereveal crash (Opsi B).
+    handleCrashCashout(game);
+    const tier = crashTierVisual(game.currentMultiplier);
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: `${game.username}'s game` })
       .setColor(0x57f287)
-      .setTitle('Crash | 💰 Cashed Out!')
+      .setTitle(`Crash | ✅ Cashed @ ${game.cashoutMultiplier.toFixed(2)}x — ${tier.emoji} ${tier.label}`)
       .setDescription(
-        `You cashed out at **${game.currentMultiplier.toFixed(2)}x**!\n\n` +
-        `Bet: **${game.bet.toLocaleString()}** Kryztal\n` +
-        `Payout: **+${payout.toLocaleString()}** Kryztal`
+        `You cashed out at **${game.cashoutMultiplier.toFixed(2)}x** ✅ — locked in **+${game.payout.toLocaleString()}** Kryztal\n\n` +
+        `Still climbing: **${game.currentMultiplier.toFixed(2)}x** ${tier.emoji}\n\n` +
+        `Watch it ride… will it crash or moon? 🫣`
       )
       .setTimestamp();
 
     const disabledBtn = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`crash_cashout_${targetUserId}`)
-        .setLabel(`Cashed Out at ${game.currentMultiplier.toFixed(2)}x`)
+        .setLabel(`✅ Cashed @ ${game.cashoutMultiplier.toFixed(2)}x`)
         .setStyle(ButtonStyle.Success)
         .setDisabled(true)
     );
@@ -3953,11 +3977,11 @@ function createOddsPage(page) {
 
         '🎰 **Slots**\n' +
         '```\n' +
-        '[ 7 | 7 | 7 ]  MEGA JACKPOT   →  50x\n' +
-        '[ 💎 | 💎 | 💎 ]  JACKPOT      →  25x\n' +
-        '[ 🍒 | 🍒 | 🍒 ]  3 of a kind  →  10x\n' +
-        '[ 🍒 | 🍒 | 🍋 ]  First 2 match →   2x\n' +
-        '[ 🍊 | 🍋 | 🍊 ]  Any 2 match   → 1.5x\n' +
+        '[ 7 | 7 | 7 ]  MEGA JACKPOT   →  40x\n' +
+        '[ 💎 | 💎 | 💎 ]  JACKPOT      →  20x\n' +
+        '[ 🍒 | 🍒 | 🍒 ]  3 of a kind  →   9x\n' +
+        '[ 🍒 | 🍒 | 🍋 ]  First 2 match →  1.5x\n' +
+        '[ 🍊 | 🍋 | 🍊 ]  Any 2 match   →  1.0x\n' +
         '```\n\n' +
 
         '🎲 **Dice**\n' +
@@ -3971,8 +3995,7 @@ function createOddsPage(page) {
         '🔴 Red / ⚫ Black      →   2x\n' +
         'Even / Odd             →   2x\n' +
         '1-18 / 19-36           →   2x\n' +
-        'Exact number (1-36)    →  35x\n' +
-        '🟢 Exact 0 (special!)  →  45x\n' +
+        'Exact number (0-36)    →  36x\n' +
         '```\n\n' +
 
         '🃏 **Blackjack**\n' +
@@ -3994,13 +4017,13 @@ function createOddsPage(page) {
       '```\n' +
       'Cash out at    Chance\n' +
       '─────────────────────────────\n' +
-      '  1.2x         almost always\n' +
-      '  1.5x         risky (spike)\n' +
-      '  2.0x         over 50%\n' +
-      '  3.0x         risky\n' +
-      '  5.0x         high risk\n' +
-      ' 10.0x         very rare\n' +
-      'Instant crash  extremely rare\n' +
+      '  1.1x         ~89%\n' +
+      '  1.5x         ~65%\n' +
+      '  2.0x         ~49%   (1 in 2)\n' +
+      '  3.0x         ~33%   (1 in 3)\n' +
+      '  5.0x         ~20%   (1 in 5)\n' +
+      ' 10.0x         ~10%   (1 in 10)\n' +
+      'Instant crash  ~2%\n' +
       '```\n\n' +
 
       '💎 **Mines** — 4×4 grid, default 3 bombs\n' +
@@ -4169,4 +4192,6 @@ module.exports = {
   handlePrefixCommand,
   handleButton,
   isValidPrefixCommand,
+  generateCrashPoint, // diekspor untuk test (test/crash.test.js)
+  crashTierVisual,    // diekspor untuk test
 };
