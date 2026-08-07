@@ -21,6 +21,7 @@ const {
   getDailySendLimit,
   getDailyReceiveLimit,
   getTransferData,
+  getGlobalRank,
   isAdmin,
 } = require('../utils/economyManager');
 const { createDeck, drawCard, calculateHand, formatHand, isBlackjack } = require('../utils/cardDeck');
@@ -375,6 +376,14 @@ function attachGameSubcommands(commandBuilder) {
           .addChoices(...listBuyable().map((i) => ({ name: `${i.emoji} ${i.name}`, value: i.id })))
       )
   );
+
+  // /kyriz profile [user]
+  commandBuilder.addSubcommand((sub) =>
+    sub.setName('profile').setDescription('View your (or someone\'s) profile card')
+      .addUserOption((opt) =>
+        opt.setName('user').setDescription('Whose profile to view').setRequired(false)
+      )
+  );
 }
 
 // ============================================================
@@ -446,7 +455,7 @@ async function execute(interaction) {
   }
 
   // T&C check (skip for superadmin)
-  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory', 'buy', 'use'];
+  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory', 'buy', 'use', 'profile'];
   if (requiresRegistration.includes(subcommand) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -506,6 +515,10 @@ async function execute(interaction) {
       return handleBuySlash(interaction, userId);
     case 'use':
       return handleUse(interaction, userId);
+    case 'profile': {
+      const t = interaction.options.getUser('user');
+      return handleProfile(interaction, t ? t.id : userId, t ? t.username : interaction.user.username, t ? t.displayAvatarURL() : interaction.user.displayAvatarURL());
+    }
   }
 }
 
@@ -564,7 +577,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -632,6 +645,10 @@ async function handlePrefixCommand(message, command, args) {
       return handleBuyPrefix(message, userId, args);
     case 'use':
       return handleUse(message, userId, args, true);
+    case 'profile': {
+      const m = message.mentions.users.first();
+      return handleProfile(message, m ? m.id : userId, m ? m.username : message.author.username, m ? m.displayAvatarURL() : message.author.displayAvatarURL(), true);
+    }
     default:
       return;
   }
@@ -1380,6 +1397,62 @@ async function handleUse(context, userId, args, isPrefix = false) {
     ? shopManager.equipCosmetic(userId, itemId)
     : shopManager.useItem(userId, itemId);
   return context.reply(res.message);
+}
+
+// PROFILE: rich card viewable for self OR another user.
+async function handleProfile(context, targetId, username, avatarURL, isPrefix = false) {
+  if (!isRegistered(targetId) && !isSuperAdmin(targetId)) {
+    const m = 'That user is not registered yet.';
+    return isPrefix ? context.reply(m) : context.reply({ content: m, ephemeral: true });
+  }
+  const user = getUser(targetId) || {};
+  const state = shopManager.getInventoryState(targetId) || { cosmetics: { title: null, badge: null, color: null } };
+
+  const titleItem = state.cosmetics.title ? getItem(state.cosmetics.title) : null;
+  const badgeItem = state.cosmetics.badge ? getItem(state.cosmetics.badge) : null;
+  const colorItem = state.cosmetics.color ? getItem(state.cosmetics.color) : null;
+
+  const display = (titleItem ? `[${titleItem.effect.value}] ` : '') + username + (badgeItem ? ` ${badgeItem.effect.value}` : '');
+  const embedColor = colorItem ? colorItem.effect.hex : 0x5865f2;
+
+  const bal = isSuperAdmin(targetId) ? '∞' : (user.balance || 0).toLocaleString();
+  const earned = user.totalEarned || 0;
+  const lost = user.totalLost || 0;
+  const net = earned - lost;
+  const netStr = (net >= 0 ? '+' : '') + net.toLocaleString();
+  const wins = user.totalWins || 0;
+  const losses = user.totalLosses || 0;
+  const winRate = (wins + losses) > 0 ? Math.round((wins / (wins + losses)) * 100) : 0;
+  const rank = isSuperAdmin(targetId) ? null : getGlobalRank(targetId);
+
+  // XP progress bar (10 segments). Number() coerces superadmin's '?' to NaN→0 so no NaN% renders.
+  const level = Number(user.level) || 1;
+  const xp = Number(user.xp) || 0;
+  const xpNeeded = Number(user.xpNeeded) || 400;
+  const pct = Math.min(1, xp / xpNeeded);
+  const filled = Math.round(pct * 10);
+  const bar = '▰'.repeat(filled) + '▱'.repeat(10 - filled);
+
+  const equipped = [
+    titleItem ? `Title [${titleItem.effect.value}]` : null,
+    badgeItem ? `Badge ${badgeItem.effect.value}` : null,
+    colorItem ? `Color ${colorItem.name.replace('Color: ', '')}` : null,
+  ].filter(Boolean).join(' · ') || 'None';
+
+  const embed = new EmbedBuilder()
+    .setColor(embedColor)
+    .setAuthor({ name: display, iconURL: avatarURL })
+    .setDescription(rank ? `🏆 Rank #${rank} Global` : '🌟 Superadmin')
+    .addFields(
+      { name: `⭐ Level ${level}`, value: `${bar}  ${xp}/${xpNeeded} XP (${Math.round(pct * 100)}%)` },
+      { name: '💎 Kryztal', value: `**${bal}**` },
+      { name: '📊 Net Profit', value: `${netStr}  *(Earned ${earned.toLocaleString()} · Lost ${lost.toLocaleString()})*` },
+      { name: '🎰 Record', value: `W/L ${wins}/${losses}  ·  Win Rate ${winRate}%` },
+      { name: '🎨 Equipped', value: equipped }
+    )
+    .setFooter({ text: `Member since ${new Date(user.registeredAt || Date.now()).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}` })
+    .setTimestamp();
+  return context.reply({ embeds: [embed] });
 }
 
 
@@ -4122,7 +4195,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
