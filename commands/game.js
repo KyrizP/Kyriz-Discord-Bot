@@ -1064,13 +1064,13 @@ async function finishBlackjack(context, game, method) {
     resultText = `Dealer has Blackjack! You lose 💎 ${game.bet.toLocaleString()}.`;
     color = 0xed4245; // Red
     xpGained = XP_LOSE;
-    recordLoss(game.userId);
+    recordLoss(game.userId, game.bet);
   } else if (playerValue > 21) {
     // Player bust
     resultText = `Bust! You lose 💎 ${game.bet.toLocaleString()}.`;
     color = 0xed4245;
     xpGained = XP_LOSE;
-    recordLoss(game.userId);
+    recordLoss(game.userId, game.bet);
   } else if (dealerValue > 21) {
     // Dealer bust
     winnings = game.bet * 2;
@@ -1090,7 +1090,7 @@ async function finishBlackjack(context, game, method) {
     resultText = `Dealer wins. You lose 💎 ${game.bet.toLocaleString()}.`;
     color = 0xed4245;
     xpGained = XP_LOSE;
-    recordLoss(game.userId);
+    recordLoss(game.userId, game.bet);
   } else {
     // Push
     winnings = game.bet;
@@ -1701,7 +1701,7 @@ async function playCoinflip(context, userId, betStr, sideStr, method) {
     if (!isSuperAdmin(userId)) {
       const xpResult = addXP(userId, calculateXP(5, bet));
       sendLevelUpNotification(msg.channel, userId, xpResult);
-      recordLoss(userId);
+      recordLoss(userId, bet);
     }
     const embed = new EmbedBuilder()
       .setAuthor({ name: `${username}'s game` })
@@ -1843,7 +1843,7 @@ async function playSlots(context, userId, betStr) {
     if (!isSuperAdmin(userId)) {
       const xpResultL = addXP(userId, calculateXP(xp, bet));
       sendLevelUpNotification(msg.channel, userId, xpResultL);
-      recordLoss(userId);
+      recordLoss(userId, bet);
     }
     const embed = new EmbedBuilder()
       .setAuthor({ name: `${username}'s game` })
@@ -1954,7 +1954,7 @@ async function playDice(context, userId, betStr, guessStr) {
     if (!isSuperAdmin(userId)) {
       const xpResult = addXP(userId, calculateXP(5, bet));
       sendLevelUpNotification(msg.channel, userId, xpResult);
-      recordLoss(userId);
+      recordLoss(userId, bet);
     }
     const embed = new EmbedBuilder()
       .setAuthor({ name: `${username}'s game` })
@@ -2038,7 +2038,7 @@ async function playCrash(context, userId, betStr, source) {
     if (!isSuperAdmin(userId)) {
       const xpResult = addXP(userId, calculateXP(10, bet));
       sendLevelUpNotification(context.channel, userId, xpResult);
-      recordLoss(userId);
+      recordLoss(userId, bet);
     }
 
     const crashEmbed = new EmbedBuilder()
@@ -2107,7 +2107,7 @@ async function runCrashLoop(game, msg) {
       if (!game.cashedOut && !isSuperAdmin(game.userId)) {
         const xpResult = addXP(game.userId, calculateXP(10, game.bet));
         sendLevelUpNotification(msg.channel, game.userId, xpResult);
-        recordLoss(game.userId);
+        recordLoss(game.userId, game.bet);
       }
 
       const embed = new EmbedBuilder()
@@ -2384,7 +2384,7 @@ async function playRoulette(context, userId, betStr, choiceStr) {
     if (!isSuperAdmin(userId)) {
       const xpResult = addXP(userId, calculateXP(5, bet));
       sendLevelUpNotification(msg.channel, userId, xpResult);
-      recordLoss(userId);
+      recordLoss(userId, bet);
     }
     const embed = new EmbedBuilder()
       .setAuthor({ name: `${username}'s game` })
@@ -2663,7 +2663,7 @@ function finishMinesGame(game, won, multiplier) {
   } else {
     if (!isSuperAdmin(game.userId)) {
       game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
-      recordLoss(game.userId);
+      recordLoss(game.userId, game.bet);
     }
     return 0;
   }
@@ -2905,7 +2905,7 @@ function finishHiloGame(game, won) {
   } else {
     if (!isSuperAdmin(game.userId)) {
       game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
-      recordLoss(game.userId);
+      recordLoss(game.userId, game.bet);
     }
     return 0;
   }
@@ -2920,7 +2920,7 @@ async function autoHiloCashout(game) {
     activeHiloGames.delete(game.userId);
     if (!isSuperAdmin(game.userId)) {
       game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
-      recordLoss(game.userId);
+      recordLoss(game.userId, game.bet);
     }
     if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
     try {
@@ -3227,7 +3227,7 @@ function finishTowerGame(game, won) {
   } else {
     if (!isSuperAdmin(game.userId)) {
       game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
-      recordLoss(game.userId);
+      recordLoss(game.userId, game.bet);
     }
     return 0;
   }
@@ -3242,7 +3242,7 @@ async function autoTowerCashout(game) {
     activeTowerGames.delete(game.userId);
     if (!isSuperAdmin(game.userId)) {
       game.xpResult = addXP(game.userId, calculateXP(XP_LOSE, game.bet));
-      recordLoss(game.userId);
+      recordLoss(game.userId, game.bet);
     }
     if (game.timeout) { clearTimeout(game.timeout); game.timeout = null; }
     try {
@@ -4122,7 +4122,7 @@ async function autoStandButton(interaction, game) {
     if (playerValue > 21) {
       resultText = `Bust! You lose 💎 ${game.bet.toLocaleString()}.`;
       color = 0xed4245;
-      recordLoss(game.userId);
+      recordLoss(game.userId, game.bet);
     } else if (dealerValue > 21) {
       winnings = game.bet * 2;
       resultText = `Dealer busts! You win 💎 ${winnings.toLocaleString()}!`;
@@ -4138,7 +4138,7 @@ async function autoStandButton(interaction, game) {
     } else if (playerValue < dealerValue) {
       resultText = `Dealer wins. You lose 💎 ${game.bet.toLocaleString()}. (Auto-stand: time expired)`;
       color = 0xed4245;
-      recordLoss(game.userId);
+      recordLoss(game.userId, game.bet);
     } else {
       winnings = game.bet;
       resultText = `Push! Bet returned. (Auto-stand: time expired)`;

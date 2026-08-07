@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
+const { computeShieldRefund } = require('./shopItems');
+
 const ECONOMY_PATH = path.join(__dirname, '..', 'data', 'economy.json');
 
 // ============================================================
@@ -451,11 +453,21 @@ function recordWin(userId) {
 /**
  * Record a loss
  */
-function recordLoss(userId) {
+function recordLoss(userId, bet = 0) {
   if (isSuperAdmin(userId)) return;
   const data = readJSON(ECONOMY_PATH);
   if (data[userId]) {
     data[userId].totalLosses += 1;
+    // Shield: refund a fraction of THIS loss, then consume the shield.
+    const boosts = data[userId].activeBoosts;
+    if (bet > 0 && boosts && boosts.shield) {
+      const refund = computeShieldRefund(bet, boosts.shield.cap, boosts.shield.pct);
+      if (refund > 0) {
+        data[userId].balance = (data[userId].balance || 0) + refund;
+        data[userId].totalEarned = (data[userId].totalEarned || 0) + refund;
+      }
+      delete boosts.shield;
+    }
     writeJSON(ECONOMY_PATH, data);
   }
 }
