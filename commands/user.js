@@ -96,7 +96,7 @@ async function handleUserAdd(interaction, guildId, userId) {
 
   if (amount < 0 || amount > 50000000) {
     return interaction.reply({
-      content: 'Amount must be between **0** and **50,000,000** Kryztal.',
+      content: 'Amount must be between 💎 **0** and **50,000,000** Kryztal.',
       ephemeral: true,
     });
   }
@@ -125,8 +125,8 @@ async function handleUserAdd(interaction, guildId, userId) {
     .setTitle('✅ Admin Added')
     .setDescription(
       `${targetUser} is now an **Admin**.\n\n` +
-      `💰 Bonus: **+${amount.toLocaleString()} Kryztal**\n` +
-      `💳 Balance: **${result.newBalance.toLocaleString()} Kryztal**\n\n` +
+      `Bonus: 💎 **+${amount.toLocaleString()}** Kryztal\n` +
+      `Balance: 💎 **${result.newBalance.toLocaleString()}** Kryztal\n\n` +
       `• Can configure auto-replies\n` +
       `• Excluded from leaderboard`
     )

@@ -348,7 +348,7 @@ const MAX_TRANSFER = 2_000_000;
 
 function transfer(fromId, toId, amount) {
   if (amount <= 0) return { success: false, message: 'Amount must be greater than 0.' };
-  if (amount > MAX_TRANSFER) return { success: false, message: `Maximum transfer is ${MAX_TRANSFER.toLocaleString()} Kryztal.` };
+  if (amount > MAX_TRANSFER) return { success: false, message: `Maximum transfer is 💎 ${MAX_TRANSFER.toLocaleString()} Kryztal.` };
 
   const data = readJSON(ECONOMY_PATH);
 
