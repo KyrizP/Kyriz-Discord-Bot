@@ -60,7 +60,43 @@ function equipCosmetic(userId, itemId) {
   return { success: true, message: `Equipped **${item.name}**.` };
 }
 
-module.exports = { getInventoryState, equipCosmetic, inv, cosmetics, boosts };
+/**
+ * Atomically purchase an item: deduct price + grant item in ONE read-modify-write.
+ * Idempotent-safe: re-checks balance at call time (use again on confirm-click).
+ * @returns {{ success: boolean, message: string, newBalance: number }}
+ */
+function purchase(userId, itemId) {
+  if (economyManager.isSuperAdmin(userId)) return { success: true, message: 'Added (superadmin).', newBalance: Infinity };
+
+  const item = getItem(itemId);
+  if (!item) return { success: false, message: 'Item not found.', newBalance: 0 };
+
+  const data = economyManager.readEconomy();
+  const u = data[userId];
+  if (!u) return { success: false, message: 'User not found.', newBalance: 0 };
+
+  // Re-validate balance NOW (balance may have changed since a confirm screen was shown).
+  if ((u.balance || 0) < item.price) {
+    return { success: false, message: 'Insufficient balance.', newBalance: u.balance || 0 };
+  }
+
+  // ---- single atomic mutation block ----
+  u.balance -= item.price;
+  u.totalLost = (u.totalLost || 0) + item.price;
+
+  if (item.type === 'permanent') {
+    const c = cosmetics(u);
+    if (!c.owned.includes(itemId)) c.owned.push(itemId);
+  } else {
+    inv(u)[itemId] = (inv(u)[itemId] || 0) + 1;
+  }
+  economyManager.writeEconomy(data);
+  // ---- end atomic block ----
+
+  return { success: true, message: `Purchased **${item.name}**.`, newBalance: u.balance };
+}
+
+module.exports = { getInventoryState, equipCosmetic, purchase, inv, cosmetics, boosts };
 
 // ---- Self-check (run: node utils/shopManager.js) ----
 // Monkeypatches economyManager.readEconomy/writeEconomy to an in-memory store
@@ -72,11 +108,12 @@ if (require.main === module) {
   // In-memory store + write counter.
   let store = {};
   let writes = 0;
+  let lastWrite = null; // captured payload for atomicity proof
   const origRead = economyManager.readEconomy;
   const origWrite = economyManager.writeEconomy;
   const origIsAdmin = economyManager.isSuperAdmin;
   economyManager.readEconomy = () => store;
-  economyManager.writeEconomy = (data) => { store = data; writes++; };
+  economyManager.writeEconomy = (data) => { store = data; lastWrite = data; writes++; };
   // SUPERADMIN_ID is unset in the self-check, so isSuperAdmin always returns false.
 
   try {
@@ -123,6 +160,63 @@ if (require.main === module) {
     const r5 = equipCosmetic('999', 'badge_crown');
     ok(r5.success === false, 'equip on non-existent user fails');
     ok(writes === 0, `equip on non-existent user does not write (got ${writes})`);
+
+    // 6. purchase: consumable. balance 1M -> lucky_token (250k) -> success, 750k, inv+1, totalLost+250k, ONE write.
+    store = { '300': { username: 'buyer1', balance: 1000000, totalLost: 0 } };
+    writes = 0; lastWrite = null;
+    const r6 = purchase('300', 'lucky_token');
+    ok(r6.success === true, 'purchase consumable succeeds');
+    ok(r6.newBalance === 750000, `purchase consumable newBalance 750000 (got ${r6.newBalance})`);
+    ok(store['300'].inventory && store['300'].inventory.lucky_token === 1, 'lucky_token granted (qty 1)');
+    ok(store['300'].totalLost === 250000, `totalLost increased by 250k (got ${store['300'].totalLost})`);
+    ok(writes === 1, `purchase consumable writes exactly once (got ${writes})`);
+
+    // Atomicity proof: the single payload handed to writeEconomy carried BOTH the deduction AND the grant.
+    ok(lastWrite && lastWrite['300'].balance === 750000 && lastWrite['300'].inventory.lucky_token === 1,
+       'atomic write payload contains reduced balance AND granted item (no gap)');
+
+    // 7. purchase: permanent. badge_crown (500k) -> success, 500k, owned includes it.
+    //    Re-buy: charges again, does NOT duplicate the owned entry.
+    store = { '301': { username: 'buyer2', balance: 1000000, totalLost: 0 } };
+    writes = 0;
+    const r7a = purchase('301', 'badge_crown');
+    ok(r7a.success === true, 'purchase permanent succeeds');
+    ok(r7a.newBalance === 500000, `purchase permanent newBalance 500000 (got ${r7a.newBalance})`);
+    ok(store['301'].cosmetics && store['301'].cosmetics.owned.includes('badge_crown'), 'badge_crown in owned');
+    writes = 0;
+    const r7b = purchase('301', 'badge_crown');
+    ok(r7b.success === true, 're-buy permanent succeeds (charges again)');
+    ok(store['301'].balance === 0, `re-buy deducts price again (balance ${store['301'].balance})`);
+    ok(store['301'].cosmetics.owned.filter((id) => id === 'badge_crown').length === 1, 'owned lists badge_crown exactly once (no dup)');
+
+    // 8. purchase: insufficient balance. balance 100 -> lucky_token -> {success:false}, no mutation, no write.
+    store = { '302': { username: 'poor', balance: 100, totalLost: 0 } };
+    writes = 0; lastWrite = null;
+    const r8 = purchase('302', 'lucky_token');
+    ok(r8.success === false, 'insufficient balance fails {success:false}');
+    ok(store['302'].balance === 100, 'balance unchanged after insufficient purchase');
+    ok(!store['302'].inventory || store['302'].inventory.lucky_token === undefined, 'inventory unchanged after insufficient purchase');
+    ok(writes === 0, `insufficient balance writes zero (got ${writes})`);
+
+    // 9. purchase: re-validation at call time. Buy (success); drop balance to 0; buy again -> {success:false}.
+    store = { '303': { username: 'race', balance: 1000000, totalLost: 0 } };
+    writes = 0;
+    const r9a = purchase('303', 'lucky_token'); // success -> 750k
+    ok(r9a.success === true, 'first purchase succeeds before balance drops');
+    store['303'].balance = 0; // simulate balance dropping between confirm screen and click
+    const r9b = purchase('303', 'shield_50'); // re-check catches the new low balance
+    ok(r9b.success === false, 're-validation rejects purchase after balance dropped to 0');
+
+    // 10. purchase: unknown item / missing user -> {success:false}, zero writes.
+    store = { '304': { username: 'x', balance: 1000000, totalLost: 0 } };
+    writes = 0;
+    const r10a = purchase('304', 'totally_fake_id');
+    ok(r10a.success === false, 'unknown item fails {success:false}');
+    ok(writes === 0, `unknown item writes zero (got ${writes})`);
+    writes = 0;
+    const r10b = purchase('404', 'lucky_token');
+    ok(r10b.success === false, 'missing user fails {success:false}');
+    ok(writes === 0, `missing user writes zero (got ${writes})`);
   } finally {
     // Restore originals so we never leak the stub into other requires.
     economyManager.readEconomy = origRead;
