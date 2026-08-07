@@ -104,6 +104,22 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Handle select-menu interactions
+  if (interaction.isStringSelectMenu()) {
+    try {
+      await gameCommand.handleSelectMenu(interaction);
+    } catch (error) {
+      console.error('Error handling select menu:', error);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: 'An error occurred. Please try again.',
+          ephemeral: true,
+        });
+      }
+    }
+    return;
+  }
+
   // Handle slash commands only
   if (!interaction.isChatInputCommand()) return;
 

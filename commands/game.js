@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, StringSelectMenuBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const {
@@ -1267,28 +1267,63 @@ async function showWallet(context, userId, username, isPrefix = false) {
 // SHOP & INVENTORY
 // ============================================================
 
-async function handleShop(context) {
-  const items = listBuyable();
-  const byKind = (k) => items.filter((i) => i.category === 'cosmetic' && i.effect.kind === k);
+// Page → category filter. Index = page number.
+const SHOP_PAGES = [
+  { name: 'Consumables', filter: (i) => i.category === 'consumable' },
+  { name: 'Titles', filter: (i) => i.category === 'cosmetic' && i.effect.kind === 'title' },
+  { name: 'Badges', filter: (i) => i.category === 'cosmetic' && i.effect.kind === 'badge' },
+  { name: 'Colors', filter: (i) => i.category === 'cosmetic' && i.effect.kind === 'color' },
+];
 
-  const fmt = (i) => `${i.emoji} **${i.name}** — 💎 ${i.price.toLocaleString()} Kryztal\n${i.description}`;
-  const consumableLines = items.filter((i) => i.category === 'consumable').map(fmt).join('\n\n');
-  const titleLines = byKind('title').map(fmt).join('\n\n');
-  const badgeLines = byKind('badge').map(fmt).join('\n\n');
-  const colorLines = byKind('color').map(fmt).join('\n\n');
+function buildShopPage(pageNum) {
+  pageNum = Math.max(0, Math.min(SHOP_PAGES.length - 1, pageNum));
+  const page = SHOP_PAGES[pageNum];
+  const items = listBuyable().filter(page.filter);
+
+  const lines = items
+    .map((i) => `${i.emoji} **${i.name}** \`${i.id}\` — 💎 **${i.price.toLocaleString()}** Kryztal\n${i.description}`)
+    .join('\n\n');
 
   const embed = new EmbedBuilder()
     .setColor(0xfee75c)
-    .setTitle('🛒 Kyriz Shop')
-    .addFields(
-      { name: '🧪 Consumables', value: consumableLines.slice(0, 1024) || '—' },
-      { name: '🏷️ Titles', value: titleLines.slice(0, 1024) || '—' },
-      { name: '👑 Badges', value: badgeLines.slice(0, 1024) || '—' },
-      { name: '🎨 Colors', value: colorLines.slice(0, 1024) || '—' }
-    )
-    .setFooter({ text: 'Buy with /kyriz buy  •  Use consumables with /kyriz use' })
+    .setTitle(`🛒 Kyriz Shop — ${page.name} (Page ${pageNum + 1}/${SHOP_PAGES.length})`)
+    .setDescription(lines || '—')
+    .setFooter({ text: 'Select an item below to buy  •  Or use /kyriz buy' })
     .setTimestamp();
-  return context.reply({ embeds: [embed] });
+
+  const selectRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('shop:select')
+      .setPlaceholder('Select an item to buy...')
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(
+        ...items.map((i) => ({
+          label: `${i.emoji} ${i.name}`.slice(0, 100),
+          description: `💎 ${i.price.toLocaleString()} Kryztal`.slice(0, 100),
+          value: i.id,
+        }))
+      )
+  );
+
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`shop:page:${pageNum - 1}`)
+      .setLabel('◀️ Previous')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(pageNum === 0),
+    new ButtonBuilder()
+      .setCustomId(`shop:page:${pageNum + 1}`)
+      .setLabel('Next ▶️')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(pageNum === SHOP_PAGES.length - 1)
+  );
+
+  return { embeds: [embed], components: [selectRow, navRow] };
+}
+
+async function handleShop(context) {
+  return context.reply(buildShopPage(0));
 }
 
 async function handleInventory(context, userId, isPrefix = false) {
@@ -1338,17 +1373,14 @@ async function handleInventory(context, userId, isPrefix = false) {
 // BUY (slash = confirm buttons; prefix = instant)
 // ============================================================
 
-async function handleBuySlash(interaction, userId) {
-  const itemId = interaction.options.getString('item', true);
+// Shared buy-confirm builder: used by both /kyriz buy (slash) and the shop select menu.
+// The [Buy]/[Cancel] buttons it produces are handled by the existing shop:buy/shop:cancel branches
+// in handleButton (which call purchase() → re-validates balance, buyer-only check).
+function buildBuyConfirmComponents(userId, itemId) {
   const item = getItem(itemId);
-  if (!item) return interaction.reply({ content: 'Item not found.', ephemeral: true });
-
   const balance = getBalance(userId);
   const balStr = balance === Infinity ? '∞' : balance.toLocaleString();
   const afterStr = balance === Infinity ? '∞' : (balance - item.price).toLocaleString();
-  if (balance !== Infinity && balance < item.price) {
-    return interaction.reply({ content: `Insufficient balance. You need 💎 ${item.price.toLocaleString()} Kryztal.`, ephemeral: true });
-  }
 
   const embed = new EmbedBuilder()
     .setColor(0xfee75c)
@@ -1362,7 +1394,20 @@ async function handleBuySlash(interaction, userId) {
     new ButtonBuilder().setCustomId(`shop:buy:${userId}:${itemId}`).setLabel('Buy').setStyle(ButtonStyle.Success).setEmoji('✅'),
     new ButtonBuilder().setCustomId(`shop:cancel:${userId}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
   );
-  return interaction.reply({ embeds: [embed], components: [row] });
+  return { embeds: [embed], components: [row] };
+}
+
+async function handleBuySlash(interaction, userId) {
+  const itemId = interaction.options.getString('item', true);
+  const item = getItem(itemId);
+  if (!item) return interaction.reply({ content: 'Item not found.', ephemeral: true });
+
+  const balance = getBalance(userId);
+  if (balance !== Infinity && balance < item.price) {
+    return interaction.reply({ content: `Insufficient balance. You need 💎 ${item.price.toLocaleString()} Kryztal.`, ephemeral: true });
+  }
+
+  return interaction.reply(buildBuyConfirmComponents(userId, itemId));
 }
 
 async function handleBuyPrefix(message, userId, args) {
@@ -1371,7 +1416,7 @@ async function handleBuyPrefix(message, userId, args) {
   if (!item) return message.reply(`Unknown item. Browse with \`ky shop\`, then \`ky buy <id>\` (e.g. \`ky buy lucky_token\`).`);
   const res = shopManager.purchase(userId, itemId); // atomic + re-validates balance
   if (!res.success) return message.reply(res.message);
-  return message.reply(`✅ ${res.message} Saldo: 💎 ${res.newBalance.toLocaleString()} Kryztal`);
+  return message.reply(`✅ ${res.message} Balance: 💎 ${res.newBalance.toLocaleString()} Kryztal`);
 }
 
 // USE: consumable -> shopManager.useItem; permanent cosmetic -> shopManager.equipCosmetic.
@@ -3354,8 +3399,26 @@ async function showLeaderboard(context, scope = 'server') {
 // Button interaction handler
 // ============================================================
 
+// Shop select-menu → routes to the (ephemeral) buy-confirm. The confirm's buttons reuse the
+// existing shop:buy/shop:cancel handler, so no purchase logic is duplicated.
+async function handleSelectMenu(interaction) {
+  if (interaction.customId !== 'shop:select') return;
+  const itemId = interaction.values && interaction.values[0];
+  const item = getItem(itemId);
+  if (!item) return interaction.reply({ content: 'Item not found.', ephemeral: true });
+  const userId = interaction.user.id;
+  return interaction.reply({ ...buildBuyConfirmComponents(userId, itemId), ephemeral: true });
+}
+
 async function handleButton(interaction) {
   const customId = interaction.customId;
+
+  // --- Shop pagination (read-only, anyone may navigate) ---
+  if (customId.startsWith('shop:page:')) {
+    let page = Number(customId.split(':')[2]);
+    if (!Number.isInteger(page)) page = 0;
+    return interaction.update(buildShopPage(page));
+  }
 
   // --- Shop buy confirm/cancel (colon-delimited; item ids contain underscores) ---
   if (customId.startsWith('shop:buy:') || customId.startsWith('shop:cancel:')) {
@@ -3374,7 +3437,7 @@ async function handleButton(interaction) {
     if (!res.success) {
       return interaction.update({ content: `❌ ${res.message}`, embeds: [], components: [] });
     }
-    return interaction.update({ content: `✅ ${res.message} Saldo: 💎 ${res.newBalance.toLocaleString()} Kryztal`, embeds: [], components: [] });
+    return interaction.update({ content: `✅ ${res.message} Balance: 💎 ${res.newBalance.toLocaleString()} Kryztal`, embeds: [], components: [] });
   }
 
   // --- T&C Accept ---
@@ -4522,6 +4585,8 @@ module.exports = {
   execute,
   handlePrefixCommand,
   handleButton,
+  handleSelectMenu,
+  handleShop,
   isValidPrefixCommand,
   generateCrashPoint, // diekspor untuk test (test/crash.test.js)
   crashTierVisual,    // diekspor untuk test
