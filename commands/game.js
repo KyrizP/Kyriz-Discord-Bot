@@ -3407,6 +3407,11 @@ async function handleSelectMenu(interaction) {
   const item = getItem(itemId);
   if (!item) return interaction.reply({ content: 'Item not found.', ephemeral: true });
   const userId = interaction.user.id;
+  // Pre-check balance (mirrors /buy) so we don't show a confirm with a negative projected balance.
+  const balance = getBalance(userId);
+  if (balance !== Infinity && balance < item.price) {
+    return interaction.reply({ content: `Insufficient balance. You need 💎 ${item.price.toLocaleString()} Kryztal.`, ephemeral: true });
+  }
   return interaction.reply({ ...buildBuyConfirmComponents(userId, itemId), ephemeral: true });
 }
 
