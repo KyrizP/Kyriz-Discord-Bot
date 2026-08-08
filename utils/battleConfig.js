@@ -33,7 +33,7 @@ const CLASSES = {
 
 // ENEMY GROWTH — exponential per floor. stat = base * scale^(floor-1)
 const ENEMY_BASE = {
-  scale: 1.12,        // +12%/floor (sim-proven; tune here if balance gate fails)
+  scale: 1.07,        // +7%/floor (gentler — high floors reachable via grind; sim-tuned)
   hp: 40, atk: 8, matk: 6, def: 5, mdef: 4, spd: 4,
 };
 
@@ -64,10 +64,10 @@ const DROPS = {
 const GEAR = {
   g1: { id: 'g1', name: 'Rusty Sword',   slot: 'weapon',    rarity: 'common',   price: 100, stats: { atk: 3 } },
   g2: { id: 'g2', name: 'Iron Blade',    slot: 'weapon',    rarity: 'uncommon', price: 250, stats: { atk: 7 } },
-  g3: { id: 'g3', name: 'Leather Armor', slot: 'armor',     rarity: 'common',   price: 120, stats: { def: 3, hp: 15 } },
-  g4: { id: 'g4', name: 'Iron Armor',    slot: 'armor',     rarity: 'uncommon', price: 300, stats: { def: 6, hp: 30 } },
+  g3: { id: 'g3', name: 'Leather Armor', slot: 'armor',     rarity: 'common',   price: 120, stats: { def: 5 } },
+  g4: { id: 'g4', name: 'Iron Armor',    slot: 'armor',     rarity: 'uncommon', price: 300, stats: { def: 10 } },
   g5: { id: 'g5', name: 'Swift Boots',   slot: 'boots',     rarity: 'uncommon', price: 200, stats: { spd: 3 } },
-  g6: { id: 'g6', name: 'Leather Cap',   slot: 'head',      rarity: 'common',   price: 90,  stats: { def: 2, hp: 10 } },
+  g6: { id: 'g6', name: 'Leather Cap',   slot: 'head',      rarity: 'common',   price: 90,  stats: { def: 4 } },
   g7: { id: 'g7', name: 'Power Ring',    slot: 'accessory', rarity: 'rare',     price: 500, stats: { atk: 5, spd: 1 } },
   g8: { id: 'g8', name: 'Oak Staff',     slot: 'weapon',    rarity: 'common',   price: 100, stats: { matk: 4 } },
   g9: { id: 'g9', name: 'Arcane Amulet', slot: 'accessory', rarity: 'rare',     price: 550, stats: { matk: 6, mdef: 3 } },

@@ -52,8 +52,8 @@ let dC = { u1: { balance: 1000 } };
 M.applyCreateCharacter(dC, 'u1', 'warrior');
 let di = M.applyDie(dC, 'u1', { floor: 9, bag: { d1: 5 }, expAccum: 30 });
 ok(di.lost === 5 && Object.keys(dC.u1.battle.bag).length === 0, 'die discards bag');
-ok(dC.u1.battle.bestDepth === 9, 'bestDepth = floor on death');
-ok(dC.u1.battle.charExp === 30, 'die KEEPS char exp (sticky progression)');
+ok(dC.u1.battle.bestDepth === 0, 'die does NOT save checkpoint (extract only)');
+ok(dC.u1.battle.charExp === 0, 'die LOSES char exp (consistent with drops)');
 
 // ---- sell drops: id / qty / all ----
 let dD = { u1: { balance: 0 } };

@@ -37,6 +37,16 @@ function ensureBattleData(user) {
   return user.battle;
 }
 
+// Superadmin bypasses the T&C registration gate, so they have no economy entry by default.
+// Auto-create a minimal entry so they can play battle like a normal player.
+function ensureUser(data, userId) {
+  if (!data[userId] && isSuperAdmin(userId)) {
+    data[userId] = { username: 'Superadmin', balance: 0, level: 1, xp: 0, xpNeeded: 400,
+      totalWins: 0, totalLosses: 0, totalEarned: 0, totalLost: 0, lastDaily: null, registeredAt: new Date().toISOString() };
+  }
+  return data[userId] || null;
+}
+
 // ---------- pure apply-functions (mutate the passed data object; no IO) ----------
 function applyCreateCharacter(data, userId, classId) {
   const b = ensureBattleData(data[userId]);
@@ -54,7 +64,7 @@ function applyGainCharExp(data, userId, exp) {
   while (b.charExp >= b.charExpNeeded) {
     b.charExp -= b.charExpNeeded;
     b.charLevel += 1;
-    b.charExpNeeded = Math.floor(CHAR_EXP_BASE * Math.pow(1.15, b.charLevel - 1));
+    b.charExpNeeded = CHAR_EXP_BASE + 50 * (b.charLevel - 1); // LINEAR — leveling feasible at any level (no stall -> farm window keeps shifting up)
     leveledUp = true;
   }
   return { leveledUp, newLevel: b.charLevel };
@@ -87,15 +97,13 @@ function applyExtract(data, userId, runState) {
   return { banked, exp: runState.expAccum || 0, leveledUp: expRes.leveledUp, newLevel: expRes.newLevel };
 }
 
-// Die: drops lost, BUT char exp is kept (sticky progression); update bestDepth.
+// Die: lose EVERYTHING this run (drops + Char EXP). NO bestDepth update —
+// checkpoint (sweep target) is only saved on a successful Extract.
 function applyDie(data, userId, runState) {
-  const b = ensureBattleData(data[userId]);
+  ensureBattleData(data[userId]);
   let lost = 0;
   for (const id of Object.keys(runState.bag || {})) lost += runState.bag[id];
-  if ((runState.floor || 0) > b.bestDepth) b.bestDepth = runState.floor;
-  let expRes = { leveledUp: false, newLevel: b.charLevel };
-  if (runState.expAccum) expRes = applyGainCharExp(data, userId, runState.expAccum);
-  return { lost, exp: runState.expAccum || 0, leveledUp: expRes.leveledUp, newLevel: expRes.newLevel };
+  return { lost };
 }
 
 function applySell(data, userId, itemId, qty) {
@@ -174,6 +182,7 @@ const activeRuns = new Map(); // userId -> { floor, hp, bag, expAccum, classId, 
 // ---------- IO wrappers (read -> apply -> write) ----------
 function createCharacter(userId, classId) {
   const data = economy.readEconomy();
+  ensureUser(data, userId);
   const r = applyCreateCharacter(data, userId, classId);
   if (r.ok) economy.writeEconomy(data);
   return r;
@@ -181,27 +190,24 @@ function createCharacter(userId, classId) {
 
 function startDelve(userId) {
   const data = economy.readEconomy();
+  ensureUser(data, userId);
   const start = applyDelveStart(data, userId);
   if (!start.ok) return { ok: false, reason: start.reason, needClass: start.reason === 'no_character' };
   const b = ensureBattleData(data[userId]);
   const stats = computeStats(b.charLevel, b.charClass, b.equipment);
-  const run = { userId, floor: 1, hp: stats.hp, bag: {}, expAccum: 0, classId: b.charClass, stats };
-  // sweep: auto-resolve safe floors instantly (economy-safe — gated by entry fee)
+  const run = { userId, floor: 1, hp: stats.hp, bag: {}, expAccum: 0, cleared: 0, classId: b.charClass, stats, equipment: { ...b.equipment } };
+  // sweep: fast-forward through proven-easy floors (below bestDepth). NO drops/exp —
+  // loot & exp come ONLY from pushing (risk). Prevents sweep+extract farming.
   const sweepTo = Math.max(1, b.bestDepth - SWEEP_BUFFER);
-  const swept = {};
   for (; run.floor < sweepTo; run.floor++) {
     const enemy = generateEnemy(run.floor);
     const r = resolveFight({ ...run.stats, hp: run.hp }, CLASSES[run.classId].rotation, enemy);
     if (r.winner !== 'player') break; // would die during sweep — play live from here
     run.hp = r.playerHpLeft;
-    const drop = rollDrop(run.floor);
-    run.bag[drop.id] = (run.bag[drop.id] || 0) + 1;
-    swept[drop.id] = (swept[drop.id] || 0) + 1;
-    run.expAccum += charExpFor(run.floor);
   }
   economy.writeEconomy(data); // persist entry-fee deduction
   activeRuns.set(userId, run);
-  return { ok: true, paid: start.paid, run, stats, startFloor: run.floor, swept };
+  return { ok: true, paid: start.paid, run, stats, startFloor: run.floor };
 }
 
 function hasActiveRun(userId) { return activeRuns.has(userId); }
@@ -218,16 +224,17 @@ function nextFloor(userId) {
     const drop = rollDrop(run.floor);
     run.bag[drop.id] = (run.bag[drop.id] || 0) + 1;
     run.expAccum += charExpFor(run.floor);
+    run.cleared = (run.cleared || 0) + 1;
     const cleared = run.floor;
     run.floor += 1;
-    return { ok: true, won: true, cleared, hp: run.hp, drop, nextFloor: run.floor };
+    return { ok: true, won: true, cleared, hp: run.hp, drop, nextFloor: run.floor, enemyMaxHp: enemy.hp, log: fight.log };
   }
   const diedAt = run.floor;
   const data = economy.readEconomy();
   const res = applyDie(data, userId, run);
   economy.writeEconomy(data);
   activeRuns.delete(userId);
-  return { ok: true, won: false, diedAt, lost: res.lost, exp: res.exp, leveledUp: res.leveledUp, newLevel: res.newLevel };
+  return { ok: true, won: false, diedAt, lost: res.lost, enemyMaxHp: enemy.hp, log: fight.log };
 }
 
 function extractRun(userId) {
@@ -242,40 +249,64 @@ function extractRun(userId) {
   return { ok: true, banked: res.banked, exp: res.exp, depth, leveledUp: res.leveledUp, newLevel: res.newLevel };
 }
 
+// Fast Sweep: auto-resolve up to N floors (bulk push). Same risk as Push (can die mid-sweep).
+function fastSweep(userId, maxFloors) {
+  if (!activeRuns.has(userId)) return { ok: false, reason: 'No active battle. Use `ky battle`.' };
+  const cap = Math.max(1, Math.min(maxFloors || 5, 10));
+  let cleared = 0; const drops = {}; let result = null;
+  for (let i = 0; i < cap; i++) {
+    const r = nextFloor(userId);
+    if (!r.ok) break;
+    if (!r.won) { result = { ok: true, cleared, drops, died: true, diedAt: r.diedAt, lost: r.lost }; break; }
+    cleared++;
+    if (r.drop) drops[r.drop.id] = (drops[r.drop.id] || 0) + 1;
+  }
+  if (!result) {
+    const run = activeRuns.get(userId);
+    result = { ok: true, cleared, drops, died: false, hp: run ? run.hp : 0, floor: run ? run.floor : 1 };
+  }
+  return result;
+}
+
 function sell(userId, itemId, qty) {
   const data = economy.readEconomy();
+  ensureUser(data, userId);
   const r = applySell(data, userId, itemId, qty);
   economy.writeEconomy(data);
   return r;
 }
 function sellGear(userId, itemId) {
   const data = economy.readEconomy();
+  ensureUser(data, userId);
   const r = applySellGear(data, userId, itemId);
   economy.writeEconomy(data);
   return r;
 }
 function equip(userId, itemId) {
   const data = economy.readEconomy();
+  ensureUser(data, userId);
   const r = applyEquip(data, userId, itemId);
   economy.writeEconomy(data);
   return r;
 }
 function unequip(userId, slot) {
   const data = economy.readEconomy();
+  ensureUser(data, userId);
   const r = applyUnequip(data, userId, slot);
   economy.writeEconomy(data);
   return r;
 }
 function buyGear(userId, itemId) {
   const data = economy.readEconomy();
+  ensureUser(data, userId);
   const r = applyBuyGear(data, userId, itemId);
   if (r.ok) economy.writeEconomy(data);
   return r;
 }
 
 module.exports = {
-  ensureBattleData, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
+  ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
   applySell, applySellGear, applyEquip, applyUnequip, applyBuyGear,
-  createCharacter, startDelve, nextFloor, extractRun, hasActiveRun, getRun, sell, sellGear, equip, unequip, buyGear,
+  createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun, sell, sellGear, equip, unequip, buyGear,
   ENTRY_FEE, GEAR_SELLBACK,
 };

@@ -70,7 +70,9 @@ function resolveFight(playerStats, playerRotation, enemy) {
   let ehp = enemy.hp;
   const playerFirst = playerStats.spd >= enemy.spd;
   let rounds = 0, pi = 0, ei = 0;
+  const log = []; // round-by-round HP states for battle animation
   while (php > 0 && ehp > 0 && rounds < MAX_ROUNDS) {
+    log.push({ php: Math.max(0, php), ehp: Math.max(0, ehp) }); // state at start of round
     rounds++;
     if (playerFirst) {
       ehp -= _dmg(playerStats, enemy, rot[pi % rot.length]); pi++;
@@ -82,6 +84,7 @@ function resolveFight(playerStats, playerRotation, enemy) {
       ehp -= _dmg(playerStats, enemy, rot[pi % rot.length]); pi++;
     }
   }
+  log.push({ php: Math.max(0, php), ehp: Math.max(0, ehp) }); // final state (incl. death)
   const playerDead = php <= 0;
   const enemyDead = ehp <= 0;
   let winner;
@@ -89,7 +92,7 @@ function resolveFight(playerStats, playerRotation, enemy) {
   else if (enemyDead) winner = 'player';
   else if (playerDead) winner = 'enemy';
   else winner = 'enemy';                                                     // stalemate => enemy
-  return { winner, rounds, playerHpLeft: Math.max(0, php), enemyHpLeft: Math.max(0, ehp) };
+  return { winner, rounds, playerHpLeft: Math.max(0, php), enemyHpLeft: Math.max(0, ehp), log };
 }
 
 // ---- drops: pick a rarity tier by weight(floor), then a random item of that tier ----

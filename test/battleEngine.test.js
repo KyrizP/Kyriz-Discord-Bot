@@ -9,7 +9,7 @@ const ok = (c, m) => { c ? pass++ : (fail++, console.log('  ❌ ' + m)); };
 let s = E.computeStats(1, 'warrior', {});
 ok(s.hp === 100 && s.atk === 12 && s.spd === 6, 'warrior lvl1 base exact');
 let s10 = E.computeStats(10, 'warrior', {});
-ok(s10.hp === 280, 'warrior lvl10 hp = 280 (100 + 20*9)');
+ok(s10.hp === 280, 'warrior lvl10 hp = 280 (100 + growth 20*9)');
 ok(s10.atk === 35, 'warrior lvl10 atk = 35 (rounded from 34.5)');
 ok(s10.hp > E.computeStats(10, 'mage', {}).hp, 'warrior tankier than mage same lvl');
 let withGear = E.computeStats(1, 'warrior', { weapon: 'g1' });
