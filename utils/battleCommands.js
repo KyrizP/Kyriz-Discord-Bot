@@ -337,10 +337,20 @@ function handleBuyGear(context, userId, code) {
   return context.reply({ embeds: [resultEmbed(uname(context, userId), `🛒 Bought **${res.name}** \`${code}\` for 🧪 **${res.price.toLocaleString()}**.\nEquip with \`ky equip ${code}\` · 🧪 left: **${res.kryptonite.toLocaleString()}**`)] });
 }
 const RARITY_RANK = { divine: 6, legendary: 5, epic: 4, rare: 3, uncommon: 2, common: 1 };
-function handleShopEquipment(context, userId) {
-  const username = uname(context, userId);
-  const gear = Object.values(GEAR).sort((a, b) => (RARITY_RANK[b.rarity] || 0) - (RARITY_RANK[a.rarity] || 0));
-  const lines = gear.map((g) => {
+const SHOP_PAGE_SIZE = 8;
+function shopGearRow(userId, page, total) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`battle_shopgear_prev_${page}_${userId}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`battle_shopgear_next_${page}_${userId}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
+  );
+}
+function renderShopGear(userId, username, page) {
+  page = page || 1;
+  const gear = Object.values(GEAR).sort((a, b) => (RARITY_RANK[b.rarity] || 0) - (RARITY_RANK[a.rarity] || 0) || (b.price - a.price));
+  const total = Math.max(1, Math.ceil(gear.length / SHOP_PAGE_SIZE));
+  page = Math.min(Math.max(1, page), total);
+  const slice = gear.slice((page - 1) * SHOP_PAGE_SIZE, page * SHOP_PAGE_SIZE);
+  const lines = slice.map((g) => {
     const st = Object.entries(g.stats).map(([k, v]) => `+${v} ${k.toUpperCase()}`).join(', ');
     return `\`${g.id}\` ${g.name} _(${g.rarity}, ${g.slot})_ — 🧪 ${g.price.toLocaleString()} | ${st}`;
   });
@@ -348,9 +358,13 @@ function handleShopEquipment(context, userId) {
     .setAuthor({ name: `${username}` })
     .setColor(COLOR)
     .setTitle('🛒 Shop — Gear')
-    .setDescription(`Buy with 🧪 Kryptonite. Earn Kryptonite by selling dungeon drops (\`ky sell\`). Highest rarity on top.\n\n${lines.join('\n')}`)
-    .setFooter({ text: 'ky buygear <code> · ky sellgear <code>' });
-  return context.reply({ embeds: [embed] });
+    .setDescription(`Highest rarity on top.\n\n${lines.join('\n')}`)
+    .setFooter({ text: `Page ${page}/${total} • ky buygear <code> · ky sellgear <code>` });
+  return { embed, components: total > 1 ? [shopGearRow(userId, page, total)] : [], total };
+}
+function handleShopEquipment(context, userId) {
+  const { embed, components } = renderShopGear(userId, uname(context, userId), 1);
+  return context.reply({ embeds: [embed], components });
 }
 
 // ---------- slash subcommand registration ----------
@@ -435,11 +449,46 @@ async function handleButton(interaction) {
     return interaction.update({ embeds: [embed], components });
   }
 
+  const shopGearMatch = customId.match(/^battle_shopgear_(next|prev)_(\d+)_/);
+  if (shopGearMatch) {
+    let page = parseInt(shopGearMatch[2], 10);
+    page = shopGearMatch[1] === 'next' ? page + 1 : page - 1;
+    const { embed, components } = renderShopGear(userId, username, page);
+    return interaction.update({ embeds: [embed], components });
+  }
+
   return interaction.deferUpdate();
+}
+
+async function handleBattleLb(context, subArgs) {
+  const isAll = subArgs && subArgs[0] && subArgs[0].toLowerCase() === 'all';
+  let memberIds = null;
+  let scopeLabel = 'Global';
+  if (!isAll && context.guild) {
+    try {
+      const members = await context.guild.members.fetch({ limit: 1000 });
+      memberIds = new Set(members.keys());
+      scopeLabel = 'Server';
+    } catch { /* fallback to global */ }
+  }
+  const board = battle.getBattleLeaderboard(10, memberIds);
+  if (!board.length) return context.reply({ content: 'No characters yet. Be the first — `ky battle`!' });
+  const lines = board.map((p, i) => {
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `**${i + 1}.**`;
+    const name = p.charName ? `${p.username} * ${p.charName}` : p.username;
+    return `${medal} **${name}** — ⚔️ **${p.score}** (Lv.${p.charLevel} ${p.charClass})`;
+  });
+  const embed = new EmbedBuilder()
+    .setColor(COLOR)
+    .setTitle(`🏆 Battle Leaderboard — ${scopeLabel}`)
+    .setDescription(lines.join('\n'))
+    .setFooter({ text: `⚔️ = total combat stats · admin included · ky lb battle${isAll ? ' all' : ' (use "all" for global)'}` })
+    .setTimestamp();
+  return context.reply({ embeds: [embed] });
 }
 
 module.exports = {
   attachSubcommands, handleButton,
-  handleBattle, handleBattleHelp, handleEnd, handleName, handleCharacter, handleBag, handleGear, handleSell, handleSellGear, handleBuyGear, handleEquip, handleUnequip, handleShopEquipment,
+  handleBattle, handleBattleHelp, handleBattleLb, handleEnd, handleName, handleCharacter, handleBag, handleGear, handleSell, handleSellGear, handleBuyGear, handleEquip, handleUnequip, handleShopEquipment,
   getKryptonite,
 };

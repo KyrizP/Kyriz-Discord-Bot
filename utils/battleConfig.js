@@ -71,6 +71,19 @@ const GEAR = {
   g7: { id: 'g7', name: 'Power Ring',    slot: 'accessory', rarity: 'rare',     price: 500, stats: { atk: 5, spd: 1 } },
   g8: { id: 'g8', name: 'Oak Staff',     slot: 'weapon',    rarity: 'common',   price: 100, stats: { matk: 4 } },
   g9: { id: 'g9', name: 'Arcane Amulet', slot: 'accessory', rarity: 'rare',     price: 550, stats: { matk: 6, mdef: 3 } },
+  // --- Rare ---
+  g16: { id: 'g16', name: 'Knight Helm',     slot: 'head',      rarity: 'rare',   price: 400, stats: { def: 6 } },
+  g17: { id: 'g17', name: 'Mage Hat',        slot: 'head',      rarity: 'rare',   price: 400, stats: { matk: 5 } },
+  g18: { id: 'g18', name: 'Crystal Wand',    slot: 'weapon',    rarity: 'rare',   price: 400, stats: { matk: 7 } },
+  g19: { id: 'g19', name: 'Steel Longsword', slot: 'weapon',    rarity: 'rare',   price: 350, stats: { atk: 6 } },
+  g20: { id: 'g20', name: 'Battle Boots',    slot: 'boots',     rarity: 'rare',   price: 350, stats: { def: 3, spd: 2 } },
+  // --- Epic (v1 highest; Legendary/Divine = v2) ---
+  g10: { id: 'g10', name: 'Dragon Slayer',    slot: 'weapon',    rarity: 'epic',   price: 1100, stats: { atk: 16 } },
+  g11: { id: 'g11', name: 'Archmage Staff',   slot: 'weapon',    rarity: 'epic',   price: 1100, stats: { matk: 16 } },
+  g12: { id: 'g12', name: 'Mithril Armor',    slot: 'armor',     rarity: 'epic',   price: 900, stats: { def: 18 } },
+  g13: { id: 'g13', name: 'Boots of Haste',   slot: 'boots',     rarity: 'epic',   price: 850, stats: { spd: 8 } },
+  g14: { id: 'g14', name: 'Warlord Gauntlets',slot: 'accessory', rarity: 'epic',   price: 1000, stats: { atk: 10, spd: 3 } },
+  g15: { id: 'g15', name: 'Arcane Orb',       slot: 'accessory', rarity: 'epic',   price: 1000, stats: { matk: 10, mdef: 5 } },
 };
 
 // v1 merchant uses flat per-item sell prices (the item's `value`). v2 adds daily variance.

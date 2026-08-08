@@ -30,6 +30,7 @@ function ensureBattleData(user) {
       charLevel: 1, charExp: 0, charExpNeeded: CHAR_EXP_BASE,
       charClass: null,
       charName: null,
+      scoreAchievedAt: null,
       equipment: { weapon: null, head: null, armor: null, boots: null, accessory: null },
       bag: {},
       bestDepth: 0,
@@ -66,6 +67,7 @@ function applyGainCharExp(data, userId, exp) {
     b.charExp -= b.charExpNeeded;
     b.charLevel += 1;
     b.charExpNeeded = CHAR_EXP_BASE + 50 * (b.charLevel - 1); // LINEAR — leveling feasible at any level (no stall -> farm window keeps shifting up)
+    b.scoreAchievedAt = new Date().toISOString(); // track when current stats were achieved (lb tiebreaker)
     leveledUp = true;
   }
   return { leveledUp, newLevel: b.charLevel };
@@ -155,6 +157,7 @@ function applyEquip(data, userId, itemId) {
   b.equipment[slot] = itemId;
   delete b.bag[itemId];
   if (prev) b.bag[prev] = (b.bag[prev] || 0) + 1;
+  b.scoreAchievedAt = new Date().toISOString(); // stats changed → lb tiebreaker
   return { ok: true, slot, swapped: prev };
 }
 
@@ -165,6 +168,7 @@ function applyUnequip(data, userId, slot) {
   if (!itemId) return { ok: false, reason: 'Nothing equipped there.' };
   b.equipment[slot] = null;
   b.bag[itemId] = (b.bag[itemId] || 0) + 1;
+  b.scoreAchievedAt = new Date().toISOString(); // stats changed → lb tiebreaker
   return { ok: true, slot, itemId };
 }
 
@@ -330,9 +334,40 @@ function buyGear(userId, itemId) {
   return r;
 }
 
+// Battle leaderboard: rank by Combat Score (total stats from level + gear).
+// Admin & superadmin INCLUDED (unlike the regular balance leaderboard).
+// Tiebreaker: same score → earlier registeredAt ranks higher.
+function getBattleLeaderboard(limit = 10, memberIds = null) {
+  const data = economy.readEconomy();
+  const players = [];
+  for (const [uid, user] of Object.entries(data)) {
+    if (memberIds && !memberIds.has(uid)) continue; // server scope filter
+    if (user.battle && user.battle.charClass) {
+      const stats = computeStats(user.battle.charLevel, user.battle.charClass, user.battle.equipment);
+      const score = stats.hp + stats.atk + stats.matk + stats.def + stats.mdef + stats.spd;
+      players.push({
+        userId: uid,
+        username: user.username || 'Unknown',
+        charName: user.battle.charName || null,
+        score,
+        charLevel: user.battle.charLevel,
+        charClass: user.battle.charClass,
+        bestDepth: user.battle.bestDepth || 0,
+        registeredAt: user.registeredAt || '9999',
+        scoreAchievedAt: user.battle.scoreAchievedAt || user.registeredAt || '9999',
+      });
+    }
+  }
+  players.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;                  // higher score first
+    return (a.scoreAchievedAt || '9999').localeCompare(b.scoreAchievedAt || '9999'); // achieved current score first = higher
+  });
+  return players.slice(0, limit);
+}
+
 module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
   applySell, applySellGear, applyEquip, applyUnequip, applyBuyGear, applySetCharName,
-  createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun, sell, sellGear, equip, unequip, buyGear, setCharName, getCharName,
+  createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun, sell, sellGear, equip, unequip, buyGear, setCharName, getCharName, getBattleLeaderboard,
   ENTRY_FEE, GEAR_SELLBACK,
 };

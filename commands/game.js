@@ -613,6 +613,7 @@ async function handlePrefixCommand(message, command, args) {
       return handleTransferPrefix(message, userId, args);
     case 'lb':
     case 'leaderboard':
+      if (args[0] && args[0].toLowerCase() === 'battle') return battleCmd.handleBattleLb(message, args.slice(1));
       return handleLeaderboardPrefix(message, args);
     case 'cf':
     case 'coinflip':
@@ -4334,7 +4335,7 @@ function createHelpEmbed() {
       '🃏 **Games**\n' +
       '`bj [bet]` · `cf [bet] [h/t]` · `slots [bet]` · `dice [bet] [1-6/e/o]` · `crash [bet]` · `rl [bet] [red/black/0-36]` · `mines [bet]` · `hl [bet]` · `tw [bet]`\n\n' +
       '⚔️ **Battle** _— Kryptonite RPG_\n' +
-      '`battle` · `battle help` · `char [name <nama>]` · `bag` · `gear` · `sell [all|code n]` · `buygear <g-code>` · `equip <g-code>` · `unequip <slot>` · `sellgear <g-code>` · `shop gear`\n\n' +
+      '`battle` · `battle help` · `char [name <nama>]` · `bag` · `gear` · `sell [all|code n]` · `buygear <g-code>` · `equip <g-code>` · `unequip <slot>` · `sellgear <g-code>` · `shop gear` · `lb battle [all]`\n\n' +
       '💰 **Economy**\n' +
       '`wallet` · `daily` · `tf @user <amt>` · `lb [all]`\n\n' +
       '🛍️ **Shop**\n' +
