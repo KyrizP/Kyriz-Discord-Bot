@@ -523,12 +523,7 @@ async function execute(interaction) {
       const t = interaction.options.getUser('user');
       return handleProfile(interaction, t ? t.id : userId, t ? t.username : interaction.user.username, t ? t.displayAvatarURL() : interaction.user.displayAvatarURL());
     }
-    case 'battle': return battleCmd.handleBattle(interaction, userId);
-    case 'character': return battleCmd.handleCharacter(interaction, userId);
-    case 'bag': return battleCmd.handleBag(interaction, userId, 1);
-    case 'sell': return battleCmd.handleSell(interaction, userId, interaction.options.getString('item') || 'all');
-    case 'equip': return battleCmd.handleEquip(interaction, userId, interaction.options.getString('item') || '');
-    case 'buygear': return battleCmd.handleBuyGear(interaction, userId, interaction.options.getString('item'));
+    // Battle mode is prefix-only (ky battle, ky char, ...) — see handlePrefixCommand.
   }
 }
 

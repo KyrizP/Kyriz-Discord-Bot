@@ -240,18 +240,10 @@ function handleShopEquipment(context, userId) {
 }
 
 // ---------- slash subcommand registration ----------
-function attachSubcommands(commandBuilder) {
-  commandBuilder
-    .addSubcommand((sub) => sub.setName('battle').setDescription('Enter the dungeon (costs 15,000 Kryztal)'))
-    .addSubcommand((sub) => sub.setName('character').setDescription('View your character (stats, gear, Kryptonite)'))
-    .addSubcommand((sub) => sub.setName('bag').setDescription('View your battle bag (drops & gear)'))
-    .addSubcommand((sub) => sub.setName('sell').setDescription('Sell drops for Kryptonite')
-      .addStringOption((o) => o.setName('item').setDescription('all | <code> | <code> <qty>').setRequired(false)))
-    .addSubcommand((sub) => sub.setName('equip').setDescription('Equip gear from your bag')
-      .addStringOption((o) => o.setName('item').setDescription('gear code, e.g. g1').setRequired(false)))
-    .addSubcommand((sub) => sub.setName('buygear').setDescription('Buy equipment with Kryptonite')
-      .addStringOption((o) => o.setName('item').setDescription('gear code, e.g. g1').setRequired(true)));
-}
+// Battle mode is PREFIX-ONLY (ky battle, ky char, ky bag, ...).
+// /kyriz already has 23 subcommands; adding 6 more would exceed Discord's
+// 25-option-per-command limit (caused "Invalid Array length" on deploy). So none here.
+function attachSubcommands(_commandBuilder) { /* prefix-only — no slash subcommands registered */ }
 
 // ---------- button handler (delegated from game.js handleButton) ----------
 async function handleButton(interaction) {
