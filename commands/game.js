@@ -27,6 +27,7 @@ const {
 const { createDeck, drawCard, calculateHand, formatHand, isBlackjack } = require('../utils/cardDeck');
 const { listBuyable, getItem } = require('../utils/shopItems');
 const shopManager = require('../utils/shopManager');
+const battleCmd = require('../utils/battleCommands');
 
 // ============================================================
 // Active games tracker (in-memory, per user)
@@ -384,6 +385,9 @@ function attachGameSubcommands(commandBuilder) {
         opt.setName('user').setDescription('Whose profile to view').setRequired(false)
       )
   );
+
+  // Battle mode subcommands (delve / character / bag / sell / equip)
+  battleCmd.attachSubcommands(commandBuilder);
 }
 
 // ============================================================
@@ -455,7 +459,7 @@ async function execute(interaction) {
   }
 
   // T&C check (skip for superadmin)
-  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory', 'buy', 'use', 'profile'];
+  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory', 'buy', 'use', 'profile', 'battle', 'character', 'bag', 'sell', 'equip', 'buygear'];
   if (requiresRegistration.includes(subcommand) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -519,6 +523,12 @@ async function execute(interaction) {
       const t = interaction.options.getUser('user');
       return handleProfile(interaction, t ? t.id : userId, t ? t.username : interaction.user.username, t ? t.displayAvatarURL() : interaction.user.displayAvatarURL());
     }
+    case 'battle': return battleCmd.handleBattle(interaction, userId);
+    case 'character': return battleCmd.handleCharacter(interaction, userId);
+    case 'bag': return battleCmd.handleBag(interaction, userId, 1);
+    case 'sell': return battleCmd.handleSell(interaction, userId, interaction.options.getString('item') || 'all');
+    case 'equip': return battleCmd.handleEquip(interaction, userId, interaction.options.getString('item') || '');
+    case 'buygear': return battleCmd.handleBuyGear(interaction, userId, interaction.options.getString('item'));
   }
 }
 
@@ -577,7 +587,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -637,6 +647,7 @@ async function handlePrefixCommand(message, command, args) {
     case 'players':
       return handlePlayersPrefix(message, userId);
     case 'shop':
+      if (args[0] && args[0].toLowerCase() === 'equipment') return battleCmd.handleShopEquipment(message, userId);
       return handleShop(message, userId);
     case 'inventory':
     case 'inv':
@@ -649,6 +660,15 @@ async function handlePrefixCommand(message, command, args) {
       const m = message.mentions.users.first();
       return handleProfile(message, m ? m.id : userId, m ? m.username : message.author.username, m ? m.displayAvatarURL() : message.author.displayAvatarURL(), true);
     }
+    case 'battle': return battleCmd.handleBattle(message, userId);
+    case 'char':
+    case 'character': return battleCmd.handleCharacter(message, userId);
+    case 'bag': return battleCmd.handleBag(message, userId, 1);
+    case 'sell': return battleCmd.handleSell(message, userId, args.join(' ') || 'all');
+    case 'sellgear': return battleCmd.handleSellGear(message, userId, args[0]);
+    case 'equip': return battleCmd.handleEquip(message, userId, args[0]);
+    case 'unequip': return battleCmd.handleUnequip(message, userId, args[0]);
+    case 'buygear': return battleCmd.handleBuyGear(message, userId, args[0]);
     default:
       return;
   }
@@ -1258,6 +1278,7 @@ async function showWallet(context, userId, username, isPrefix = false) {
     .setColor(0x5865f2)
     .setTitle(`${username}'s Wallet`)
     .addFields({ name: 'Balance', value: `💎 **${balanceDisplay}** Kryztal`, inline: false })
+    .addFields({ name: 'Kryptonite', value: `🧪 **${battleCmd.getKryptonite(userId).toLocaleString()}**`, inline: false })
     .setFooter({ text: 'Full stats & flex: /kyriz profile' })
     .setTimestamp();
   return context.reply({ embeds: [embed] });
@@ -3439,6 +3460,9 @@ async function handleSelectMenu(interaction) {
 async function handleButton(interaction) {
   const customId = interaction.customId;
 
+  // Battle mode buttons (per-user locked inside battleCmd.handleButton)
+  if (customId.startsWith('battle_')) return battleCmd.handleButton(interaction);
+
   // Maintenance: block shop buy/pagination for non-admins on an already-open shop embed
   // (the command-level guard covers /shop & /buy; game buttons are left alone so in-progress
   // rounds can still finish).
@@ -4290,7 +4314,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
@@ -4305,76 +4329,19 @@ function createHelpEmbed() {
     .setColor(0x5865f2)
     .setTitle('Kyriz | Commands')
     .setDescription(
-      'All commands can be used with **slash commands** or **prefix commands**.\n' +
-      'Prefix commands start with `ky` followed by the command name.\n\n' +
-      '```\n' +
-      '━━━ GAMES ━━━\n\n' +
-      'Blackjack\n' +
-      '  /kyriz blackjack [bet]      ky bj [bet]\n' +
-      '  Play Blackjack. Default bet: 1. Max: 500,000.\n\n' +
-      'Coinflip\n' +
-      '  /kyriz coinflip [bet] [side]  ky cf [bet] [h/t]\n' +
-      '  Flip a coin. Side: heads/head/h, tails/tail/t.\n\n' +
-      'Slots\n' +
-      '  /kyriz slots [bet]          ky slots [bet]\n' +
-      '  Spin the slot machine.\n\n' +
-      'Dice\n' +
-      '  /kyriz dice [bet] [guess]   ky dice [bet] [1-6/even/odd]\n' +
-      '  Roll a dice and bet on the result.\n\n' +
-      'Crash\n' +
-      '  /kyriz crash [bet]          ky crash [bet]\n' +
-      '  Cash out before the multiplier crashes.\n\n' +
-      'Roulette\n' +
-      '  /kyriz roulette [bet] [choice]  ky rl [bet] [choice]\n' +
-      '  Bet: red/black/even/odd/1-18/19-36/0-36.\n\n' +
-      'Mines\n' +
-      '  /kyriz mines [bet] [mines]  ky mines [bet] [1-12]\n' +
-      '  Reveal tiles and avoid the mines!\n\n' +
-      'Hi-Lo\n' +
-      '  /kyriz hilo [bet]           ky hl [bet]\n' +
-      '  Guess if the next card is higher or lower.\n\n' +
-      'Tower\n' +
-      '  /kyriz tower [bet] [diff]   ky tw [bet] [easy/med/hard]\n' +
-      '  Climb floors by picking safe doors.\n\n' +
-      '━━━ ECONOMY ━━━\n\n' +
-      'Wallet\n' +
-      '  /kyriz wallet               ky wallet\n' +
-      '  Check your Kryztal balance and stats.\n\n' +
-      'Daily\n' +
-      '  /kyriz daily                ky daily\n' +
-      '  Claim your daily reward (resets 00:00 WIB).\n\n' +
-      'Transfer\n' +
-      '  /kyriz transfer             ky tf @user [amount]\n' +
-      '  Send Kryztal to another user.\n\n' +
-      'Leaderboard\n' +
-      '  /kyriz leaderboard          ky lb\n' +
-      '  Server top 10. Use "ky lb all" for global.\n\n' +
-      '━━━ SHOP ━━━\n\n' +
-      'Shop\n' +
-      '  /kyriz shop                 ky shop\n' +
-      '  Browse the shop catalog.\n\n' +
-      'Buy\n' +
-      '  /kyriz buy <item>           ky buy <id>\n' +
-      '  Buy an item (slash: pick from list + confirm; prefix: ky buy <id>).\n\n' +
-      'Use\n' +
-      '  /kyriz use <item>           ky use <id>\n' +
-      '  Use a consumable or equip a cosmetic.\n\n' +
-      'Inventory\n' +
-      '  /kyriz inventory            ky inv\n' +
-      '  View your items, cosmetics & active boosts.\n\n' +
-      'Profile\n' +
-      '  /kyriz profile [user]       ky profile [@user]\n' +
-      '  View your (or someone\'s) profile card.\n\n' +
-      '━━━ INFO ━━━\n\n' +
-      'Help\n' +
-      '  /kyriz help                 ky help\n' +
-      '  Show this help message.\n\n' +
-      'Odds\n' +
-      '  /kyriz odds                 ky odds\n' +
-      '  View win rates & odds for all games.\n' +
-      '```'
+      'Prefix every command with `ky`.   `[optional]` · `<required>`\n\n' +
+      '🃏 **Games**\n' +
+      '`bj [bet]` · `cf [bet] [h/t]` · `slots [bet]` · `dice [bet] [1-6/e/o]` · `crash [bet]` · `rl [bet] [red/black/0-36]` · `mines [bet]` · `hl [bet]` · `tw [bet]`\n\n' +
+      '⚔️ **Battle** _— Kryptonite RPG_\n' +
+      '`battle` · `char` · `bag` · `sell [all|code n]` · `buygear <g-code>` · `equip <g-code>` · `unequip <slot>` · `sellgear <g-code>` · `shop equipment`\n\n' +
+      '💰 **Economy**\n' +
+      '`wallet` · `daily` · `tf @user <amt>` · `lb [all]`\n\n' +
+      '🛍️ **Shop**\n' +
+      '`shop` · `buy <id>` · `use <id>` · `inv` · `profile [@user]`\n\n' +
+      'ℹ️ **Info**\n' +
+      '`help` · `odds`'
     )
-    .setFooter({ text: 'Currency: Kryztal | Prefix: ky' })
+    .setFooter({ text: '💎 Kryztal (games/economy) · 🧪 Kryptonite (battle) | Prefix: ky' })
     .setTimestamp();
 }
 

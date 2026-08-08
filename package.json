@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "deploy": "node deploy-commands.js",
-    "test": "node test/crash.test.js"
+    "test": "node test/crash.test.js && node test/battleConfig.test.js && node test/battleEngine.test.js && node test/battleManager.test.js"
   },
   "keywords": ["discord", "bot", "kyriz"],
   "author": "",
