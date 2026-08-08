@@ -1,8 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-const { computeShieldRefund } = require('./shopItems');
-
 const ECONOMY_PATH = path.join(__dirname, '..', 'data', 'economy.json');
 
 // ============================================================
@@ -440,45 +438,24 @@ function addXP(userId, amount) {
 
 /**
  * Record a win
- * @returns {{ shieldConsumed: boolean }} shieldConsumed is true only when a shield was actually consumed (voided) this call.
  */
 function recordWin(userId) {
-  if (isSuperAdmin(userId)) return { shieldConsumed: false };
+  if (isSuperAdmin(userId)) return;
   const data = readJSON(ECONOMY_PATH);
-  if (!data[userId]) return { shieldConsumed: false };
+  if (!data[userId]) return;
   data[userId].totalWins += 1;
-  let shieldConsumed = false;
-  // Shield: voided on a win (consumed, no refund). A shield now covers ONE round, win or lose.
-  const boosts = data[userId].activeBoosts;
-  if (boosts && boosts.shield) { delete boosts.shield; shieldConsumed = true; }
   writeJSON(ECONOMY_PATH, data);
-  return { shieldConsumed };
 }
 
 /**
  * Record a loss
- * @returns {{ shieldConsumed: boolean, refund: number }} shieldConsumed is true only when a shield was actually consumed (refunded) this call.
  */
-function recordLoss(userId, bet = 0) {
-  if (isSuperAdmin(userId)) return { shieldConsumed: false, refund: 0 };
+function recordLoss(userId) {
+  if (isSuperAdmin(userId)) return;
   const data = readJSON(ECONOMY_PATH);
-  if (!data[userId]) return { shieldConsumed: false, refund: 0 };
+  if (!data[userId]) return;
   data[userId].totalLosses += 1;
-  let shieldConsumed = false;
-  let refund = 0;
-  // Shield: refund a fraction of THIS loss, then consume the shield.
-  const boosts = data[userId].activeBoosts;
-  if (bet > 0 && boosts && boosts.shield) {
-    refund = computeShieldRefund(bet, boosts.shield.cap, boosts.shield.pct);
-    if (refund > 0) {
-      data[userId].balance = (data[userId].balance || 0) + refund;
-      data[userId].totalEarned = (data[userId].totalEarned || 0) + refund;
-    }
-    delete boosts.shield;
-    shieldConsumed = true;
-  }
   writeJSON(ECONOMY_PATH, data);
-  return { shieldConsumed, refund };
 }
 
 // ============================================================

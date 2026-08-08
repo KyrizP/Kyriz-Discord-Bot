@@ -8,7 +8,7 @@ const LUCKY_WHEEL = [
   { amt: 300000,  p: 0.18 },
   { amt: 500000,  p: 0.05 },
   { amt: 1000000, p: 0.02 },
-]; // EV ≈ 162k
+]; // EV ≈ 166.5k
 
 const MYSTERY_WHEEL = [
   { amt: 100000,  p: 0.40 },
@@ -20,14 +20,12 @@ const MYSTERY_WHEEL = [
 
 // ---- Catalog ----
 // type: 'consumable' (used from inventory) | 'permanent' (cosmetic, owned forever)
-// effect.kind: 'shield' | 'daily_boost' | 'spin'
+// effect.kind: 'daily_boost' | 'spin'
 const ITEMS = {
   // Consumables
-  shield_50:     { id: 'shield_50',     name: 'Shield 50%',    emoji: '🛡️', category: 'consumable', type: 'consumable', price: 175000, effect: { kind: 'shield', pct: 0.50, cap: 250000 }, description: 'Insure your next bet — recover 50% if it loses (cap 250,000).' },
-  shield_100:    { id: 'shield_100',    name: 'Shield 100%',   emoji: '🛡️', category: 'consumable', type: 'consumable', price: 325000, effect: { kind: 'shield', pct: 1.00, cap: 500000 }, description: 'Insure your next bet — recover 100% if it loses (cap 500,000).' },
   daily_boost_15:{ id: 'daily_boost_15',name: 'Daily x1.5',    emoji: '📅', category: 'consumable', type: 'consumable', price: 200000, effect: { kind: 'daily_boost', mult: 1.5 }, description: 'Your next daily reward is multiplied by 1.5.' },
   daily_boost_20:{ id: 'daily_boost_20',name: 'Daily x2',      emoji: '📅', category: 'consumable', type: 'consumable', price: 400000, effect: { kind: 'daily_boost', mult: 2.0 }, description: 'Your next daily reward is multiplied by 2.' },
-  lucky_token:   { id: 'lucky_token',   name: 'Lucky Token',   emoji: '🎟️', category: 'consumable', type: 'consumable', price: 250000, effect: { kind: 'spin', wheel: 'LUCKY_WHEEL' }, description: 'Spin the lucky wheel for a random Kryztal prize.' },
+  lucky_token:   { id: 'lucky_token',   name: 'Lucky Token',   emoji: '🎟️', category: 'consumable', type: 'consumable', price: 200000, effect: { kind: 'spin', wheel: 'LUCKY_WHEEL' }, description: 'Spin the lucky wheel for a random Kryztal prize.' },
   mystery_box:   { id: 'mystery_box',   name: 'Mystery Box',   emoji: '📦', category: 'consumable', type: 'consumable', price: 500000, effect: { kind: 'spin', wheel: 'MYSTERY_WHEEL' }, description: 'Spin the mystery wheel — bigger prizes, bigger thrills.' },
 
   // Cosmetics (permanent). Prices span the wealth distribution.
@@ -68,12 +66,6 @@ function spinWheel(wheelName, rng = Math.random) {
   return wheel[wheel.length - 1].amt;
 }
 
-// Pure: shield refund for a lost bet. Refund = min(bet * pct, cap). Never exceeds the loss or the cap.
-function computeShieldRefund(bet, cap, pct) {
-  if (bet <= 0 || cap <= 0 || pct <= 0) return 0;
-  return Math.floor(Math.min(bet * pct, cap));
-}
-
 // Pure: apply a daily multiplier.
 function applyDailyMultiplier(amount, mult) {
   return Math.floor(amount * mult);
@@ -88,7 +80,7 @@ function wheelEV(wheelName) {
 
 module.exports = {
   ITEMS, LUCKY_WHEEL, MYSTERY_WHEEL,
-  getItem, listBuyable, spinWheel, computeShieldRefund, applyDailyMultiplier, wheelEV,
+  getItem, listBuyable, spinWheel, applyDailyMultiplier, wheelEV,
 };
 
 // ---- Self-check (run: node utils/shopItems.js) ----
@@ -96,15 +88,8 @@ if (require.main === module) {
   let fail = 0;
   const ok = (c, m) => { if (!c) { console.error('FAIL:', m); fail++; } };
 
-  ok(getItem('shield_50').price === 175000, 'shield_50 price');
   ok(getItem('nope') === null, 'unknown item returns null');
-  ok(listBuyable().length === 23, `catalog has 23 items, got ${listBuyable().length}`);
-
-  // Shield refund: respects cap and pct, never exceeds loss
-  ok(computeShieldRefund(500000, 250000, 0.5) === 250000, 'shield50 maxbet = 250k cap'); // min(500k*0.5, 250k)
-  ok(computeShieldRefund(100000, 250000, 0.5) === 50000, 'shield50 small bet = 50% of bet');
-  ok(computeShieldRefund(500000, 500000, 1.0) === 500000, 'shield100 maxbet = full 500k');
-  ok(computeShieldRefund(0, 250000, 0.5) === 0, 'zero bet = zero refund');
+  ok(listBuyable().length === 21, `catalog has 21 items, got ${listBuyable().length}`);
 
   // Wheels: EV below price (sink), probabilities sum to 1
   for (const [name, wheel] of Object.entries(WHEELS)) {

@@ -108,7 +108,7 @@ function purchase(userId, itemId) {
 
 /**
  * Use a consumable from inventory.
- * - shield / daily_boost: arm a flag on activeBoosts (consumed by game hooks).
+ * - daily_boost: arm a flag on activeBoosts (consumed by game hooks).
  * - spin: resolve the wheel immediately and credit the prize.
  * @returns {{ success: boolean, message: string, outcome?: { prize: number } }}
  */
@@ -131,15 +131,6 @@ function useItem(userId, itemId) {
 
   const b = boosts(u);
   const eff = item.effect;
-
-  if (eff.kind === 'shield') {
-    // One shield at a time; latest use replaces.
-    b.shield = { pct: eff.pct, cap: eff.cap };
-    inventory[itemId] -= 1;
-    if (inventory[itemId] <= 0) delete inventory[itemId];
-    economyManager.writeEconomy(data);
-    return { success: true, message: `🛡️ Shield armed (${Math.round(eff.pct * 100)}%, cap ${eff.cap.toLocaleString()}). It will refund your next loss.` };
-  }
 
   if (eff.kind === 'daily_boost') {
     // Queue the multiplier for the next daily claim (consumed in claimDaily).
@@ -241,18 +232,18 @@ if (require.main === module) {
     ok(r5.success === false, 'equip on non-existent user fails');
     ok(writes === 0, `equip on non-existent user does not write (got ${writes})`);
 
-    // 6. purchase: consumable. balance 1M -> lucky_token (250k) -> success, 750k, inv+1, totalLost+250k, ONE write.
+    // 6. purchase: consumable. balance 1M -> lucky_token (200k) -> success, 800k, inv+1, totalLost+200k, ONE write.
     store = { '300': { username: 'buyer1', balance: 1000000, totalLost: 0 } };
     writes = 0; lastWrite = null;
     const r6 = purchase('300', 'lucky_token');
     ok(r6.success === true, 'purchase consumable succeeds');
-    ok(r6.newBalance === 750000, `purchase consumable newBalance 750000 (got ${r6.newBalance})`);
+    ok(r6.newBalance === 800000, `purchase consumable newBalance 800000 (got ${r6.newBalance})`);
     ok(store['300'].inventory && store['300'].inventory.lucky_token === 1, 'lucky_token granted (qty 1)');
-    ok(store['300'].totalLost === 250000, `totalLost increased by 250k (got ${store['300'].totalLost})`);
+    ok(store['300'].totalLost === 200000, `totalLost increased by 200k (got ${store['300'].totalLost})`);
     ok(writes === 1, `purchase consumable writes exactly once (got ${writes})`);
 
     // Atomicity proof: the single payload handed to writeEconomy carried BOTH the deduction AND the grant.
-    ok(lastWrite && lastWrite['300'].balance === 750000 && lastWrite['300'].inventory.lucky_token === 1,
+    ok(lastWrite && lastWrite['300'].balance === 800000 && lastWrite['300'].inventory.lucky_token === 1,
        'atomic write payload contains reduced balance AND granted item (no gap)');
 
     // 7. purchase: permanent. badge_crown (500k) -> success, 500k, owned includes it.
@@ -283,10 +274,10 @@ if (require.main === module) {
     // 9. purchase: re-validation at call time. Buy (success); drop balance to 0; buy again -> {success:false}.
     store = { '303': { username: 'race', balance: 1000000, totalLost: 0 } };
     writes = 0;
-    const r9a = purchase('303', 'lucky_token'); // success -> 750k
+    const r9a = purchase('303', 'lucky_token'); // success -> 800k
     ok(r9a.success === true, 'first purchase succeeds before balance drops');
     store['303'].balance = 0; // simulate balance dropping between confirm screen and click
-    const r9b = purchase('303', 'shield_50'); // re-check catches the new low balance
+    const r9b = purchase('303', 'lucky_token'); // re-check catches the new low balance
     ok(r9b.success === false, 're-validation rejects purchase after balance dropped to 0');
 
     // 10. purchase: unknown item / missing user -> {success:false}, zero writes.
@@ -300,16 +291,14 @@ if (require.main === module) {
     ok(r10b.success === false, 'missing user fails {success:false}');
     ok(writes === 0, `missing user writes zero (got ${writes})`);
 
-    // 11. useItem: shield. inventory.shield_50=1 -> arms activeBoosts.shield={pct,cap}, deletes item, ONE write.
-    store = { '400': { username: 'shielded', balance: 100000, inventory: { shield_50: 1 } } };
+    // 11. useItem: daily_boost_20 (x2.0). inventory.daily_boost_20=1 -> daily_mult=2, deletes item, ONE write.
+    store = { '400': { username: 'boosted20', balance: 100000, inventory: { daily_boost_20: 1 } } };
     writes = 0;
-    const r11 = useItem('400', 'shield_50');
-    ok(r11.success === true, 'useItem shield succeeds');
-    ok(writes === 1, `useItem shield writes once (got ${writes})`);
-    ok(store['400'].activeBoosts && store['400'].activeBoosts.shield
-       && store['400'].activeBoosts.shield.pct === 0.5 && store['400'].activeBoosts.shield.cap === 250000,
-       'shield armed as {pct:0.5, cap:250000}');
-    ok(store['400'].inventory.shield_50 === undefined, 'shield_50 deleted from inventory at qty 0');
+    const r11 = useItem('400', 'daily_boost_20');
+    ok(r11.success === true, 'useItem daily_boost_20 succeeds');
+    ok(writes === 1, `useItem daily_boost_20 writes once (got ${writes})`);
+    ok(store['400'].activeBoosts && store['400'].activeBoosts.daily_mult === 2, 'daily_mult armed to 2');
+    ok(store['400'].inventory.daily_boost_20 === undefined, 'daily_boost_20 deleted from inventory at qty 0');
 
     // 12. useItem: daily_boost. daily_boost_15 (qty 2) -> daily_mult=1.5, decremented to 1 (not deleted).
     store = { '401': { username: 'boosted', balance: 100000, inventory: { daily_boost_15: 2 } } };
@@ -337,7 +326,7 @@ if (require.main === module) {
     // 14. useItem: not in inventory -> {success:false}, no mutation, zero writes.
     store = { '403': { username: 'empty', balance: 100000, inventory: {} } };
     writes = 0;
-    const r14 = useItem('403', 'shield_50');
+    const r14 = useItem('403', 'daily_boost_15');
     ok(r14.success === false, 'useItem on missing inventory item fails');
     ok(writes === 0, `useItem missing item writes zero (got ${writes})`);
     ok(Object.keys(store['403'].inventory).length === 0, 'inventory unchanged after failed use');
@@ -350,13 +339,13 @@ if (require.main === module) {
     ok(writes === 0, `useItem cosmetic writes zero (got ${writes})`);
 
     // 16. useItem: unknown item / missing user -> {success:false}, zero writes.
-    store = { '405': { username: 'x', balance: 100000, inventory: { shield_50: 1 } } };
+    store = { '405': { username: 'x', balance: 100000, inventory: { lucky_token: 1 } } };
     writes = 0;
     const r16a = useItem('405', 'totally_fake_id');
     ok(r16a.success === false, 'useItem unknown item fails');
     ok(writes === 0, `useItem unknown item writes zero (got ${writes})`);
     writes = 0;
-    const r16b = useItem('999', 'shield_50');
+    const r16b = useItem('999', 'lucky_token');
     ok(r16b.success === false, 'useItem missing user fails');
     ok(writes === 0, `useItem missing user writes zero (got ${writes})`);
   } finally {
