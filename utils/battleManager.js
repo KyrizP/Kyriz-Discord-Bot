@@ -227,15 +227,10 @@ function startDelve(userId) {
   const b = ensureBattleData(data[userId]);
   const stats = computeStats(b.charLevel, b.charClass, b.equipment);
   const run = { userId, floor: 1, hp: stats.hp, bag: {}, expAccum: 0, cleared: 0, classId: b.charClass, stats, equipment: { ...b.equipment } };
-  // sweep: fast-forward through proven-easy floors (below bestDepth). NO drops/exp —
-  // loot & exp come ONLY from pushing (risk). Prevents sweep+extract farming.
+  // sweep: fast-forward through proven-easy floors (below bestDepth). HP-FREE — no fights
+  // (you've cleared these before, they're trivial). Full HP at the sweep target. Only Push costs HP.
   const sweepTo = Math.max(1, b.bestDepth - SWEEP_BUFFER);
-  for (; run.floor < sweepTo; run.floor++) {
-    const enemy = generateEnemy(run.floor);
-    const r = resolveFight({ ...run.stats, hp: run.hp }, CLASSES[run.classId].rotation, enemy);
-    if (r.winner !== 'player') break; // would die during sweep — play live from here
-    run.hp = r.playerHpLeft;
-  }
+  run.floor = sweepTo;
   economy.writeEconomy(data); // persist entry-fee deduction
   activeRuns.set(userId, run);
   return { ok: true, paid: start.paid, run, stats, startFloor: run.floor };
