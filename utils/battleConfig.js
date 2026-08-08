@@ -23,7 +23,7 @@ const CLASSES = {
     name: 'Mage',
     emoji: '🔮',
     base:   { hp: 70,  atk: 4,  matk: 14, def: 5,  mdef: 9,  spd: 7 },
-    growth: { hp: 12,  atk: 0.8, matk: 2.8, def: 1.0, mdef: 1.8, spd: 0.6 },
+    growth: { hp: 15,  atk: 1.0, matk: 3.8, def: 1.5, mdef: 2.5, spd: 3.0 },
     rotation: [
       { id: 'bolt',     mult: 1.0, type: 'magic' },
       { id: 'fireball', mult: 1.7, type: 'magic' },

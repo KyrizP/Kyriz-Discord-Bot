@@ -29,7 +29,7 @@ ok(!M.applyGainCharExp({ u3: {} }, 'u3', 500).leveledUp, 'no level up without cl
 let dA = { u1: { balance: 50000 } };
 M.applyCreateCharacter(dA, 'u1', 'warrior');
 let sA = M.applyDelveStart(dA, 'u1');
-ok(sA.ok && sA.paid && dA.u1.balance === 35000, 'entry deducts 15k');
+ok(sA.ok && sA.paid && dA.u1.balance === 45000, 'entry deducts 5k');
 ok(!M.applyDelveStart({ u1: { balance: 100 } }, 'u1').ok, 'reject insufficient (note: no class here anyway)');
 ok(M.applyDelveStart({ u2: { balance: 999999 } }, 'u2').reason === 'no_character', 'no character -> reason');
 process.env.SUPERADMIN_ID = 'SUP_1';

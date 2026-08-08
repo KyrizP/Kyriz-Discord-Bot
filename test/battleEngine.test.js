@@ -28,7 +28,7 @@ const e1 = E.generateEnemy(1);
 ok(e1.hp === 40 && e1.atk === 8, 'enemy floor1 base');
 const e20 = E.generateEnemy(20);
 ok(e20.hp > e1.hp * 3 && e20.atk > e1.atk * 3, 'enemy scales hard by floor 20');
-ok(e20.rotation.length === 1 && ['physical', 'magic'].includes(e20.rotation[0].type), 'enemy has rotation');
+ok(e20.rotation.length === 2 && e20.rotation[0].type === 'physical' && e20.rotation[1].type === 'magic', 'enemy has mixed rotation (physical + magic)');
 
 // ---------- resolveFight ----------
 let p15 = E.computeStats(15, 'warrior', {});

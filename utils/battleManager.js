@@ -15,7 +15,7 @@ const { computeStats, generateEnemy, resolveFight, rollDrop } = require('./battl
 const economy = require('./economyManager');
 const { isSuperAdmin } = economy;
 
-const ENTRY_FEE = 15000;
+const ENTRY_FEE = 5000;
 const SWEEP_BUFFER = 5;          // sweep resolves floors 1..(bestDepth - SWEEP_BUFFER) instantly
 const GEAR_SELLBACK = 0.4;       // sell-back gear at 40% of price
 const CHAR_EXP_BASE = 100;
@@ -79,7 +79,7 @@ function applyDelveStart(data, userId) {
   const b = ensureBattleData(u);
   if (!b.charClass) return { ok: false, reason: 'no_character' };
   if (!isSuperAdmin(userId)) {
-    if ((u.balance || 0) < ENTRY_FEE) return { ok: false, reason: 'Insufficient 💎 Kryztal for entry (need 15,000).' };
+    if ((u.balance || 0) < ENTRY_FEE) return { ok: false, reason: `Insufficient 💎 Kryztal for entry (need ${ENTRY_FEE.toLocaleString()}).` };
     u.balance -= ENTRY_FEE;
   }
   return { ok: true, paid: !isSuperAdmin(userId) };

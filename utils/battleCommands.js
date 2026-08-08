@@ -43,7 +43,7 @@ function classPickEmbed(username) {
     .setAuthor({ name: `${username}'s battle` })
     .setColor(COLOR)
     .setTitle('🎭 Create your character')
-    .setDescription('Pick a class to begin your dungeon battle (entry **15,000 💎 Kryztal**):\n\n⚔️ **Warrior** — tanky physical bruiser (ATK/DEF/HP)\n🔮 **Mage** — glass-cannon magic (MATK, squishy)')
+    .setDescription('Pick a class to begin your dungeon battle (entry **5,000 💎 Kryztal**):\n\n⚔️ **Warrior** — tanky physical bruiser (ATK/DEF/HP)\n🔮 **Mage** — glass-cannon magic (MATK, squishy)')
     .setTimestamp();
 }
 function classPickRow(userId) {
@@ -138,7 +138,7 @@ function dieEmbed(username, res) {
     .setTitle(`💀 You died on Floor ${res.diedAt}`)
     .setDescription(
       `Lost **${res.lost}** unbanked drop(s) + all Char EXP this run.\n\n` +
-      `_No checkpoint saved — Extract to lock in depth. \`ky battle\` to try again (15,000 💎)._`
+      `_No checkpoint saved — Extract to lock in depth. \`ky battle\` to try again (5,000 💎)._`
     )
     .setTimestamp();
 }
@@ -188,7 +188,7 @@ function handleBattleHelp(context) {
       '💡 **THE LOOP**\n' +
       '`ky battle` → fight floors → collect drops → **Extract** (bank) → `ky sell all` → 🧪 → `ky buygear` + `ky equip` → stronger → delve deeper!\n\n' +
       '🎮 **COMMANDS**\n' +
-      '`ky battle` — enter dungeon (**15,000 💎** entry). First time: pick a class.\n' +
+      '`ky battle` — enter dungeon (**5,000 💎** entry). First time: pick a class.\n' +
       '`ky char` — view stats, gear, 🧪, best depth · `ky char name <nama>` — set name\n' +
       '`ky bag` — your drops (sellable) · `ky gear` — your equipment\n\n' +
       '⚔️ **IN BATTLE (buttons)**\n' +

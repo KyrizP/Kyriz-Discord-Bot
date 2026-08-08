@@ -51,7 +51,7 @@ function generateEnemy(floor) {
     def: Math.round(ENEMY_BASE.def * k),
     mdef: Math.round(ENEMY_BASE.mdef * k),
     spd: Math.round(ENEMY_BASE.spd * k),
-    rotation: [{ mult: 1.0, type }],
+    rotation: [{ mult: 1.0, type: 'physical' }, { mult: 1.0, type: 'magic' }],
   };
 }
 
