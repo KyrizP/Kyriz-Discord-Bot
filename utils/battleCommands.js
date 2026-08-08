@@ -15,7 +15,12 @@ const { computeStats } = require('./battleEngine');
 
 const BAG_PAGE_SIZE = 8;
 const COLOR = 0x9b59b6;
-const uname = (ctx) => ctx.user?.username || ctx.author?.username || 'Player';
+const uname = (ctx, userId) => {
+  const dn = ctx.user?.username || ctx.author?.username || 'Player';
+  if (userId) { const cn = battle.getCharName(userId); if (cn) return cn; } // charName overrides discord username
+  return dn;
+};
+const BATTLE_IDLE_MS = 120000; // auto-extract after this many ms idle (tunable)
 
 // read-only battle-data getter (ensures defaults; does NOT write)
 function getBattle(userId) {
@@ -155,7 +160,7 @@ async function handleBattle(context, userId) {
   if (battle.hasActiveRun(userId)) {
     return context.reply({ content: '⚔️ You already have an active battle. Use **Push** / **Extract**, or end it with `ky end`.' });
   }
-  const username = uname(context);
+  const username = uname(context, userId);
   const res = battle.startDelve(userId);
   if (!res.ok) {
     if (res.needClass) return context.reply({ embeds: [classPickEmbed(username)], components: [classPickRow(userId)] });
@@ -163,24 +168,62 @@ async function handleBattle(context, userId) {
   }
   const note = (res.run.floor > 1 ? `⚡ Auto-swept to floor ${res.run.floor} (no loot — push for drops).\n` : '') + 'Push for loot, or Extract to bank (`ky end` also works).';
   const msg = await context.reply({ embeds: [delveFloorEmbed(username, res.run, note)], components: [actionRow(userId, res.run)] });
-  // Auto-extract on 2-min idle: frees the run if the player goes AFK (so they can start a new battle + RAM freed)
+  // Auto-extract on idle: frees the run if the player goes AFK.
+  // Scoped to THIS run (myRun) so a stale collector from a PREVIOUS battle can't extract a newer run.
+  const myRun = res.run;
   try {
-    msg.createMessageComponentCollector({ idle: 120000 }).on('end', async () => {
-      if (battle.hasActiveRun(userId)) {
+    msg.createMessageComponentCollector({ idle: BATTLE_IDLE_MS }).on('end', async () => {
+      if (battle.getRun(userId) === myRun) { // only if THIS run is still the active one
         const r = battle.extractRun(userId);
         try { await msg.edit({ embeds: [extractEmbed(username, r)], components: [] }); } catch {}
       }
     });
   } catch {}
 }
+function handleBattleHelp(context) {
+  const embed = new EmbedBuilder()
+    .setColor(COLOR)
+    .setTitle('⚔️ Battle Mode — How to Play')
+    .setDescription(
+      '💡 **THE LOOP**\n' +
+      '`ky battle` → fight floors → collect drops → **Extract** (bank) → `ky sell all` → 🧪 → `ky buygear` + `ky equip` → stronger → delve deeper!\n\n' +
+      '🎮 **COMMANDS**\n' +
+      '`ky battle` — enter dungeon (**15,000 💎** entry). First time: pick a class.\n' +
+      '`ky char` — view stats, gear, 🧪, best depth · `ky char name <nama>` — set name\n' +
+      '`ky bag` — your drops (sellable) · `ky gear` — your equipment\n\n' +
+      '⚔️ **IN BATTLE (buttons)**\n' +
+      '⏩ **Push** — fight **1 floor** (animated clash). Can die.\n' +
+      '⚡ **Fast Sweep** — auto-fight **5 floors** at once (fast, blind — riskier).\n' +
+      '🧪 **Extract** — bank drops + EXP (safe). Locked until you clear ≥1 floor.\n\n' +
+      '💀 **Death** = lose drops + EXP (this run only). **Extract** to keep them.\n' +
+      '_Push your luck: extract early (safe) or go deeper (more loot, more risk)._\n\n' +
+      '💰 **KRYPTONITE (🧪)** — drops are NOT 🧪, you must **sell** them:\n' +
+      '`ky sell all` → sell all drops → 🧪 · `ky sell d83 5` → sell 5 of d83\n\n' +
+      '⚔️ **GEAR** (get stronger — pass walls without leveling):\n' +
+      '`ky shop gear` (browse) → `ky buygear g1` (buy w/ 🧪) → `ky equip g1` (equip) → stats up!\n' +
+      '`ky sellgear g1` → sell spare gear (40% back).\n\n' +
+      '📈 **PROGRESSION**\n' +
+      'Push → Char EXP → level up → base stats grow. Gear → more stats → delve deeper → better drops.\n' +
+      'Stuck at a floor? **Grind** (sweep + push + extract) → level/gear up → pass it!\n' +
+      '_Floor & level have **NO CAP** — grind forever._'
+    )
+    .addFields({ name: '🔮 Coming in v2', value: "Psst... wanna know what's special? ⚔️ **PVP DUELS** — fight other players head-to-head. Pure power, no mercy, no loot lost — just bragging rights. Get strong NOW so you're ready. 😤🔥", inline: false })
+    .setFooter({ text: 'ky battle help | 💎 Kryztal = entry · 🧪 Kryptonite = battle currency' });
+  return context.reply({ embeds: [embed] });
+}
 function handleEnd(context, userId) {
   if (!battle.hasActiveRun(userId)) return context.reply({ content: 'You have no active battle.' });
   const res = battle.extractRun(userId);
-  return context.reply({ embeds: [extractEmbed(uname(context), res)] });
+  return context.reply({ embeds: [extractEmbed(uname(context, userId), res)] });
+}
+function handleName(context, userId, nameStr) {
+  const res = battle.setCharName(userId, nameStr);
+  if (!res.ok) return context.reply({ content: res.reason });
+  return context.reply({ embeds: [resultEmbed(uname(context, userId), `🏷️ Character name set to **${res.name}**.`)] });
 }
 
 function handleCharacter(context, userId) {
-  const username = uname(context);
+  const username = uname(context, userId);
   const bd = getBattle(userId);
   if (!bd) return context.reply({ content: 'Not registered. Use `ky register` first.' });
   const b = bd.b;
@@ -198,6 +241,7 @@ function handleCharacter(context, userId) {
     .setColor(COLOR)
     .setTitle(`${cls.emoji} ${cls.name} — Level ${b.charLevel}`)
     .setDescription(
+      `🏷️ Name: ${b.charName || `_(unset — \`ky char name <nama>\`)`}\n` +
       `**Char EXP:** ${b.charExp}/${b.charExpNeeded}\n` +
       `🧪 Kryptonite: **${b.kryptonite.toLocaleString()}** · 🏰 Best depth: **${b.bestDepth}**\n\n` +
       `❤️ HP **${stats.hp}** · ⚔️ ATK **${stats.atk}** · 🔮 MATK **${stats.matk}**\n` +
@@ -208,43 +252,57 @@ function handleCharacter(context, userId) {
 }
 
 function handleBag(context, userId, page) {
-  const username = uname(context);
+  const username = uname(context, userId);
   const { embed } = renderBag(userId, username, page || 1);
+  return context.reply({ embeds: [embed] });
+}
+function handleGear(context, userId) {
+  const username = uname(context, userId);
+  const bd = getBattle(userId);
+  if (!bd) return context.reply({ content: 'Not registered. Use `ky register` first.' });
+  const b = bd.b;
+  const eqLines = ['weapon', 'head', 'armor', 'boots', 'accessory']
+    .map((slot) => { const id = b.equipment[slot]; const it = id ? GEAR[id] : null; return `**${slot}:** ${it ? `${it.name} \`${id}\`` : '—'}`; })
+    .join('\n');
+  const owned = Object.entries(b.bag).filter(([id, n]) => GEAR[id] && n > 0);
+  const ownedLines = owned.map(([id, n]) => {
+    const it = GEAR[id]; const sb = Math.round(it.price * 0.4);
+    return `\`${id}\` ${it.name} ×${n} — \`ky equip ${id}\` | sell \`ky sellgear ${id}\` → 🧪 ${sb}`;
+  }).join('\n') || '_No spare gear. Visit `ky shop gear`._';
+  const embed = new EmbedBuilder()
+    .setAuthor({ name: `${username}'s gear` })
+    .setColor(COLOR)
+    .setTitle('⚔️ Gear')
+    .setDescription(`**Equipped:**\n${eqLines}\n\n**Owned (spare):**\n${ownedLines}`)
+    .setFooter({ text: 'ky equip <code> · ky unequip <slot> · ky sellgear <code>' });
   return context.reply({ embeds: [embed] });
 }
 
 function renderBag(userId, username, page) {
   const bd = getBattle(userId);
   if (!bd) return { embed: infoEmbed(username, 'Not registered.'), components: [], totalPages: 1 };
-  const entries = Object.entries(bd.b.bag).filter(([, c]) => c > 0);
-  const drops = entries.filter(([id]) => DROPS[id]);
-  const gears = entries.filter(([id]) => GEAR[id]);
-  const total = Math.max(1, Math.ceil((drops.length + gears.length) / BAG_PAGE_SIZE));
+  const drops = Object.entries(bd.b.bag).filter(([id, c]) => DROPS[id] && c > 0); // drops only — gear is in `ky gear`
+  const total = Math.max(1, Math.ceil(drops.length / BAG_PAGE_SIZE));
   page = Math.min(Math.max(1, page), total);
-  const slice = [...drops, ...gears].slice((page - 1) * BAG_PAGE_SIZE, page * BAG_PAGE_SIZE);
+  const slice = drops.slice((page - 1) * BAG_PAGE_SIZE, page * BAG_PAGE_SIZE);
   let desc = '';
   let totalValue = 0;
   for (const [id, count] of slice) {
-    if (DROPS[id]) {
-      desc += `\`${id}\` ${DROPS[id].name} ×${count} — 🧪 ${DROPS[id].value} ea (🧪 ${(DROPS[id].value * count).toLocaleString()})\n`;
-      totalValue += DROPS[id].value * count;
-    } else if (GEAR[id]) {
-      const sb = Math.round(GEAR[id].price * 0.4);
-      desc += `\`${id}\` ${GEAR[id].name} ×${count} — \`ky equip ${id}\` | sell \`ky sellgear ${id}\` → 🧪 ${sb}\n`;
-    }
+    desc += `\`${id}\` ${DROPS[id].name} ×${count} — 🧪 ${DROPS[id].value} ea (🧪 ${(DROPS[id].value * count).toLocaleString()})\n`;
+    totalValue += DROPS[id].value * count;
   }
   if (!desc) desc = '_Your bag is empty. Delve to find drops!_';
   const embed = new EmbedBuilder()
     .setAuthor({ name: `${username}'s bag` })
     .setColor(COLOR)
-    .setTitle('🎒 Battle Bag')
-    .setDescription(desc + (totalValue ? `\n**Drop value:** 🧪 ${totalValue.toLocaleString()} (\`ky sell all\`)` : ''))
+    .setTitle('🎒 Battle Bag (drops)')
+    .setDescription(desc + (totalValue ? `\n**Drop value:** 🧪 ${totalValue.toLocaleString()} (\`ky sell all\`)` : '') + `\n_Gear? \`ky gear\`_`)
     .setFooter({ text: `Page ${page}/${total} • ky sell all | ky sell <code> [n]` });
   return { embed, components: total > 1 ? [bagRow(userId, page, total)] : [], totalPages: total };
 }
 
 async function handleSell(context, userId, what) {
-  const username = uname(context);
+  const username = uname(context, userId);
   what = (what || 'all').trim();
   let res;
   if (what === '' || what === 'all') res = battle.sell(userId, 'all');
@@ -255,32 +313,32 @@ async function handleSell(context, userId, what) {
   if (res.reason) return context.reply({ content: res.reason });
   return context.reply({ embeds: [resultEmbed(username, `🧪 Sold **${res.sold}** drop(s) for **${res.kryptonite.toLocaleString()}** Kryptonite.`)] });
 }
-function handleSellGear(context, userId, code) {
-  const res = battle.sellGear(userId, (code || '').trim());
+function handleSellGear(context, userId, code, qty) {
+  const res = battle.sellGear(userId, (code || '').trim(), qty);
   if (!res.ok) return context.reply({ content: res.reason });
-  return context.reply({ embeds: [resultEmbed(uname(context), `🧪 Sold **${res.name}** for **${res.kryptonite.toLocaleString()}** Kryptonite (40% sellback).`)] });
+  return context.reply({ embeds: [resultEmbed(uname(context, userId), `🧪 Sold **${res.sold}× ${res.name}** for **${res.kryptonite.toLocaleString()}** Kryptonite (40% sellback each).`)] });
 }
 function handleEquip(context, userId, code) {
   code = (code || '').trim();
   const res = battle.equip(userId, code);
   if (!res.ok) return context.reply({ content: res.reason });
   const name = GEAR[code] ? GEAR[code].name : code;
-  return context.reply({ embeds: [resultEmbed(uname(context), `⚙️ Equipped **${name}** → **${res.slot}**.` + (res.swapped ? ' Previous gear moved to bag.' : ''))] });
+  return context.reply({ embeds: [resultEmbed(uname(context, userId), `⚙️ Equipped **${name}** → **${res.slot}**.` + (res.swapped ? ' Previous gear moved to bag.' : ''))] });
 }
 function handleUnequip(context, userId, slot) {
   const res = battle.unequip(userId, (slot || '').trim().toLowerCase());
   if (!res.ok) return context.reply({ content: res.reason });
-  return context.reply({ embeds: [resultEmbed(uname(context), `⚙️ Unequipped **${res.slot}** → moved to bag.`)] });
+  return context.reply({ embeds: [resultEmbed(uname(context, userId), `⚙️ Unequipped **${res.slot}** → moved to bag.`)] });
 }
 function handleBuyGear(context, userId, code) {
   code = (code || '').trim();
   const res = battle.buyGear(userId, code);
   if (!res.ok) return context.reply({ content: res.reason });
-  return context.reply({ embeds: [resultEmbed(uname(context), `🛒 Bought **${res.name}** \`${code}\` for 🧪 **${res.price.toLocaleString()}**.\nEquip with \`ky equip ${code}\` · 🧪 left: **${res.kryptonite.toLocaleString()}**`)] });
+  return context.reply({ embeds: [resultEmbed(uname(context, userId), `🛒 Bought **${res.name}** \`${code}\` for 🧪 **${res.price.toLocaleString()}**.\nEquip with \`ky equip ${code}\` · 🧪 left: **${res.kryptonite.toLocaleString()}**`)] });
 }
 const RARITY_RANK = { divine: 6, legendary: 5, epic: 4, rare: 3, uncommon: 2, common: 1 };
 function handleShopEquipment(context, userId) {
-  const username = uname(context);
+  const username = uname(context, userId);
   const gear = Object.values(GEAR).sort((a, b) => (RARITY_RANK[b.rarity] || 0) - (RARITY_RANK[a.rarity] || 0));
   const lines = gear.map((g) => {
     const st = Object.entries(g.stats).map(([k, v]) => `+${v} ${k.toUpperCase()}`).join(', ');
@@ -309,7 +367,7 @@ async function handleButton(interaction) {
   if (interaction.user.id !== userId) {
     return interaction.reply({ content: '⛔ This is not yours.', ephemeral: true });
   }
-  const username = interaction.user.username;
+  const username = uname(interaction, userId);
 
   // class pick -> create character + start delve
   const classMatch = customId.match(/^battle_class_(warrior|mage)_/);
@@ -323,7 +381,7 @@ async function handleButton(interaction) {
 
   if (customId.startsWith('battle_push_')) {
     const run0 = battle.getRun(userId);
-    if (!run0) return interaction.reply({ content: 'No active battle.', ephemeral: true });
+    if (!run0) return interaction.reply({ content: 'No active battle — use `ky battle` to start one. (Your previous run may have ended or the bot restarted.)', ephemeral: true });
     if (run0.animating) return interaction.deferUpdate(); // prevent double-click during animation
     const playerMaxHp = run0.stats.hp;
     const res = battle.nextFloor(userId);
@@ -348,7 +406,7 @@ async function handleButton(interaction) {
 
   if (customId.startsWith('battle_fsweep_')) {
     const run0 = battle.getRun(userId);
-    if (!run0) return interaction.reply({ content: 'No active battle.', ephemeral: true });
+    if (!run0) return interaction.reply({ content: 'No active battle — use `ky battle` to start one. (Your previous run may have ended or the bot restarted.)', ephemeral: true });
     if (run0.animating) return interaction.deferUpdate(); // no overlap with Push/another FastSweep
     run0.animating = true;
     try {
@@ -382,6 +440,6 @@ async function handleButton(interaction) {
 
 module.exports = {
   attachSubcommands, handleButton,
-  handleBattle, handleEnd, handleCharacter, handleBag, handleSell, handleSellGear, handleBuyGear, handleEquip, handleUnequip, handleShopEquipment,
+  handleBattle, handleBattleHelp, handleEnd, handleName, handleCharacter, handleBag, handleGear, handleSell, handleSellGear, handleBuyGear, handleEquip, handleUnequip, handleShopEquipment,
   getKryptonite,
 };

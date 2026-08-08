@@ -29,6 +29,7 @@ function ensureBattleData(user) {
       kryptonite: 0,
       charLevel: 1, charExp: 0, charExpNeeded: CHAR_EXP_BASE,
       charClass: null,
+      charName: null,
       equipment: { weapon: null, head: null, armor: null, boots: null, accessory: null },
       bag: {},
       bestDepth: 0,
@@ -128,16 +129,20 @@ function applySell(data, userId, itemId, qty) {
   return { sold: n, kryptonite: kry, name: item.name };
 }
 
-function applySellGear(data, userId, itemId) {
+function applySellGear(data, userId, itemId, qty) {
   const b = ensureBattleData(data[userId]);
   const item = GEAR[itemId];
   if (!item) return { ok: false, reason: 'Not equipment.' };
-  if (Object.values(b.equipment).includes(itemId)) return { ok: false, reason: 'Unequip it first (`ky unequip <slot>`).' };
-  if (!b.bag[itemId]) return { ok: false, reason: 'Not in your bag.' };
-  delete b.bag[itemId];
-  const kry = Math.round((item.price || 0) * GEAR_SELLBACK);
+  // Equipped gear lives in b.equipment (separate from b.bag spares). Selling from bag
+  // (spares) never touches the equipped copy -> no unequip needed to sell spares.
+  const have = b.bag[itemId] || 0;
+  if (have <= 0) return { ok: false, reason: 'Not in your bag. (To sell the equipped copy, `ky unequip` it first.)' };
+  const n = qty === 'all' ? have : Math.min(have, Math.max(1, Math.floor(qty || 1))); // default 1, each at sellback
+  b.bag[itemId] -= n;
+  if (b.bag[itemId] <= 0) delete b.bag[itemId];
+  const kry = Math.round((item.price || 0) * GEAR_SELLBACK * n);
   b.kryptonite += kry;
-  return { ok: true, kryptonite: kry, name: item.name };
+  return { ok: true, kryptonite: kry, name: item.name, sold: n };
 }
 
 function applyEquip(data, userId, itemId) {
@@ -161,6 +166,32 @@ function applyUnequip(data, userId, slot) {
   b.equipment[slot] = null;
   b.bag[itemId] = (b.bag[itemId] || 0) + 1;
   return { ok: true, slot, itemId };
+}
+
+// Set character display name (shown in ky char/battle/gear/bag). Validated.
+function applySetCharName(data, userId, name) {
+  const u = ensureUser(data, userId);
+  if (!u) return { ok: false, reason: 'Not registered.' };
+  const b = ensureBattleData(u);
+  if (!b.charClass) return { ok: false, reason: 'Create a character first (`ky battle`).' };
+  name = (name || '').trim();
+  if (!name) return { ok: false, reason: 'Name cannot be empty. Usage: `ky name <name>`' };
+  if (name.length > 20) return { ok: false, reason: 'Name too long (max 20 chars).' };
+  if (!/^[\w\s\-']{1,20}$/.test(name)) return { ok: false, reason: 'Invalid characters. Use letters, numbers, spaces, -, _.' };
+  b.charName = name;
+  return { ok: true, name };
+}
+function setCharName(userId, name) {
+  const data = economy.readEconomy();
+  ensureUser(data, userId);
+  const r = applySetCharName(data, userId, name);
+  if (r.ok) economy.writeEconomy(data);
+  return r;
+}
+function getCharName(userId) {
+  const data = economy.readEconomy();
+  const u = data[userId];
+  return (u && u.battle && u.battle.charName) ? u.battle.charName : null;
 }
 
 // Buy gear with Kryptonite. Guard: registered + sufficient kryptonite. No char required.
@@ -275,10 +306,10 @@ function sell(userId, itemId, qty) {
   economy.writeEconomy(data);
   return r;
 }
-function sellGear(userId, itemId) {
+function sellGear(userId, itemId, qty) {
   const data = economy.readEconomy();
   ensureUser(data, userId);
-  const r = applySellGear(data, userId, itemId);
+  const r = applySellGear(data, userId, itemId, qty);
   economy.writeEconomy(data);
   return r;
 }
@@ -306,7 +337,7 @@ function buyGear(userId, itemId) {
 
 module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
-  applySell, applySellGear, applyEquip, applyUnequip, applyBuyGear,
-  createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun, sell, sellGear, equip, unequip, buyGear,
+  applySell, applySellGear, applyEquip, applyUnequip, applyBuyGear, applySetCharName,
+  createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun, sell, sellGear, equip, unequip, buyGear, setCharName, getCharName,
   ENTRY_FEE, GEAR_SELLBACK,
 };

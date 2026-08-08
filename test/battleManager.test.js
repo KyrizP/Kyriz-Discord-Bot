@@ -88,8 +88,10 @@ dF.u1.battle.bag = { g1: 1 };
 let sg = M.applySellGear(dF, 'u1', 'g1');
 ok(sg.ok && sg.kryptonite === 40 && !dF.u1.battle.bag.g1, 'sellgear g1 (price 100) = 40 kry');
 dF.u1.battle.equipment.armor = 'g3';
-let sgEquipped = M.applySellGear(dF, 'u1', 'g3');
-ok(!sgEquipped.ok && sgEquipped.reason, 'cannot sell equipped gear');
+dF.u1.battle.bag = { g3: 2 }; // 2 spares + 1 equipped
+let sgEq = M.applySellGear(dF, 'u1', 'g3', 1); // sell 1 SPARE — should work (no unequip needed)
+ok(sgEq.ok && sgEq.sold === 1 && sgEq.kryptonite === 48 && dF.u1.battle.bag.g3 === 1, 'sell spare g3 while one is equipped (no unequip needed)');
+ok(dF.u1.battle.equipment.armor === 'g3', 'equipped g3 copy untouched when selling spares');
 
 // ---- buygear ----
 let dG = { u1: { balance: 0 } };
@@ -101,6 +103,18 @@ let bg2 = M.applyBuyGear(dG, 'u1', 'g2'); // g2 price 250, only 50 left
 ok(!bg2.ok && dG.u1.battle.kryptonite === 50, 'insufficient kryptonite rejected, balance unchanged (no partial)');
 ok(!M.applyBuyGear(dG, 'u1', 'zzz').ok, 'invalid gear code rejected');
 ok(!M.applyBuyGear({}, 'nobody', 'g1').ok, 'unregistered rejected (no throw)');
+
+// ---- sellgear multi-copy (bug: was selling all for one price) ----
+let dH = { u1: { balance: 0 } };
+M.applyCreateCharacter(dH, 'u1', 'warrior');
+dH.u1.battle.bag = { g1: 2 };
+let sg1 = M.applySellGear(dH, 'u1', 'g1'); // default qty 1
+ok(sg1.ok && sg1.sold === 1 && sg1.kryptonite === 40 && dH.u1.battle.bag.g1 === 1, 'sellgear g1 default = sell 1 (40), keep 1');
+let sg2 = M.applySellGear(dH, 'u1', 'g1', 2); // only 1 left -> sells 1
+ok(sg2.ok && sg2.sold === 1 && sg2.kryptonite === 40, 'sellgear qty 2 but only 1 left = sell 1 (no over-sell)');
+dH.u1.battle.bag = { g1: 3 };
+let sgAll = M.applySellGear(dH, 'u1', 'g1', 'all');
+ok(sgAll.ok && sgAll.sold === 3 && sgAll.kryptonite === 120 && !dH.u1.battle.bag.g1, 'sellgear g1 all (x3) = 120 (3x sellback, NO underpayment)');
 
 // ---- summary ----
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
