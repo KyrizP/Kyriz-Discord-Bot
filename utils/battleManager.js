@@ -20,7 +20,8 @@ const SWEEP_BUFFER = 5;          // sweep resolves floors 1..(bestDepth - SWEEP_
 const GEAR_SELLBACK = 0.4;       // sell-back gear at 40% of price
 const CHAR_EXP_BASE = 100;
 const charExpFor = (f) => 8 + Math.floor(f * 1.5);   // char exp per floor cleared (tunable)
-const profileXpFor = (floors) => Math.max(0, floors) * 15;
+const PROFILE_XP_EXTRACT = 50; // fixed profile XP on successful extract
+const PROFILE_XP_DIE = 20; // fixed profile XP on death (consolation)
 
 // ---------- ensure battle data (nested under user.battle — max isolation) ----------
 function ensureBattleData(user) {
@@ -263,6 +264,7 @@ function nextFloor(userId) {
   const data = economy.readEconomy();
   const res = applyDie(data, userId, run);
   economy.writeEconomy(data);
+  try { economy.addXP(userId, PROFILE_XP_DIE); } catch (_) { /* consolation profile XP */ }
   activeRuns.delete(userId);
   return { ok: true, won: false, diedAt, lost: res.lost, enemyMaxHp: enemy.hp, log: fight.log };
 }
@@ -274,7 +276,7 @@ function extractRun(userId) {
   const data = economy.readEconomy();
   const res = applyExtract(data, userId, run);
   economy.writeEconomy(data);
-  try { economy.addXP(userId, profileXpFor(depth)); } catch (_) { /* profile XP best-effort */ }
+  try { economy.addXP(userId, PROFILE_XP_EXTRACT); } catch (_) { /* profile XP best-effort */ }
   activeRuns.delete(userId);
   return { ok: true, banked: res.banked, exp: res.exp, depth, leveledUp: res.leveledUp, newLevel: res.newLevel };
 }
