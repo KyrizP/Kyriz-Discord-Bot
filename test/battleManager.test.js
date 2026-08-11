@@ -81,16 +81,16 @@ ok(dE.u1.battle.equipment.weapon === 'g2' && dE.u1.battle.bag.g1 === 1, 'equip s
 let ueq = M.applyUnequip(dE, 'u1', 'weapon');
 ok(ueq.ok && dE.u1.battle.equipment.weapon === null && dE.u1.battle.bag.g2 === 1, 'unequip moves slot->bag');
 
-// ---- sellgear 40% (unequipped only) ----
+// ---- sellgear 35% (unequipped only) ----
 let dF = { u1: { balance: 0 } };
 M.applyCreateCharacter(dF, 'u1', 'warrior');
 dF.u1.battle.bag = { g1: 1 };
 let sg = M.applySellGear(dF, 'u1', 'g1');
-ok(sg.ok && sg.kryptonite === 40 && !dF.u1.battle.bag.g1, 'sellgear g1 (price 100) = 40 kry');
+ok(sg.ok && sg.kryptonite === 35 && !dF.u1.battle.bag.g1, 'sellgear g1 (price 100) = 35 kry');
 dF.u1.battle.equipment.armor = 'g3';
 dF.u1.battle.bag = { g3: 2 }; // 2 spares + 1 equipped
 let sgEq = M.applySellGear(dF, 'u1', 'g3', 1); // sell 1 SPARE — should work (no unequip needed)
-ok(sgEq.ok && sgEq.sold === 1 && sgEq.kryptonite === 48 && dF.u1.battle.bag.g3 === 1, 'sell spare g3 while one is equipped (no unequip needed)');
+ok(sgEq.ok && sgEq.sold === 1 && sgEq.kryptonite === 42 && dF.u1.battle.bag.g3 === 1, 'sell spare g3 while one is equipped (no unequip needed)');
 ok(dF.u1.battle.equipment.armor === 'g3', 'equipped g3 copy untouched when selling spares');
 
 // ---- buygear ----
@@ -109,12 +109,100 @@ let dH = { u1: { balance: 0 } };
 M.applyCreateCharacter(dH, 'u1', 'warrior');
 dH.u1.battle.bag = { g1: 2 };
 let sg1 = M.applySellGear(dH, 'u1', 'g1'); // default qty 1
-ok(sg1.ok && sg1.sold === 1 && sg1.kryptonite === 40 && dH.u1.battle.bag.g1 === 1, 'sellgear g1 default = sell 1 (40), keep 1');
+ok(sg1.ok && sg1.sold === 1 && sg1.kryptonite === 35 && dH.u1.battle.bag.g1 === 1, 'sellgear g1 default = sell 1 (35), keep 1');
 let sg2 = M.applySellGear(dH, 'u1', 'g1', 2); // only 1 left -> sells 1
-ok(sg2.ok && sg2.sold === 1 && sg2.kryptonite === 40, 'sellgear qty 2 but only 1 left = sell 1 (no over-sell)');
+ok(sg2.ok && sg2.sold === 1 && sg2.kryptonite === 35, 'sellgear qty 2 but only 1 left = sell 1 (no over-sell)');
 dH.u1.battle.bag = { g1: 3 };
 let sgAll = M.applySellGear(dH, 'u1', 'g1', 'all');
-ok(sgAll.ok && sgAll.sold === 3 && sgAll.kryptonite === 120 && !dH.u1.battle.bag.g1, 'sellgear g1 all (x3) = 120 (3x sellback, NO underpayment)');
+ok(sgAll.ok && sgAll.sold === 3 && sgAll.kryptonite === 105 && !dH.u1.battle.bag.g1, 'sellgear g1 all (x3) = 105 (3x 35 sellback, NO underpayment)');
+
+// ---- unique items: buy / equip / sell + exploits ----
+// buy unique (legendary weapon) — deducts 5000, stores unique
+let dU = { u1: { balance: 0 } };
+M.ensureBattleData(dU.u1);
+dU.u1.battle.kryptonite = 20000;
+let bu = M.applyBuyUnique(dU, 'u1', 'legendary', 'weapon', 'atk');
+ok(bu.ok && bu.unique.id.startsWith('ky') && dU.u1.battle.kryptonite === 15000, 'buy legend weapon: -5000 kry, unique stored');
+ok(dU.u1.battle.uniqueItems[bu.unique.id], 'unique stored in uniqueItems map');
+
+// insufficient kry -> no unique created, balance untouched (atomic, no partial)
+let dU2 = { u1: { balance: 0 } };
+M.ensureBattleData(dU2.u1);
+dU2.u1.battle.kryptonite = 3000;
+let buBad = M.applyBuyUnique(dU2, 'u1', 'divine', 'weapon', 'atk'); // divine = 20000
+ok(!buBad.ok && Object.keys(dU2.u1.battle.uniqueItems).length === 0 && dU2.u1.battle.kryptonite === 3000, 'insufficient kry: no unique, no deduction');
+
+// equip unique -> slot set; equip same unique in 2nd slot -> rejected
+let dE2 = { u1: { balance: 0 } };
+M.ensureBattleData(dE2.u1);
+dE2.u1.battle.kryptonite = 20000;
+let mk = M.applyBuyUnique(dE2, 'u1', 'legendary', 'weapon', 'atk');
+let eqU = M.applyEquip(dE2, 'u1', mk.unique.id);
+ok(eqU.ok && eqU.slot === 'weapon' && dE2.u1.battle.equipment.weapon === mk.unique.id, 'equip unique weapon');
+let eqDup = M.applyEquip(dE2, 'u1', mk.unique.id); // try equip same id again
+ok(!eqDup.ok, 'cannot equip same unique id in two slots');
+
+// sell equipped unique -> rejected (must unequip first)
+let sgEq2 = M.applySellGear(dE2, 'u1', mk.unique.id);
+ok(!sgEq2.ok, 'cannot sell equipped unique (unequip first)');
+// unequip then sell -> works, refund 35% (1750)
+M.applyUnequip(dE2, 'u1', 'weapon');
+let sgU = M.applySellGear(dE2, 'u1', mk.unique.id);
+ok(sgU.ok && sgU.kryptonite === 1750 && !dE2.u1.battle.uniqueItems[mk.unique.id], 'sell spare unique: refund 1750, removed from collection');
+
+// exploit: sell same unique twice -> second rejected (already deleted)
+let sgU2 = M.applySellGear(dE2, 'u1', mk.unique.id);
+ok(!sgU2.ok, 'cannot sell deleted unique twice (no double refund)');
+
+// exploit: equip mismatched slot (weapon unique auto-fits weapon slot only)
+let dS = { u1: { balance: 0 } };
+M.ensureBattleData(dS.u1);
+dS.u1.battle.kryptonite = 5000;
+let mkw = M.applyBuyUnique(dS, 'u1', 'legendary', 'weapon', 'atk');
+M.applyEquip(dS, 'u1', mkw.unique.id);
+ok(dS.u1.battle.equipment.weapon === mkw.unique.id && dS.u1.battle.equipment.boots === null, 'weapon unique only fits weapon slot');
+
+// backfill: existing user without uniqueItems/pvp fields gets them
+let dOld = { u1: { battle: { kryptonite: 5, charLevel: 1, charClass: 'warrior', equipment: { weapon: null }, bag: {}, charExp: 0, charExpNeeded: 100, bestDepth: 0 } } };
+let bOld = M.ensureBattleData(dOld.u1);
+ok(bOld.uniqueItems && bOld.pvpWins === 0 && bOld.pvpLosses === 0, 'existing user backfilled with uniqueItems + pvp W/L fields');
+
+// ---- PvP result recording (W/L only, no ELO) ----
+let dP = { A: { balance: 0 }, B: { balance: 0 } };
+M.ensureBattleData(dP.A); M.ensureBattleData(dP.B);
+dP.A.battle.charClass = 'warrior'; dP.B.battle.charClass = 'mage';
+let pr = M.applyPvpResult(dP, 'A', 'B');
+ok(pr.ok, 'pvp result recorded');
+ok(dP.A.battle.pvpWins === 1 && dP.B.battle.pvpLosses === 1, 'W/L recorded');
+ok(dP.A.battle.pvpRating === undefined, 'no ELO rating field created');
+// backfill: user without pvp fields gets 0 W/L
+let dP2 = { A: { battle: { charClass: 'warrior', equipment: {}, bag: {}, charLevel: 1, charExp: 0, charExpNeeded: 100, bestDepth: 0 } } };
+M.ensureBattleData(dP2.A);
+ok(dP2.A.battle.pvpWins === 0 && dP2.A.battle.pvpLosses === 0, 'W/L backfilled to 0');
+
+// ---- Greed passive boosts drop sell value (regression: was silently lost) ----
+let dGr = { u1: { balance: 0 } };
+M.ensureBattleData(dGr.u1);
+dGr.u1.battle.uniqueItems = { kyG: { id: 'kyG', rarity: 'divine', slot: 'accessory', stats: { atk: 30 }, passives: [{ id: 'greed', value: 20 }] } };
+dGr.u1.battle.equipment.accessory = 'kyG';
+dGr.u1.battle.bag = { d4: 1 }; // d4 Crystal Shard, value 30
+let gsl = M.applySell(dGr, 'u1', 'd4', 1);
+ok(gsl.kryptonite === 36 && dGr.u1.battle.kryptonite === 36, 'Greed boosts sell: d4 (30) × 1.20 = 36');
+dGr.u1.battle.kryptonite = 0;
+dGr.u1.battle.bag = { d1: 10 }; // d1 value 3 ×10 = 30 base
+let gslA = M.applySell(dGr, 'u1', 'all');
+ok(gslA.kryptonite === 36, 'Greed boosts sell all: d1×10 (30) × 1.20 = 36');
+// no Greed → base value
+let dGr2 = { u1: { balance: 0 } };
+M.ensureBattleData(dGr2.u1);
+dGr2.u1.battle.bag = { d4: 1 };
+ok(M.applySell(dGr2, 'u1', 'd4', 1).kryptonite === 30, 'no Greed → base value 30');
+
+// ---- gear locked during active run (rental exploit guard) ----
+// The guard lives on the equip/unequip/sellGear IO wrappers (which read real economy),
+// not on the pure apply* fns, so it isn't unit-testable here without mocking economy.
+// Verified by code review: `if (activeRuns.has(userId)) return {ok:false,...}` at the top
+// of each IO wrapper. (startDelve also has an internal hasActiveRun guard now.)
 
 // ---- summary ----
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));

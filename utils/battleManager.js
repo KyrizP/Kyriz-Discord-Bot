@@ -11,13 +11,14 @@
 // ============================================================
 
 const { CLASSES, GEAR, DROPS } = require('./battleConfig');
-const { computeStats, generateEnemy, resolveFight, rollDrop } = require('./battleEngine');
+const { computeStats, generateEnemy, resolveFight, rollDrop, getPassives } = require('./battleEngine');
 const economy = require('./economyManager');
 const { isSuperAdmin } = economy;
+const unique = require('./uniqueItems');
 
 const ENTRY_FEE = 5000;
 const SWEEP_BUFFER = 5;          // sweep resolves floors 1..(bestDepth - SWEEP_BUFFER) instantly
-const GEAR_SELLBACK = 0.4;       // sell-back gear at 40% of price
+const GEAR_SELLBACK = 0.35;      // sell-back gear at 35% (all tiers, v1.1)
 const CHAR_EXP_BASE = 100;
 const charExpFor = (f) => 8 + Math.floor(f * 1.5);   // char exp per floor cleared (tunable)
 const PROFILE_XP_EXTRACT = 50; // fixed profile XP on successful extract
@@ -33,11 +34,17 @@ function ensureBattleData(user) {
       charName: null,
       scoreAchievedAt: null,
       equipment: { weapon: null, head: null, armor: null, boots: null, accessory: null },
-      bag: {},
-      bestDepth: 0,
+      bag: {}, uniqueItems: {},
+      bestDepth: 0, pvpWins: 0, pvpLosses: 0,
     };
   }
-  return user.battle;
+  // backfill v1.1 fields for existing users (lazy migration)
+  const b = user.battle;
+  if (!b.uniqueItems) b.uniqueItems = {};
+  if (!b.equipment || !b.equipment.accessory) b.equipment = Object.assign({ weapon: null, head: null, armor: null, boots: null, accessory: null }, b.equipment || {});
+  if (b.pvpWins == null) b.pvpWins = 0;
+  if (b.pvpLosses == null) b.pvpLosses = 0;
+  return b;
 }
 
 // Superadmin bypasses the T&C registration gate, so they have no economy entry by default.
@@ -112,10 +119,11 @@ function applyDie(data, userId, runState) {
 
 function applySell(data, userId, itemId, qty) {
   const b = ensureBattleData(data[userId]);
+  const greedMult = 1 + (getPassives(b.equipment, b.uniqueItems).greed || 0) / 100; // Greed passive boosts sell value
   if (itemId === 'all') {
     let kry = 0, sold = 0;
     for (const id of Object.keys(b.bag)) {
-      if (DROPS[id]) { kry += DROPS[id].value * b.bag[id]; sold += b.bag[id]; delete b.bag[id]; }
+      if (DROPS[id]) { kry += Math.round(DROPS[id].value * b.bag[id] * greedMult); sold += b.bag[id]; delete b.bag[id]; }
     }
     b.kryptonite += kry;
     return { sold, kryptonite: kry };
@@ -127,13 +135,22 @@ function applySell(data, userId, itemId, qty) {
   if (n <= 0) return { sold: 0, kryptonite: 0, reason: 'You have none of that.' };
   b.bag[itemId] -= n;
   if (b.bag[itemId] <= 0) delete b.bag[itemId];
-  const kry = item.value * n;
+  const kry = Math.round(item.value * n * greedMult);
   b.kryptonite += kry;
   return { sold: n, kryptonite: kry, name: item.name };
 }
 
 function applySellGear(data, userId, itemId, qty) {
   const b = ensureBattleData(data[userId]);
+  if (itemId && itemId.startsWith('ky')) {
+    const uq = b.uniqueItems[itemId];
+    if (!uq) return { ok: false, reason: 'Not in your collection.' };
+    for (const sl of Object.keys(b.equipment)) if (b.equipment[sl] === itemId) return { ok: false, reason: 'Unequip it first.' };
+    const kry = unique.sellValue(uq);
+    delete b.uniqueItems[itemId];
+    b.kryptonite += kry;
+    return { ok: true, kryptonite: kry, name: uq.name, sold: 1 };
+  }
   const item = GEAR[itemId];
   if (!item) return { ok: false, reason: 'Not equipment.' };
   // Equipped gear lives in b.equipment (separate from b.bag spares). Selling from bag
@@ -150,6 +167,18 @@ function applySellGear(data, userId, itemId, qty) {
 
 function applyEquip(data, userId, itemId) {
   const b = ensureBattleData(data[userId]);
+  if (!itemId) return { ok: false, reason: 'Equip what? Usage: `ky equip <g-code|ky-id>`' };
+  if (itemId.startsWith('ky')) {
+    const uq = b.uniqueItems[itemId];
+    if (!uq) return { ok: false, reason: 'Not in your collection.' };
+    for (const sl of Object.keys(b.equipment)) if (b.equipment[sl] === itemId) return { ok: false, reason: 'Already equipped.' };
+    const slot = uq.slot;
+    const prev = b.equipment[slot];
+    b.equipment[slot] = itemId;
+    if (prev && prev.startsWith('g')) b.bag[prev] = (b.bag[prev] || 0) + 1; // ky prev stays spare in uniqueItems
+    b.scoreAchievedAt = new Date().toISOString();
+    return { ok: true, slot, swapped: prev };
+  }
   const item = GEAR[itemId];
   if (!item) return { ok: false, reason: 'Not equipment.' };
   if (!b.bag[itemId]) return { ok: false, reason: 'Not in your bag.' };
@@ -157,18 +186,18 @@ function applyEquip(data, userId, itemId) {
   const prev = b.equipment[slot];
   b.equipment[slot] = itemId;
   delete b.bag[itemId];
-  if (prev) b.bag[prev] = (b.bag[prev] || 0) + 1;
+  if (prev) { if (prev.startsWith('g')) b.bag[prev] = (b.bag[prev] || 0) + 1; }
   b.scoreAchievedAt = new Date().toISOString(); // stats changed → lb tiebreaker
   return { ok: true, slot, swapped: prev };
 }
 
 function applyUnequip(data, userId, slot) {
   const b = ensureBattleData(data[userId]);
-  if (!(slot in b.equipment)) return { ok: false, reason: 'Invalid slot.' };
+  if (!(slot in (b.equipment || {}))) return { ok: false, reason: 'Invalid slot.' };
   const itemId = b.equipment[slot];
   if (!itemId) return { ok: false, reason: 'Nothing equipped there.' };
   b.equipment[slot] = null;
-  b.bag[itemId] = (b.bag[itemId] || 0) + 1;
+  if (itemId.startsWith('g')) b.bag[itemId] = (b.bag[itemId] || 0) + 1; // ky stays in uniqueItems as spare
   b.scoreAchievedAt = new Date().toISOString(); // stats changed → lb tiebreaker
   return { ok: true, slot, itemId };
 }
@@ -212,6 +241,21 @@ function applyBuyGear(data, userId, itemId) {
   return { ok: true, name: item.name, price: item.price, kryptonite: b.kryptonite };
 }
 
+// Buy a Legend+ unique (gacha). Atomic: no unique created if insufficient kry.
+function applyBuyUnique(data, userId, tier, slot, variant) {
+  const u = data[userId];
+  if (!u) return { ok: false, reason: 'You are not registered.' };
+  const b = ensureBattleData(u);
+  if (!unique.TIER_PRICE[tier]) return { ok: false, reason: 'Tier must be legendary, mythic, or divine.' };
+  const price = unique.TIER_PRICE[tier];
+  if ((b.kryptonite || 0) < price) return { ok: false, reason: `Insufficient 🧪 Kryptonite (need ${price.toLocaleString()}).` };
+  const existing = new Set(Object.keys(b.uniqueItems));
+  const uniq = unique.createUnique(tier, slot, variant, existing);
+  b.kryptonite -= price;
+  b.uniqueItems[uniq.id] = uniq;
+  return { ok: true, unique: uniq, price, kryptonite: b.kryptonite };
+}
+
 // ---------- in-memory run state ----------
 const activeRuns = new Map(); // userId -> { floor, hp, bag, expAccum, classId, stats }
 
@@ -225,13 +269,14 @@ function createCharacter(userId, classId) {
 }
 
 function startDelve(userId) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'You already have an active battle. Use `ky end` to finish it.' };
   const data = economy.readEconomy();
   ensureUser(data, userId);
   const start = applyDelveStart(data, userId);
   if (!start.ok) return { ok: false, reason: start.reason, needClass: start.reason === 'no_character' };
   const b = ensureBattleData(data[userId]);
-  const stats = computeStats(b.charLevel, b.charClass, b.equipment);
-  const run = { userId, floor: 1, hp: stats.hp, bag: {}, expAccum: 0, cleared: 0, classId: b.charClass, stats, equipment: { ...b.equipment } };
+  const stats = computeStats(b.charLevel, b.charClass, b.equipment, b.uniqueItems || {});
+  const run = { userId, floor: 1, hp: stats.hp, bag: {}, expAccum: 0, cleared: 0, classId: b.charClass, stats, equipment: { ...b.equipment }, uniqueItems: { ...(b.uniqueItems || {}) } };
   // sweep: fast-forward through proven-easy floors (below bestDepth). HP-FREE — no fights
   // (you've cleared these before, they're trivial). Full HP at the sweep target. Only Push costs HP.
   const sweepTo = Math.max(1, b.bestDepth - SWEEP_BUFFER);
@@ -249,12 +294,15 @@ function nextFloor(userId) {
   const run = activeRuns.get(userId);
   if (!run) return { ok: false, reason: 'No active battle. Use `ky battle`.' };
   const enemy = generateEnemy(run.floor);
-  const fight = resolveFight({ ...run.stats, hp: run.hp }, CLASSES[run.classId].rotation, enemy);
+  const passives = getPassives(run.equipment, run.uniqueItems || {});
+  const fight = resolveFight({ stats: run.stats, hp: run.hp, skills: CLASSES[run.classId].skills, passives }, enemy);
   if (fight.winner === 'player') {
     run.hp = fight.playerHpLeft;
     const drop = rollDrop(run.floor);
     run.bag[drop.id] = (run.bag[drop.id] || 0) + 1;
-    run.expAccum += charExpFor(run.floor);
+    let exp = charExpFor(run.floor);
+    if ((passives.wisdom || 0) > 0) exp = Math.round(exp * (1 + passives.wisdom / 100));
+    run.expAccum += exp;
     run.cleared = (run.cleared || 0) + 1;
     const cleared = run.floor;
     run.floor += 1;
@@ -308,6 +356,7 @@ function sell(userId, itemId, qty) {
   return r;
 }
 function sellGear(userId, itemId, qty) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
   const data = economy.readEconomy();
   ensureUser(data, userId);
   const r = applySellGear(data, userId, itemId, qty);
@@ -315,6 +364,7 @@ function sellGear(userId, itemId, qty) {
   return r;
 }
 function equip(userId, itemId) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
   const data = economy.readEconomy();
   ensureUser(data, userId);
   const r = applyEquip(data, userId, itemId);
@@ -322,6 +372,7 @@ function equip(userId, itemId) {
   return r;
 }
 function unequip(userId, slot) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
   const data = economy.readEconomy();
   ensureUser(data, userId);
   const r = applyUnequip(data, userId, slot);
@@ -335,17 +386,24 @@ function buyGear(userId, itemId) {
   if (r.ok) economy.writeEconomy(data);
   return r;
 }
+function buyUnique(userId, tier, slot, variant) {
+  const data = economy.readEconomy();
+  ensureUser(data, userId);
+  const r = applyBuyUnique(data, userId, tier, slot, variant);
+  if (r.ok) economy.writeEconomy(data);
+  return r;
+}
 
-// Battle leaderboard: rank by Combat Score (total stats from level + gear).
+// Battle leaderboard: rank by FLOOR DEPTH (bestDepth) first, then Combat Score, then scoreAchievedAt.
 // Admin & superadmin INCLUDED (unlike the regular balance leaderboard).
-// Tiebreaker: same score → earlier registeredAt ranks higher.
+// Depth = gameplay achievement (decoupled from raw stats); CS is the tiebreak.
 function getBattleLeaderboard(limit = 10, memberIds = null) {
   const data = economy.readEconomy();
   const players = [];
   for (const [uid, user] of Object.entries(data)) {
     if (memberIds && !memberIds.has(uid)) continue; // server scope filter
     if (user.battle && user.battle.charClass) {
-      const stats = computeStats(user.battle.charLevel, user.battle.charClass, user.battle.equipment);
+      const stats = computeStats(user.battle.charLevel, user.battle.charClass, user.battle.equipment, user.battle.uniqueItems || {});
       const score = stats.hp + stats.atk + stats.matk + stats.def + stats.mdef + stats.spd;
       players.push({
         userId: uid,
@@ -357,19 +415,38 @@ function getBattleLeaderboard(limit = 10, memberIds = null) {
         bestDepth: user.battle.bestDepth || 0,
         registeredAt: user.registeredAt || '9999',
         scoreAchievedAt: user.battle.scoreAchievedAt || user.registeredAt || '9999',
+        cosmetics: user.cosmetics || null,
       });
     }
   }
   players.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;                  // higher score first
-    return (a.scoreAchievedAt || '9999').localeCompare(b.scoreAchievedAt || '9999'); // achieved current score first = higher
+  if (b.bestDepth !== a.bestDepth) return b.bestDepth - a.bestDepth;    // FLOOR DEPTH first (gameplay achievement)
+    if (b.score !== a.score) return b.score - a.score;                  // CS tiebreak
+    return (a.scoreAchievedAt || '9999').localeCompare(b.scoreAchievedAt || '9999'); // reached it first
   });
   return players.slice(0, limit);
 }
 
+// Record a PvP outcome atomically: W/L for both combatants (no ELO — dropped).
+function applyPvpResult(data, winnerId, loserId) {
+  if (!data[winnerId] || !data[loserId]) return { ok: false }; // defensive: combatant entry missing
+  const bw = ensureBattleData(data[winnerId]);
+  const bl = ensureBattleData(data[loserId]);
+  bw.pvpWins = (bw.pvpWins || 0) + 1;
+  bl.pvpLosses = (bl.pvpLosses || 0) + 1;
+  return { ok: true }; // NOTE: no scoreAchievedAt bump — W/L isn't part of Combat Score, so it shouldn't move the LB tiebreak
+}
+function recordPvp(winnerId, loserId) {
+  const data = economy.readEconomy();
+  applyPvpResult(data, winnerId, loserId);
+  economy.writeEconomy(data);
+  return { ok: true };
+}
+
 module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
-  applySell, applySellGear, applyEquip, applyUnequip, applyBuyGear, applySetCharName,
-  createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun, sell, sellGear, equip, unequip, buyGear, setCharName, getCharName, getBattleLeaderboard,
+  applySell, applySellGear, applyEquip, applyUnequip, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
+  createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
+  sell, sellGear, equip, unequip, buyGear, buyUnique, setCharName, getCharName, getBattleLeaderboard, recordPvp,
   ENTRY_FEE, GEAR_SELLBACK,
 };

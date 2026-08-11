@@ -6,27 +6,29 @@
 // sim (test/battleEngine.test.js) is the gate before going live.
 // ============================================================
 
-// CLASSES — base stats at lvl 1 + per-level growth + PvE auto rotation.
-// rotation: { id, mult (skillMult), type: 'physical'|'magic' }
+// CLASSES — base stats at lvl 1 + per-level growth + skills (PvE auto-picks; PvP player-picks).
+// skill: { id, name, mult, type:'physical'|'magic', cd, effect? }  effect: {kind:'parry'|'buff'|'burn',...}
 const CLASSES = {
   warrior: {
     name: 'Warrior',
     emoji: '⚔️',
     base:   { hp: 100, atk: 12, matk: 4,  def: 10, mdef: 5,  spd: 6 },
-    growth: { hp: 20,  atk: 2.5, matk: 0.8, def: 2.0, mdef: 1.0, spd: 0.5 },
-    rotation: [
-      { id: 'slash', mult: 1.0, type: 'physical' },
-      { id: 'heavy', mult: 1.6, type: 'physical' },
+    growth: { hp: 20,  atk: 2.0, matk: 0.8, def: 2.0, mdef: 2.0, spd: 0.5 },
+    skills: [
+      { id: 'slash',  name: 'Slash',        mult: 1.0, type: 'physical', cd: 0 },
+      { id: 'parry',  name: 'Parry Strike', mult: 1.6, type: 'physical', cd: 2, effect: { kind: 'parry' } },
+      { id: 'warcry', name: 'War Cry',      mult: 2.5, type: 'physical', cd: 4, effect: { kind: 'buff', stat: 'atk', pct: 25, turns: 2, dmgReduce: 35, pierce: 0.5 } },
     ],
   },
   mage: {
     name: 'Mage',
     emoji: '🔮',
     base:   { hp: 70,  atk: 4,  matk: 14, def: 5,  mdef: 9,  spd: 7 },
-    growth: { hp: 15,  atk: 1.0, matk: 3.8, def: 1.5, mdef: 2.5, spd: 3.0 },
-    rotation: [
-      { id: 'bolt',     mult: 1.0, type: 'magic' },
-      { id: 'fireball', mult: 1.7, type: 'magic' },
+    growth: { hp: 15,  atk: 1.0, matk: 3.0, def: 2.1, mdef: 2.5, spd: 3.0 },
+    skills: [
+      { id: 'bolt',     name: 'Bolt',     mult: 1.0, type: 'magic', cd: 0 },
+      { id: 'fireball', name: 'Fireball', mult: 1.7, type: 'magic', cd: 2, effect: { kind: 'burn', pct: 10, turns: 3 } },
+      { id: 'meteor',   name: 'Meteor',   mult: 2.5, type: 'magic', cd: 4, effect: { kind: 'burn', pct: 20, turns: 3, pierce: 0.5 } },
     ],
   },
 };
@@ -46,6 +48,16 @@ const DROP_RARITIES = [
   { id: 'epic',      value: [50, 90],   weight: (f) => Math.min(5,   0.5 + f * 0.05) },
   { id: 'legendary', value: [120, 200], weight: (f) => Math.min(1.5, 0.1 + f * 0.015) },
   { id: 'divine',    value: [300, 500], weight: (f) => (f < 20 ? 0 : Math.min(0.05, (f - 20) * 0.001)) },
+];
+
+// DROP ZONES — hard floor breakpoints (v1.1) replacing the continuous weight fns above.
+// weights are % per rarity (mythic is NOT a drop rarity — only a gear tier).
+// Each row's weights sum to ~100; rollDrop normalizes defensively.
+const DROP_ZONES = [
+  { min: 1,  max: 30,        weights: { common: 65, uncommon: 20, rare: 12,  epic: 2.5, legendary: 0.5, divine: 0 } },
+  { min: 31, max: 60,        weights: { common: 45, uncommon: 0,  rare: 35,  epic: 15,  legendary: 4,   divine: 1 } },
+  { min: 61, max: 90,        weights: { common: 30, uncommon: 0,  rare: 40,  epic: 20,  legendary: 7,   divine: 3 } },
+  { min: 91, max: Infinity,  weights: { common: 0,  uncommon: 15, rare: 40,  epic: 25,  legendary: 12,  divine: 8 } },
 ];
 
 // DROPS — concrete loot items, code `d<n>`. value = 🧪 Kryptonite sell price.
@@ -84,9 +96,80 @@ const GEAR = {
   g13: { id: 'g13', name: 'Boots of Haste',   slot: 'boots',     rarity: 'epic',   price: 850, stats: { spd: 8 } },
   g14: { id: 'g14', name: 'Warlord Gauntlets',slot: 'accessory', rarity: 'epic',   price: 1000, stats: { atk: 10, spd: 3 } },
   g15: { id: 'g15', name: 'Arcane Orb',       slot: 'accessory', rarity: 'epic',   price: 1000, stats: { matk: 10, mdef: 5 } },
+  // --- Epic head/armor variants (DEF or MDEF versions) ---
+  g21: { id: 'g21', name: 'Vanguard Greathelm', slot: 'head',  rarity: 'epic', price: 950, stats: { def: 12 } },
+  g22: { id: 'g22', name: 'Archmage Cowl',      slot: 'head',  rarity: 'epic', price: 950, stats: { mdef: 11 } },
+  g23: { id: 'g23', name: 'Mystic Vestments',    slot: 'armor', rarity: 'epic', price: 950, stats: { mdef: 14 } },
 };
 
 // v1 merchant uses flat per-item sell prices (the item's `value`). v2 adds daily variance.
 const MERCHANT_FLAT = true;
 
-module.exports = { CLASSES, ENEMY_BASE, DROP_RARITIES, DROPS, GEAR, MERCHANT_FLAT };
+// TIER_INFO — letter/color/price/passive-count per tier. price = mystery-box buy price
+// AND the sell-value basis (sellback 35%). common-epic price here is a fallback only
+// (g* items use their own .price); legendary/mythic/divine use this price.
+const TIER_INFO = {
+  common:    { letter: 'C', color: '⚪', price: 100,   passives: 0 },
+  uncommon:  { letter: 'U', color: '🟢', price: 250,   passives: 0 },
+  rare:      { letter: 'R', color: '🔵', price: 450,   passives: 0 },
+  epic:      { letter: 'E', color: '🟣', price: 1000,  passives: 0 },
+  legendary: { letter: 'L', color: '🟠', price: 5000,  passives: 1 },
+  mythic:    { letter: 'M', color: '🟡', price: 10000, passives: 1 },
+  divine:    { letter: 'D', color: '🔶', price: 20000, passives: 2 },
+};
+
+// LEGEND_GEAR_RANGES — random stat ranges per tier per slot. Inclusive bounds.
+// weapon uses variant 'atk'|'matk'. accessory rolls 2 DIFFERENT stats (main vs spd range).
+const LEGEND_GEAR_RANGES = {
+  legendary: {
+    weapon:    { atk: [20, 28], matk: [20, 28] },
+    head:      { stat: [6, 10] },           // 1 random stat: DEF or MDEF (gambling)
+    armor:     { stat: [18, 26] },          // 1 random stat: DEF or MDEF (gambling)
+    boots:     { spd: [8, 14] },
+    accessory: { main: [12, 18], spd: [2, 5] },
+  },
+  mythic: {
+    weapon:    { atk: [30, 40], matk: [30, 40] },
+    head:      { stat: [11, 16] },
+    armor:     { stat: [28, 38] },
+    boots:     { spd: [15, 22] },
+    accessory: { main: [18, 26], spd: [4, 8] },
+  },
+  divine: {
+    weapon:    { atk: [42, 55], matk: [42, 55] },
+    head:      { stat: [18, 26] },
+    armor:     { stat: [40, 52] },
+    boots:     { spd: [24, 34] },
+    accessory: { main: [25, 35], spd: [6, 12] },
+  },
+};
+
+// MYSTERY BOXES — shop codes for Legend/Mythic/Divine boxes. Buy via `ky buygear <code> [atk|matk]`.
+// Weapon boxes take an atk|matk variant; others roll automatically. On buy -> becomes a kyXXXX unique.
+const _cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const MYSTERY_BOXES = {};
+['legendary', 'mythic', 'divine'].forEach((tier, ti) => {
+  ['weapon', 'head', 'armor', 'boots', 'accessory'].forEach((slot, si) => {
+    const code = 'g' + (100 + ti * 5 + si);
+    MYSTERY_BOXES[code] = { code, tier, slot, name: _cap(tier) + ' ' + _cap(slot) + ' Box' };
+  });
+});
+
+// PASSIVES — catalog. weight drives the gacha roll (greed/wisdom slightly higher).
+// unit '' for flat (swift), '%' for the rest.
+const PASSIVES = {
+  berserker: { emoji: '🗡️', name: 'Berserker', weight: 10, unit: '%', ranges: { legendary: [8, 12],  mythic: [13, 17], divine: [18, 25] } },
+  precision: { emoji: '🎯', name: 'Precision', weight: 10, unit: '%', ranges: { legendary: [5, 8],   mythic: [9, 13],  divine: [14, 20] } },
+  lifesteal: { emoji: '🩸', name: 'Lifesteal', weight: 10, unit: '%', ranges: { legendary: [2, 4],   mythic: [4, 7],   divine: [7, 12] } },
+  swift:     { emoji: '💨', name: 'Swift',     weight: 10, unit: '',  ranges: { legendary: [3, 6],   mythic: [6, 10],  divine: [10, 16] } },
+  fortify:   { emoji: '🛡️', name: 'Fortify',   weight: 10, unit: '%', ranges: { legendary: [3, 6],   mythic: [6, 10],  divine: [10, 16] } },
+  evasion:   { emoji: '🫥', name: 'Evasion',   weight: 10, unit: '%', ranges: { legendary: [3, 5],   mythic: [5, 8],   divine: [8, 13] } },
+  greed:     { emoji: '🧪', name: 'Greed',     weight: 11, unit: '%', ranges: { legendary: [8, 12],  mythic: [13, 17], divine: [18, 25] } },
+  wisdom:    { emoji: '📚', name: 'Wisdom',    weight: 11, unit: '%', ranges: { legendary: [8, 12],  mythic: [13, 17], divine: [18, 25] } },
+};
+
+// CRIT — player crit source is Precision passive only; enemy crit floor 45+.
+const CRIT = { mult: 1.75, cap: 0.50, enemyFloor: 45, enemyChance: 0.20 };
+
+module.exports = { CLASSES, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, GEAR, MERCHANT_FLAT,
+  TIER_INFO, LEGEND_GEAR_RANGES, MYSTERY_BOXES, PASSIVES, CRIT };

@@ -643,7 +643,7 @@ async function handlePrefixCommand(message, command, args) {
     case 'players':
       return handlePlayersPrefix(message, userId);
     case 'shop':
-      if (args[0] && args[0].toLowerCase() === 'gear') return battleCmd.handleShopEquipment(message, userId);
+      if (args[0] && args[0].toLowerCase() === 'gear') return battleCmd.handleShopEquipment(message, userId, args[1]);
       return handleShop(message, userId);
     case 'inventory':
     case 'inv':
@@ -658,18 +658,19 @@ async function handlePrefixCommand(message, command, args) {
     }
     case 'battle':
       if (args[0] && args[0].toLowerCase() === 'help') return battleCmd.handleBattleHelp(message);
+      if (message.mentions && message.mentions.users.first()) return battleCmd.handlePvp(message, userId, message.mentions.users.first().id);
       return battleCmd.handleBattle(message, userId);
     case 'char':
     case 'character':
       if (args[0] && args[0].toLowerCase() === 'name') return battleCmd.handleName(message, userId, args.slice(1).join(' '));
-      return battleCmd.handleCharacter(message, userId);
+      return battleCmd.handleCharacter(message, userId, args[0]);
     case 'bag': return battleCmd.handleBag(message, userId, 1);
-    case 'gear': return battleCmd.handleGear(message, userId);
+    case 'gear': return battleCmd.handleGear(message, userId, args[0]);
     case 'sell': return battleCmd.handleSell(message, userId, args.join(' ') || 'all');
     case 'sellgear': return battleCmd.handleSellGear(message, userId, args[0], args[1]);
     case 'equip': return battleCmd.handleEquip(message, userId, args[0]);
     case 'unequip': return battleCmd.handleUnequip(message, userId, args[0]);
-    case 'buygear': return battleCmd.handleBuyGear(message, userId, args[0]);
+    case 'buygear': return battleCmd.handleBuyGear(message, userId, args.join(' '));
     case 'end': return battleCmd.handleEnd(message, userId);
     default:
       return;
@@ -3463,7 +3464,7 @@ async function handleButton(interaction) {
   const customId = interaction.customId;
 
   // Battle mode buttons (per-user locked inside battleCmd.handleButton)
-  if (customId.startsWith('battle_')) return battleCmd.handleButton(interaction);
+  if (customId.startsWith('battle_') || customId.startsWith('pvp_')) return battleCmd.handleButton(interaction);
 
   // Maintenance: block shop buy/pagination for non-admins on an already-open shop embed
   // (the command-level guard covers /shop & /buy; game buttons are left alone so in-progress
@@ -4335,7 +4336,7 @@ function createHelpEmbed() {
       '🃏 **Games**\n' +
       '`bj [bet]` · `cf [bet] [h/t]` · `slots [bet]` · `dice [bet] [1-6/e/o]` · `crash [bet]` · `rl [bet] [red/black/0-36]` · `mines [bet]` · `hl [bet]` · `tw [bet]`\n\n' +
       '⚔️ **Battle** _— Kryptonite RPG_\n' +
-      '`battle` · `battle help` · `char [name <nama>]` · `bag` · `gear` · `sell [all|code n]` · `buygear <g-code>` · `equip <g-code>` · `unequip <slot>` · `sellgear <g-code>` · `shop gear` · `lb battle [all]`\n\n' +
+      '`battle [@user]` · `battle help` · `char [name <nama>]` · `bag` · `gear [id]` · `sell [all|code n]` · `buygear <code> [atk|matk]` · `equip <id>` · `unequip <slot>` · `sellgear <id>` · `shop gear [tier]` · `lb battle [all]`\n\n' +
       '💰 **Economy**\n' +
       '`wallet` · `daily` · `tf @user <amt>` · `lb [all]`\n\n' +
       '🛍️ **Shop**\n' +

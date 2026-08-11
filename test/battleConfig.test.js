@@ -11,7 +11,10 @@ for (const id of ['hp', 'atk', 'matk', 'def', 'mdef', 'spd']) {
   ok(typeof C.CLASSES.warrior.growth[id] === 'number', 'warrior growth.' + id);
   ok(typeof C.CLASSES.mage.base[id] === 'number', 'mage base.' + id);
 }
-ok(C.CLASSES.warrior.rotation.length >= 1 && C.CLASSES.mage.rotation.length >= 1, 'both have rotations');
+ok(C.CLASSES.warrior.skills.length >= 1 && C.CLASSES.mage.skills.length >= 1, 'both have skills');
+for (const sk of [...C.CLASSES.warrior.skills, ...C.CLASSES.mage.skills]) {
+  ok(typeof sk.id === 'string' && typeof sk.mult === 'number' && (sk.type === 'physical' || sk.type === 'magic'), 'skill well-formed: ' + (sk.id || '?'));
+}
 ok(C.DROP_RARITIES.length === 6, '6 rarity tiers');
 ok(C.DROPS.d7 && C.DROPS.d7.rarity === 'divine', 'divine drop exists');
 // every rarity tier must have >=1 item (rollDrop picks a random item of the rolled tier)

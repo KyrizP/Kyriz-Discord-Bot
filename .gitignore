@@ -2,5 +2,6 @@ node_modules/
 .env
 data/replies.json
 data/users.json
+data/economy.json
 CONTEXT.md
 GAME_ODDS.md
