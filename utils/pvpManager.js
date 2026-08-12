@@ -14,7 +14,7 @@ const { CRIT } = require('./battleConfig');
 const activePvpFights = new Map(); // fightId -> fight
 const AFK_MS = 60_000;
 const TURN_CAP = 20;
-const PVP_HP_RATIO = 1.0; // full HP — longer fights, more room for sustain/strategy
+const PVP_HP_RATIO = 1.5; // 150% HP — longer fights (8-10 turns target), more room for sustain/strategy
 // PvP level dampen (sqrt): higher level gives a SMALL edge (grinding still useful) but a few levels
 // don't auto-win (strategy decides nearby levels), and stats don't explode at extreme levels.
 // PvE uses the REAL level (untouched) — this is PvP-only, in startFight.
@@ -66,10 +66,12 @@ function startFight(fightId, p1, p2) {
   };
   activePvpFights.set(fightId, fight);
   if (PVP_GATE_ULTS) {
-    // Ults (last skill, cd>=4) can't open — prevents turn-1 Meteor/War-Cry nuke before the slower player acts.
+    // Only ULTS (cd>=4) start at half-CD (→2). Skill 2 (cd 2) starts at 0 (available turn 1, same as before).
+    // After first use, normal cd. Makes ults usable by turn 3 (was turn 5 with full gate).
     for (const k of ['p1', 'p2']) {
-      const ult = fight[k].skills[fight[k].skills.length - 1];
-      if (ult && ult.cd) fight[k].cdLeft[ult.id] = ult.cd;
+      for (const sk of fight[k].skills) {
+        if (sk.cd >= 4) fight[k].cdLeft[sk.id] = Math.ceil(sk.cd / 2);
+      }
     }
   }
   return fight;

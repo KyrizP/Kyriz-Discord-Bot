@@ -15,8 +15,8 @@ const weakMage = { hp: 600, atk: 10, matk: 120, def: 30, mdef: 60, spd: 10 };
 // ---- startFight: HP 70%, turn order by SPD ----
 P.activePvpFights.clear();
 let f = P.startFight('F1', mkPlayer('A', strongWar, 'warrior'), mkPlayer('B', weakMage, 'mage'));
-ok(f.p1.hp === 1000 && f.p1.hpMax === 1000, 'p1 hp = full (1000)');
-ok(f.p2.hp === 600 && f.p2.hpMax === 600, 'p2 hp = full (600)');
+ok(f.p1.hp === 1500 && f.p1.hpMax === 1500, 'p1 hp = 1.5× (1500)');
+ok(f.p2.hp === 900 && f.p2.hpMax === 900, 'p2 hp = 1.5× (900)');
 ok(f.active === 'p1', 'higher SPD (p1) goes first');
 
 // ---- resolvePvpTurn: damage + swap ----

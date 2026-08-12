@@ -5,7 +5,7 @@
 // Fully unit-tested (test/battleEngine.test.js, incl. balance sim).
 // ============================================================
 
-const { CLASSES, GEAR, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, CRIT } = require('./battleConfig');
+const { CLASSES, GEAR, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, CRIT, PASSIVE_CAPS } = require('./battleConfig');
 
 const STAT_KEYS = ['hp', 'atk', 'matk', 'def', 'mdef', 'spd'];
 const EQUIP_SLOTS = ['weapon', 'head', 'armor', 'boots', 'accessory'];
@@ -49,6 +49,10 @@ function getPassives(equipment = {}, uniqueItems = {}) {
         sums[p.id] = (sums[p.id] || 0) + (p.value || 0);
       }
     }
+  }
+  // apply stacking caps (prevent degenerate builds: 5× Lifesteal=100%, 5× Fortify=110%, etc.)
+  for (const id of Object.keys(PASSIVE_CAPS)) {
+    if (sums[id] != null && sums[id] > PASSIVE_CAPS[id]) sums[id] = PASSIVE_CAPS[id];
   }
   return sums;
 }

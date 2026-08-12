@@ -42,6 +42,7 @@ function ensureBattleData(user) {
   const b = user.battle;
   if (!b.uniqueItems) b.uniqueItems = {};
   if (!b.equipment || !b.equipment.accessory) b.equipment = Object.assign({ weapon: null, head: null, armor: null, boots: null, accessory: null }, b.equipment || {});
+  if (b.bestDepth == null) b.bestDepth = 0;
   if (b.pvpWins == null) b.pvpWins = 0;
   if (b.pvpLosses == null) b.pvpLosses = 0;
   return b;
@@ -150,6 +151,32 @@ function applySellGear(data, userId, itemId, qty) {
     delete b.uniqueItems[itemId];
     b.kryptonite += kry;
     return { ok: true, kryptonite: kry, name: uq.name, sold: 1 };
+  }
+  // Rarity sell: `ky sellgear <rarity>` or `ky sellgear <abbr>` — sell ALL unequipped gear of that tier.
+  // Each at its OWN sellback price (unique = 35% of tier price; template = 35% of item price).
+  const RARITY_ABBR = { l: 'legendary', m: 'mythic', d: 'divine', e: 'epic', r: 'rare', u: 'uncommon', c: 'common' };
+  const tier = RARITY_ABBR[itemId] || (['legendary', 'mythic', 'divine', 'epic', 'rare', 'uncommon', 'common'].includes(itemId) ? itemId : null);
+  if (tier) {
+    if (qty !== 'all') return { ok: false, reason: 'Sell ALL ' + tier + ' gear? Use `ky sellgear ' + itemId + ' all` (requires confirmation).' };
+    let kry = 0, sold = 0;
+    // unique items
+    for (const id of Object.keys(b.uniqueItems)) {
+      let equipped = false;
+      for (const sl of Object.keys(b.equipment)) if (b.equipment[sl] === id) { equipped = true; break; }
+      if (equipped) continue;
+      if (b.uniqueItems[id].rarity === tier) { kry += unique.sellValue(b.uniqueItems[id]); delete b.uniqueItems[id]; sold++; }
+    }
+    // template g-items
+    for (const id of Object.keys(b.bag)) {
+      if (GEAR[id] && GEAR[id].rarity === tier && b.bag[id] > 0) {
+        kry += Math.round(GEAR[id].price * GEAR_SELLBACK * b.bag[id]);
+        sold += b.bag[id];
+        delete b.bag[id];
+      }
+    }
+    if (sold === 0) return { ok: false, reason: 'No unequipped ' + tier + ' gear to sell.' };
+    b.kryptonite += kry;
+    return { ok: true, kryptonite: kry, sold, name: sold + '× ' + tier };
   }
   const item = GEAR[itemId];
   if (!item) return { ok: false, reason: 'Not equipment.' };
@@ -380,6 +407,7 @@ function unequip(userId, slot) {
   return r;
 }
 function buyGear(userId, itemId) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
   const data = economy.readEconomy();
   ensureUser(data, userId);
   const r = applyBuyGear(data, userId, itemId);
@@ -387,6 +415,7 @@ function buyGear(userId, itemId) {
   return r;
 }
 function buyUnique(userId, tier, slot, variant) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
   const data = economy.readEconomy();
   ensureUser(data, userId);
   const r = applyBuyUnique(data, userId, tier, slot, variant);

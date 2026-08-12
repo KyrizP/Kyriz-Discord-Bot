@@ -230,10 +230,12 @@ function handleBattleHelp(context) {
       '`ky sell all` → sell all drops → 🧪 · `ky sell d83 5` → sell 5 of d83\n\n' +
       '⚔️ **GEAR** (get stronger — pass walls):\n' +
       '`ky shop gear [tier]` → browse. Common–Epic = fixed gear (`g1`–`g23`). **Legend/Mythic/Divine = mystery boxes** (`g100`+) — random stats + passive!\n' +
-      'Buy with the code: `ky buygear g100`. Weapon/head/armor boxes are **pure gacha** (ATK or MATK / DEF or MDEF — random, can\'t pick). Bad roll? Sell (35%) + rebuy to reroll. `ky equip <id>` · `ky sellgear <id>`.\n\n' +
-      '🎲 **REROLL**: bad stats/passive? `ky sellgear <id>` (35% refund) → rebuy the box → new random roll!\n\n' +
+      'Buy: `ky buygear <code>`. Weapon/head/armor = **pure gacha** (random ATK/MATK, DEF/MDEF — can\'t pick).\n' +
+      '`ky equip <id>` · `ky sellgear <id>` · `ky sellgear <rarity> all` (sell ALL spares of a tier, e.g. `ky sellgear d all`)\n' +
+      '⚠️ **Gear locked during battle/duel** — finish first (`ky end`).\n\n' +
+      '🎲 **REROLL**: bad roll? `ky sellgear <id>` (35% refund) → rebuy → new random!\n\n' +
       '✨ **PASSIVES** (on Legend+ gear, auto-active in PvE & PvP):\n' +
-      '🗡️ Berserker (+% dmg) · 🎯 Precision (crit 1.75×) · 🩸 Lifesteal (heal on hit) · 💨 Swift (+SPD) · 🛡️ Fortify (−dmg taken) · 🫥 Evasion (dodge) · 🧪 Greed (+🧪 sell value) · 📚 Wisdom (+Char EXP)\n' +
+      '🗡️ Berserker (+% dmg, cap 100%) · 🎯 Precision (crit 1.75×, cap 50%) · 🩸 Lifesteal (heal, cap 80%) · 💨 Swift (+SPD) · 🛡️ Fortify (−dmg taken, cap 80%) · 🌀 Evasion (dodge, cap 60%) · 🧪 Greed (+🧪 sell) · 📚 Wisdom (+EXP)\n' +
       '_Build matters: Lifesteal+Fortify+DEF (sustain) delves far deeper than pure ATK — the wall is HP-drain._\n\n' +
       '📈 **PROGRESSION**\n' +
       'Push → Char EXP → level up → base stats grow. Gear → more stats → delve deeper → better drops.\n' +
@@ -269,7 +271,7 @@ function handleCharacter(context, userId, targetArg) {
   let targetId = userId;
   let displayName = uname(context, userId);
   if (targetArg) {
-    if (!economy.isSuperAdmin(userId)) return context.reply({ content: 'Only superadmin can view other players\' characters.' });
+    if (!economy.isAdmin(userId)) return context.reply({ content: 'Only admins can view other players\' characters.' });
     const mentionMatch = targetArg.match(/^<@!?(\d+)>$/);
     targetId = mentionMatch ? mentionMatch[1] : (/^\d+$/.test(targetArg) ? targetArg : null);
     if (!targetId) return context.reply({ content: 'Invalid user. Use @mention or user ID.' });
@@ -294,6 +296,14 @@ function handleCharacter(context, userId, targetArg) {
       else return `**${slot}:** \`${id}\``;
       return `**${slot}:** ${tierBadge(rarity)} ${name} \`${id}\``;
     }).join('\n');
+  // Passive summary from equipped unique items
+  const { getPassives } = require('./battleEngine');
+  const passSum = getPassives(b.equipment, b.uniqueItems || {});
+  const passLines = Object.entries(passSum)
+    .filter(([id, v]) => v > 0 && PASSIVES[id])
+    .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}`)
+    .join('\n');
+  const passSection = passLines ? `\n\n**✨ Active Passives:**\n${passLines}` : '';
   const embed = new EmbedBuilder()
     .setAuthor({ name: `${displayName}'s character` })
     .setColor(COLOR)
@@ -304,7 +314,7 @@ function handleCharacter(context, userId, targetArg) {
       `🧪 Kryptonite: **${b.kryptonite.toLocaleString()}** · 🏰 Best depth: **${b.bestDepth}** · ⚔️ PvP: **${b.pvpWins || 0}W/${b.pvpLosses || 0}L**\n\n` +
       `❤️ HP **${stats.hp}** · ⚔️ ATK **${stats.atk}** · 🔮 MATK **${stats.matk}**\n` +
       `🛡️ DEF **${stats.def}** · ✨ MDEF **${stats.mdef}** · 💨 SPD **${stats.spd}**\n` +
-      `**Combat Score: ${totalStat}**\n\n${equipLines}`
+      `**Combat Score: ${totalStat}**\n\n${equipLines}${passSection}`
     )
     .setFooter({ text: 'ky equip <code> · ky unequip <slot>' });
   return context.reply({ embeds: [embed] });
@@ -326,10 +336,24 @@ function handleGear(context, userId, itemId) {
   // Detail view: ky gear <id>  (g* template OR ky* unique)
   if (lower) {
     let name, slot, rarity, stats, passives = [], id, sell;
+    let isForeign = false; // admin viewing someone else's gear
     if (lower.startsWith('ky') && b.uniqueItems && b.uniqueItems[lower]) {
       const u = b.uniqueItems[lower];
       id = u.id; name = u.name; slot = u.slot; rarity = u.rarity; stats = u.stats; passives = u.passives || [];
       sell = unique.sellValue(u);
+    } else if (lower.startsWith('ky') && economy.isAdmin(userId)) {
+      // Admin/superadmin: search ALL users for this kyID
+      const data = economy.readEconomy();
+      let found = null, ownerName = null;
+      for (const [uid, u] of Object.entries(data)) {
+        if (u.battle && u.battle.uniqueItems && u.battle.uniqueItems[lower]) {
+          found = u.battle.uniqueItems[lower]; ownerName = u.username || uid; break;
+        }
+      }
+      if (!found) return context.reply({ content: 'Gear not found (not in your collection or anyone else\'s).' });
+      id = found.id; name = found.name; slot = found.slot; rarity = found.rarity; stats = found.stats; passives = found.passives || [];
+      sell = unique.sellValue(found); isForeign = true;
+      name = `${name} _(owned by ${ownerName})_`;
     } else if (GEAR[lower]) {
       const g = GEAR[lower]; id = g.id; name = g.name; slot = g.slot; rarity = g.rarity; stats = g.stats; passives = [];
       sell = Math.round((g.price || 0) * battle.GEAR_SELLBACK);
@@ -347,7 +371,11 @@ function handleGear(context, userId, itemId) {
       embed.addFields({ name: 'Passive' + (passives.length > 1 ? 's' : ''),
         value: passives.map((p) => `${p.emoji} ${PASSIVES[p.id].name} +${p.value}${p.unit}\n_${passiveDesc(p)}_`).join('\n') });
     }
-    embed.setFooter({ text: `ky equip ${id} · ky sellgear ${id} → 🧪 ${sell.toLocaleString()}` });
+    if (!isForeign) {
+      embed.setFooter({ text: `ky equip ${id} · ky sellgear ${id} → 🧪 ${sell.toLocaleString()}` });
+    } else {
+      embed.setFooter({ text: '🔒 Read-only (not your gear)' });
+    }
     return context.reply({ embeds: [embed] });
   }
 
@@ -369,6 +397,7 @@ function renderGearList(userId, username, page) {
   const b = bd.b;
   const uniqIds = Object.keys(b.uniqueItems || {})
     .filter((id) => !Object.values(b.equipment).includes(id))
+    .filter((id) => b.uniqueItems[id].rarity !== 'immortal') // hide IMMORTAL items from gear list (hidden until equipped)
     .sort((a, c) => (b.uniqueItems[c].boughtAt || '').localeCompare(b.uniqueItems[a].boughtAt || ''));
   const tmplIds = Object.keys(b.bag).filter((id) => GEAR[id] && b.bag[id] > 0)
     .sort((a, c) => (RARITY_RANK[GEAR[c].rarity] || 0) - (RARITY_RANK[GEAR[a].rarity] || 0));
@@ -435,11 +464,13 @@ async function handleSell(context, userId, what) {
   return context.reply({ embeds: [resultEmbed(username, `🧪 Sold **${res.sold}** drop(s) for **${res.kryptonite.toLocaleString()}** Kryptonite.`)] });
 }
 function handleSellGear(context, userId, code, qty) {
+  if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
   const res = battle.sellGear(userId, (code || '').trim(), qty);
   if (!res.ok) return context.reply({ content: res.reason });
   return context.reply({ embeds: [resultEmbed(uname(context, userId), `🧪 Sold **${res.sold}× ${res.name}** for **${res.kryptonite.toLocaleString()}** Kryptonite (35% sellback).`)] });
 }
 function handleEquip(context, userId, code) {
+  if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
   code = (code || '').trim();
   const res = battle.equip(userId, code);
   if (!res.ok) return context.reply({ content: res.reason });
@@ -451,6 +482,7 @@ function handleEquip(context, userId, code) {
   return context.reply({ embeds: [resultEmbed(uname(context, userId), `⚙️ Equipped **${name}** → **${res.slot}**.${movedNote ? ' ' + movedNote : ''}`)] });
 }
 function handleUnequip(context, userId, slot) {
+  if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
   const res = battle.unequip(userId, (slot || '').trim().toLowerCase());
   if (!res.ok) return context.reply({ content: res.reason });
   const bd = getBattle(userId);
@@ -463,6 +495,7 @@ function handleUnequip(context, userId, slot) {
   return context.reply({ embeds: [resultEmbed(uname(context, userId), `⚙️ Unequipped **${name}** (${res.slot}) — ${dest}.`)] });
 }
 function handleBuyGear(context, userId, code) {
+  if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
   const args = String(code || '').toLowerCase().split(/\s+/).filter(Boolean);
   const code0 = args[0];
   // Mystery box (g100+) -> generate a kyXXXX unique
@@ -576,18 +609,23 @@ function pvpGearLine(c) {
 }
 function renderPvpPanel(fight, note) {
   const a = fight.p1, b = fight.p2;
-  const line = (c) => `❤️ ${hpBar20(c.hp, c.hpMax)}\n${pvpGearLine(c)}`;
-  const nm = (c) => `${cosmeticWrap(c.cosmetics, c.charName || c.username)} · Lv.${c.charLevel} ${CLASSES[c.charClass].name}`;
+  const sep = '─'.repeat(28);
+  const clsEm = (c) => CLASSES[c.charClass] ? CLASSES[c.charClass].emoji : '';
+  const nm = (c) => `${cosmeticWrap(c.cosmetics, c.charName || c.username)} · Lv.${c.charLevel} ${CLASSES[c.charClass].name} ${clsEm(c)}`;
+  const hpLine = (c) => `❤️ ${hpBar20(c.hp, c.hpMax)}`;
+  const statsLine = (c) => `❤️ HP ${c.hp} · ⚔️ ATK ${c.stats.atk} · 🔮 MATK ${c.stats.matk}\n🛡️ DEF ${c.stats.def} · ✨ MDEF ${c.stats.mdef} · 💨 SPD ${c.stats.spd}`;
+  const playerBlock = (c) => `**${nm(c)}**\n${hpLine(c)}\n${sep}\n${statsLine(c)}\n${sep}\n${pvpGearLine(c)}`;
   const turnN = fight.over ? fight.turnCount : Math.min(fight.turnCount + 1, PVP_TURN_CAP);
-  const activeNm = fight.over ? '🏁 Duel Over' : `🔄 ${cosmeticWrap(fight[fight.active].cosmetics, fight[fight.active].charName || fight[fight.active].username)}'s turn`;
-  const log = (note || '').trim() || (fight.over ? '_Match ended_' : '_Pick your skill below ⬇_');
+  const activeNm = fight.over ? '🏁 Duel Over' : `🔄 ${(fight[fight.active].charName || fight[fight.active].username)}'s turn`;
+  const log = (note || '').trim();
+  const logSection = log ? `${log}\n${activeNm}` : activeNm;
   const embed = new EmbedBuilder().setColor(PVP_COLOR)
     .setTitle(`⚔️ DUEL ARENA — Turn ${turnN}/${PVP_TURN_CAP}`)
-    .addFields(
-      { name: nm(a), value: line(a), inline: false },
-      { name: '⚡ VS ⚡', value: '🥊', inline: false },
-      { name: nm(b), value: line(b), inline: false },
-      { name: '━━━━━━━━━━━━━━━', value: `**${activeNm}**\n${log}`, inline: false },
+    .setDescription(
+      `${playerBlock(a)}\n\n` +
+      `⚡ **V S** ⚡\n\n` +
+      `${playerBlock(b)}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n${logSection}`
     );
   return embed;
 }
@@ -607,13 +645,14 @@ function pvpSkillRow(fight) {
 function pvpResultEmbed(fight) {
   const winKey = fight.winner, loseKey = winKey === 'p1' ? 'p2' : 'p1';
   const win = fight[winKey], lose = fight[loseKey];
-  const nm = (c) => cosmeticWrap(c.cosmetics, c.charName || c.username);
-  const reason = fight.afkForfeit ? `${nm(lose)} went AFK` : fight.manualForfeit ? `${nm(lose)} forfeited` : fight.timeout ? 'Turn cap — decided by HP%' : 'Knockout';
+  const clsEm = (c) => CLASSES[c.charClass] ? CLASSES[c.charClass].emoji : '';
+  const charNm = (c) => c.charName || c.username;
+  const nm = (c) => `${charNm(c)} · Lv.${c.charLevel} ${CLASSES[c.charClass].name} ${clsEm(c)}`;
+  const reason = fight.afkForfeit ? `${charNm(lose)} went AFK` : fight.manualForfeit ? `${charNm(lose)} forfeited` : fight.timeout ? 'Turn cap — decided by HP%' : 'Knockout';
   return new EmbedBuilder().setColor(PVP_COLOR).setTitle('⚔️ Duel Over')
-    .setDescription(`🏆 **${nm(win)}** wins!\n_${reason}_`)
-    .addFields(
-      { name: nm(fight.p1), value: `❤️ ${hpBar20(fight.p1.hp, fight.p1.hpMax)}`, inline: true },
-      { name: nm(fight.p2), value: `❤️ ${hpBar20(fight.p2.hp, fight.p2.hpMax)}`, inline: true },
+    .setDescription(`🏆 **${charNm(win)}** wins!\n_${reason}_\n\n` +
+      `**${nm(fight.p1)}**\n❤️ ${hpBar20(fight.p1.hp, fight.p1.hpMax)}\n\n` +
+      `**${nm(fight.p2)}**\n❤️ ${hpBar20(fight.p2.hp, fight.p2.hpMax)}`
     );
 }
 const pvpMessages = new Map(); // fightId -> live Discord message (for edits + AFK callback)
@@ -724,7 +763,7 @@ async function handlePvpButton(interaction) {
     } else {
       // ALWAYS restart the timer for the new active player (prevents hang if render failed)
       pvp.startAfkTimer(fightId, _onForfeitFor(fightId));
-      if (renderOk) { try { await interaction.message.edit({ embeds: [renderPvpPanel(fight, null)], components: pvpSkillRow(fight) }); } catch (_) {} }
+      if (renderOk) { try { await interaction.message.edit({ embeds: [renderPvpPanel(fight, eventStr || ' ')], components: pvpSkillRow(fight) }); } catch (_) {} }
     }
     return;
   }
@@ -855,13 +894,14 @@ async function handleBattleLb(context, subArgs) {
     const prefix = titleItem ? `[${(titleItem.emoji && titleItem.emoji !== '\u{1F3F7}️') ? titleItem.emoji + ' ' : ''}${titleItem.effect.value}] ` : '';
     const suffix = badgeItem ? ` ${badgeItem.effect.value}` : '';
     const className = CLASSES[p.charClass] ? CLASSES[p.charClass].name : (p.charClass.charAt(0).toUpperCase() + p.charClass.slice(1));
-    return `${medal} ${prefix}**${displayName}**${suffix} — 🏰 ${p.bestDepth} · ⚔️ ${p.score} (Lv.${p.charLevel} ${className})`;
+    const clsEmoji = CLASSES[p.charClass] ? CLASSES[p.charClass].emoji : '';
+    return `${medal} ${prefix}**${displayName}**${suffix} — 🏰 ${p.bestDepth} · Lv.${p.charLevel} ${className} ${clsEmoji}`;
   });
   const embed = new EmbedBuilder()
     .setColor(COLOR)
     .setTitle(`🏆 Battle Leaderboard — ${scopeLabel}`)
     .setDescription(lines.join('\n'))
-    .setFooter({ text: `🏰 = best floor depth · ⚔️ = combat score (tiebreak) · ky lb battle${isAll ? ' all' : ' (use "all" for global)'}` })
+    .setFooter({ text: `🏰 = best floor depth · ky lb battle${isAll ? ' all' : ' (use "all" for global)'}` })
     .setTimestamp();
   return context.reply({ embeds: [embed] });
 }

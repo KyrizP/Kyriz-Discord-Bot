@@ -24,7 +24,7 @@ const CLASSES = {
     name: 'Mage',
     emoji: '🔮',
     base:   { hp: 70,  atk: 4,  matk: 14, def: 5,  mdef: 9,  spd: 7 },
-    growth: { hp: 15,  atk: 1.0, matk: 3.0, def: 2.1, mdef: 2.5, spd: 3.0 },
+    growth: { hp: 15,  atk: 1.0, matk: 3.0, def: 2.1, mdef: 3.2, spd: 3.0 },
     skills: [
       { id: 'bolt',     name: 'Bolt',     mult: 1.0, type: 'magic', cd: 0 },
       { id: 'fireball', name: 'Fireball', mult: 1.7, type: 'magic', cd: 2, effect: { kind: 'burn', pct: 10, turns: 3 } },
@@ -116,6 +116,7 @@ const TIER_INFO = {
   legendary: { letter: 'L', color: '🟠', price: 5000,  passives: 1 },
   mythic:    { letter: 'M', color: '🟡', price: 10000, passives: 1 },
   divine:    { letter: 'D', color: '🔶', price: 20000, passives: 2 },
+  immortal:  { letter: 'I', color: '🔴', price: 0,     passives: 0 },
 };
 
 // LEGEND_GEAR_RANGES — random stat ranges per tier per slot. Inclusive bounds.
@@ -155,21 +156,26 @@ const MYSTERY_BOXES = {};
   });
 });
 
-// PASSIVES — catalog. weight drives the gacha roll (greed/wisdom slightly higher).
-// unit '' for flat (swift), '%' for the rest.
+// PASSIVES — catalog. Buffed values so Divine gear feels impactful (Lifesteal ~20% target).
+// weight drives the gacha roll (greed/wisdom slightly higher).
 const PASSIVES = {
-  berserker: { emoji: '🗡️', name: 'Berserker', weight: 10, unit: '%', ranges: { legendary: [8, 12],  mythic: [13, 17], divine: [18, 25] } },
-  precision: { emoji: '🎯', name: 'Precision', weight: 10, unit: '%', ranges: { legendary: [5, 8],   mythic: [9, 13],  divine: [14, 20] } },
-  lifesteal: { emoji: '🩸', name: 'Lifesteal', weight: 10, unit: '%', ranges: { legendary: [2, 4],   mythic: [4, 7],   divine: [7, 12] } },
-  swift:     { emoji: '💨', name: 'Swift',     weight: 10, unit: '',  ranges: { legendary: [3, 6],   mythic: [6, 10],  divine: [10, 16] } },
-  fortify:   { emoji: '🛡️', name: 'Fortify',   weight: 10, unit: '%', ranges: { legendary: [3, 6],   mythic: [6, 10],  divine: [10, 16] } },
-  evasion:   { emoji: '🫥', name: 'Evasion',   weight: 10, unit: '%', ranges: { legendary: [3, 5],   mythic: [5, 8],   divine: [8, 13] } },
-  greed:     { emoji: '🧪', name: 'Greed',     weight: 11, unit: '%', ranges: { legendary: [8, 12],  mythic: [13, 17], divine: [18, 25] } },
-  wisdom:    { emoji: '📚', name: 'Wisdom',    weight: 11, unit: '%', ranges: { legendary: [8, 12],  mythic: [13, 17], divine: [18, 25] } },
+  berserker: { emoji: '🗡️', name: 'Berserker', weight: 10, unit: '%', ranges: { legendary: [12, 18], mythic: [17, 23], divine: [22, 32] } },
+  precision: { emoji: '🎯', name: 'Precision', weight: 10, unit: '%', ranges: { legendary: [8, 14],  mythic: [12, 18], divine: [16, 25] } },
+  lifesteal: { emoji: '🩸', name: 'Lifesteal', weight: 10, unit: '%', ranges: { legendary: [5, 10],  mythic: [10, 17], divine: [15, 25] } },
+  swift:     { emoji: '💨', name: 'Swift',     weight: 10, unit: '',  ranges: { legendary: [4, 8],   mythic: [8, 14],  divine: [12, 20] } },
+  fortify:   { emoji: '🛡️', name: 'Fortify',   weight: 10, unit: '%', ranges: { legendary: [5, 10],  mythic: [10, 15], divine: [14, 22] } },
+  evasion:   { emoji: '🌀', name: 'Evasion',   weight: 10, unit: '%', ranges: { legendary: [3, 5],   mythic: [5, 8],   divine: [8, 13] } },
+  greed:     { emoji: '🧪', name: 'Greed',     weight: 11, unit: '%', ranges: { legendary: [12, 18], mythic: [17, 23], divine: [22, 30] } },
+  wisdom:    { emoji: '📚', name: 'Wisdom',    weight: 11, unit: '%', ranges: { legendary: [12, 18], mythic: [17, 23], divine: [22, 30] } },
 };
 
 // CRIT — player crit source is Precision passive only; enemy crit floor 45+.
 const CRIT = { mult: 1.75, cap: 0.50, enemyFloor: 45, enemyChance: 0.20 };
 
+// PASSIVE_CAPS — stacking across multiple gear is capped to prevent degenerate builds
+// (5× Lifesteal = 100% invulnerability, 5× Fortify = 110% → negative dmg, etc.).
+// Swift/Greed/Wisdom uncapped (flat/utility, diminishing returns naturally).
+const PASSIVE_CAPS = { berserker: 100, lifesteal: 80, fortify: 80, evasion: 40 };
+
 module.exports = { CLASSES, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, GEAR, MERCHANT_FLAT,
-  TIER_INFO, LEGEND_GEAR_RANGES, MYSTERY_BOXES, PASSIVES, CRIT };
+  TIER_INFO, LEGEND_GEAR_RANGES, MYSTERY_BOXES, PASSIVES, PASSIVE_CAPS, CRIT };
