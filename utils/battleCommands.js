@@ -223,26 +223,36 @@ function handleBattleHelp(context) {
       '⏩ **Push** — fight **1 floor** (animated clash). Can die.\n' +
       '⚡ **Fast Sweep** — auto-fight **5 floors** at once (fast, blind — riskier).\n' +
       '🧪 **Extract** — bank drops + EXP (safe). Locked until you clear ≥1 floor.\n\n' +
-      '⚔️ **COMBAT** (auto): your class uses skills — Warrior _Slash/Parry Strike/War Cry_, Mage _Bolt/Fireball/Meteor_. Equipped passives fire (🗡️Berserker, 🎯Precision crit, 🩸Lifesteal, 🛡️Fortify…). **Enemies crit from floor 45+** — bring sustain gear (Lifesteal/Fortify/DEF) to push deep.\n\n' +
+      '⚔️ **COMBAT** (auto in PvE, pick skills in PvP):\n\n' +
+      'Warrior ⚔️\n' +
+      'Slash — 1.0× ATK\n' +
+      'Parry Strike — 1.6× ATK + block next hit (CD2)\n' +
+      'War Cry — 2.5× ATK + 50% DEF pierce + buff (CD4)\n\n' +
+      'Mage 🔮\n' +
+      'Bolt — 1.0× MATK\n' +
+      'Fireball — 1.7× MATK + burn 10%/turn 3 turns (CD2)\n' +
+      'Meteor — 2.5× MATK + heavy burn + 50% MDEF pierce (CD4)\n\n' +
+      '_Burn bypasses Parry. Enemies crit from floor 45+._\n\n' +
       '💀 **Death** = lose drops + EXP (this run only). **Extract** to keep them.\n' +
       '_Push your luck: extract early (safe) or go deeper (more loot, more risk)._\n\n' +
       '💰 **KRYPTONITE (🧪)** — drops are NOT 🧪, you must **sell** them:\n' +
       '`ky sell all` → sell all drops → 🧪 · `ky sell d83 5` → sell 5 of d83\n\n' +
       '⚔️ **GEAR** (get stronger — pass walls):\n' +
-      '`ky shop gear [tier]` → browse. Common–Epic = fixed gear (`g1`–`g23`). **Legend/Mythic/Divine = mystery boxes** (`g100`+) — random stats + passive!\n' +
+      '`ky shop gear [tier]` → browse. `ky shop gear rates` → see all stat + passive % ranges.\n' +
+      'Common–Epic = fixed gear (`g1`–`g23`). **Legend/Mythic/Divine = mystery boxes** (`g100`+) — random stats + passive!\n' +
       'Buy: `ky buygear <code>`. Weapon/head/armor = **pure gacha** (random ATK/MATK, DEF/MDEF — can\'t pick).\n' +
       '`ky equip <id>` · `ky sellgear <id>` · `ky sellgear <rarity> all` (sell ALL spares of a tier, e.g. `ky sellgear d all`)\n' +
       '⚠️ **Gear locked during battle/duel** — finish first (`ky end`).\n\n' +
       '🎲 **REROLL**: bad roll? `ky sellgear <id>` (35% refund) → rebuy → new random!\n\n' +
-      '✨ **PASSIVES** (on Legend+ gear, auto-active in PvE & PvP):\n' +
-      '🗡️ Berserker (+% dmg, cap 100%) · 🎯 Precision (crit 1.75×, cap 50%) · 🩸 Lifesteal (heal, cap 80%) · 💨 Swift (+SPD) · 🛡️ Fortify (−dmg taken, cap 80%) · 🌀 Evasion (dodge, cap 60%) · 🧪 Greed (+🧪 sell) · 📚 Wisdom (+EXP)\n' +
-      '_Build matters: Lifesteal+Fortify+DEF (sustain) delves far deeper than pure ATK — the wall is HP-drain._\n\n' +
+      '✨ **PASSIVES** (on Legend+ gear, auto-active in PvE & PvP — see shop for stat ranges per tier):\n' +
+      '🗡️ Berserker (+% dmg, cap 100%) · 🎯 Precision (crit 1.75×, cap 50%) · 🩸 Lifesteal (heal % of dmg dealt, cap 80%) · 💨 Swift (+flat SPD) · 🛡️ Fortify (−% dmg taken, cap 80%) · 🌀 Evasion (dodge %, cap 40%) · 🧪 Greed (+% 🧪 sell) · 📚 Wisdom (+% EXP)\n' +
+      '_Lifesteal works on BOTH physical & magic damage! Stacks across gear (capped)._\n\n' +
       '📈 **PROGRESSION**\n' +
       'Push → Char EXP → level up → base stats grow. Gear → more stats → delve deeper → better drops.\n' +
       'Stuck at a floor? **Grind** (sweep + push + extract) → level/gear up → pass it!\n' +
       '_Floor & level have **NO CAP** — grind forever._'
     )
-    .addFields({ name: '⚔️ PvP DUELS', value: "`ky battle @user` — challenge a player to a turn-based duel! HP at 70%, skills with cooldowns, all passives active. Win → W/L record (on `ky char`). AFK 1 min on your turn = forfeit; `ky end` forfeits anytime. No loot lost — pure glory. 🏆", inline: false })
+    .addFields({ name: '⚔️ PvP DUELS', value: "`ky battle @user` — challenge a player! Turn-based, pick your skills each turn, all passives active. Level gap shrinks (dampened) so nearby levels = strategy decides. Win → W/L on `ky char`. AFK 1 min = forfeit; `ky end` anytime. No loot lost. 🏆", inline: false })
     .setFooter({ text: 'ky battle help | 💎 Kryztal = entry · 🧪 Kryptonite = battle currency' });
   return context.reply({ embeds: [embed] });
 }
@@ -311,7 +321,8 @@ function handleCharacter(context, userId, targetArg) {
     .setDescription(
       `🏷️ Name: ${b.charName || `_(unset — \`ky char name <nama>\`)`}\n` +
       `**Char EXP:** ${b.charExp}/${b.charExpNeeded}\n` +
-      `🧪 Kryptonite: **${b.kryptonite.toLocaleString()}** · 🏰 Best depth: **${b.bestDepth}** · ⚔️ PvP: **${b.pvpWins || 0}W/${b.pvpLosses || 0}L**\n\n` +
+      `🧪 Kryptonite: **${b.kryptonite.toLocaleString()}** · 🏰 Best depth: **${b.bestDepth}**\n` +
+      `⚔️ PvP: **${b.pvpWins || 0}W/${b.pvpLosses || 0}L**${((b.pvpWins || 0) + (b.pvpLosses || 0)) > 0 ? ` (${Math.round((b.pvpWins || 0) / ((b.pvpWins || 0) + (b.pvpLosses || 0)) * 100)}% win rate)` : ''}\n\n` +
       `❤️ HP **${stats.hp}** · ⚔️ ATK **${stats.atk}** · 🔮 MATK **${stats.matk}**\n` +
       `🛡️ DEF **${stats.def}** · ✨ MDEF **${stats.mdef}** · 💨 SPD **${stats.spd}**\n` +
       `**Combat Score: ${totalStat}**\n\n${equipLines}${passSection}`
@@ -566,17 +577,54 @@ function renderShopGear(userId, username, page, tierFilter) {
     .setAuthor({ name: `${username}` })
     .setColor(COLOR)
     .setTitle('🛒 Shop — Gear' + (tierFilter ? ` (${_cap(tierFilter)})` : ''))
-    .setDescription(`Top = highest rarity. **Legend+ = mystery boxes** (random stats + passive). Weapon/Head/Armor are **pure gacha** (ATK or MATK / DEF or MDEF — random, can't pick). Unhappy with a roll? Sell back (35%) + rebuy to reroll!\n\n${slice.join('\n')}`)
+    .setDescription(`Top = highest rarity. **Legend+ = mystery boxes** (random stats + passive). Pure gacha (ATK/MATK, DEF/MDEF — random). Unhappy? Sell (35%) + rebuy to reroll. Check \`ky shop gear rates\` for stat & passive % ranges.\n\n${slice.join('\n')}`)
     .setFooter({ text: `Page ${page}/${total} • ky buygear <code> · ky sellgear <code>` });
   return { embed, components: total > 1 ? [shopGearRow(userId, page, total)] : [], total };
 }
 function handleShopEquipment(context, userId, tierArg) {
   const t = String(tierArg || '').toLowerCase();
+  if (t === 'rates' || t === 'rate' || t === 'info') {
+    return context.reply({ embeds: [renderGearRates(uname(context, userId))] });
+  }
   const valid = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'divine'];
   const filter = valid.includes(t) ? t : null;
   const { embed, components } = renderShopGear(userId, uname(context, userId), 1, filter);
   return context.reply({ embeds: [embed], components });
 }
+function renderGearRates(username) {
+  const R = require('./battleConfig').LEGEND_GEAR_RANGES;
+  const P = require('./battleConfig').PASSIVES;
+  const TI = require('./battleConfig').TIER_INFO;
+  const tiers = ['legendary', 'mythic', 'divine'];
+  const shortName = { legendary: 'L', mythic: 'M', divine: 'D' };
+  let desc = '**📊 STAT RANGES** (random within range)\n\n';
+  desc += '**Weapon** (ATK or MATK, random):\n';
+  for (const t of tiers) desc += `  ${TI[t].color}${shortName[t]} +${R[t].weapon.atk[0]}-${R[t].weapon.atk[1]}\n`;
+  desc += '\n**Head/Armor** (DEF or MDEF, random 1 stat):\n';
+  for (const t of tiers) desc += `  ${TI[t].color}${shortName[t]} Head +${R[t].head.stat[0]}-${R[t].head.stat[1]} · Armor +${R[t].armor.stat[0]}-${R[t].armor.stat[1]}\n`;
+  desc += '\n**Boots** (SPD):\n';
+  for (const t of tiers) desc += `  ${TI[t].color}${shortName[t]} +${R[t].boots.spd[0]}-${R[t].boots.spd[1]}\n`;
+  desc += '\n**Accessory** (2 random different stats):\n';
+  for (const t of tiers) desc += `  ${TI[t].color}${shortName[t]} +${R[t].accessory.main[0]}-${R[t].accessory.main[1]} (SPD +${R[t].accessory.spd[0]}-${R[t].accessory.spd[1]})\n`;
+  desc += `\n**✨ PASSIVE RANGES** (random type, random %)\n`;
+  desc += '```';
+  desc += 'Passive'.padEnd(14) + '  ';
+  for (const t of tiers) desc += shortName[t].padEnd(10);
+  desc += '\n';
+  for (const [id, p] of Object.entries(P)) {
+    desc += (p.emoji + ' ' + p.name).padEnd(14) + '  ';
+    for (const t of tiers) desc += (p.ranges[t][0] + '-' + p.ranges[t][1] + (p.unit || '')).padEnd(10);
+    desc += '\n';
+  }
+  desc += '```\n';
+  desc += `Legend: 1 passive · Mythic: 1 passive · Divine: **2 passives** (different types)\n`;
+  desc += `Stacking caps: Berserker 100% · Lifesteal 80% · Fortify 80% · Evasion 40% · Crit 50%\n`;
+  desc += `_Sell back at 35% + rebuy to reroll!_`;
+  return new EmbedBuilder().setAuthor({ name: `${username}` }).setColor(COLOR)
+    .setTitle('🎰 Mystery Box Rates & Ranges').setDescription(desc)
+    .setFooter({ text: 'ky shop gear [tier] to browse · ky buygear <code> to buy' });
+}
+
 
 // ---------- PvP (turn-based duels) ----------
 // Cosmetics name wrap — mirrors handleBattleLb's title/badge resolution exactly.
