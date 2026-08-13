@@ -235,11 +235,11 @@ function handleBattleHelp(context) {
       'Warrior ⚔️\n' +
       'Slash — 1.0× ATK\n' +
       'Parry Strike — 1.6× ATK + block next hit (CD2)\n' +
-      'War Cry — 2.5× ATK + 50% DEF pierce + buff (CD4)\n\n' +
+      'War Cry — 2.5× ATK + 50% DEF pierce + buff + **pierces evasion** (CD4)\n\n' +
       'Mage 🔮\n' +
       'Bolt — 1.0× MATK\n' +
       'Fireball — 1.7× MATK + burn 10%/turn 3 turns (CD2)\n' +
-      'Meteor — 2.5× MATK + heavy burn + 50% MDEF pierce (CD4)\n\n' +
+      'Meteor — 2.5× MATK + heavy burn + 50% MDEF pierce + **pierces evasion** (CD4)\n\n' +
       '_Burn bypasses Parry. Enemies crit from floor 45+._\n\n' +
       '💀 **Death** = lose drops + EXP (this run only). **Extract** to keep them.\n' +
       '_Push your luck: extract early (safe) or go deeper (more loot, more risk)._\n\n' +
@@ -253,7 +253,7 @@ function handleBattleHelp(context) {
       '⚠️ **Gear locked during battle/duel** — finish first (`ky end`).\n\n' +
       '🎲 **REROLL**: bad roll? `ky sellgear <id>` (35% refund) → rebuy → new random!\n\n' +
       '✨ **PASSIVES** (on Legend+ gear, auto-active in PvE & PvP — see shop for stat ranges per tier):\n' +
-      '🗡️ Berserker (+% dmg, cap 100%) · 🎯 Precision (crit 1.75×, cap 50%) · 🩸 Lifesteal (heal % of dmg dealt, cap 80%) · 💨 Swift (+flat SPD) · 🛡️ Fortify (−% dmg taken, cap 80%) · 🌀 Evasion (dodge %, cap 40%) · 🧪 Greed (+% 🧪 sell) · 📚 Wisdom (+% EXP)\n' +
+      '🗡️ Berserker (+% dmg, cap 100%) · 🎯 Precision (crit 1.75×, cap 50%) · 🩸 Lifesteal (heal % of dmg dealt, cap 65%) · 💨 Swift (+flat SPD) · 🛡️ Fortify (−% dmg taken, cap 45%) · 🌀 Evasion (dodge %, cap 40% — ults pierce) · 🧪 Greed (+% 🧪 sell) · 📚 Wisdom (+% EXP)\n' +
       '_Lifesteal works on BOTH physical & magic damage! Stacks across gear (capped)._\n\n' +
       '📈 **PROGRESSION**\n' +
       'Push → Char EXP → level up → base stats grow. Gear → more stats → delve deeper → better drops.\n' +

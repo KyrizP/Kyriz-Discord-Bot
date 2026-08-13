@@ -13,22 +13,22 @@ const CLASSES = {
     name: 'Warrior',
     emoji: '⚔️',
     base:   { hp: 100, atk: 12, matk: 4,  def: 10, mdef: 5,  spd: 6 },
-    growth: { hp: 20,  atk: 2.0, matk: 0.8, def: 2.0, mdef: 2.0, spd: 0.5 },
+    growth: { hp: 20,  atk: 2.2, matk: 0.8, def: 2.0, mdef: 2.0, spd: 0.5 }, // v1.2: ATK 2.0→2.2 (slight buff for PvE parity)
     skills: [
       { id: 'slash',  name: 'Slash',        mult: 1.0, type: 'physical', cd: 0 },
       { id: 'parry',  name: 'Parry Strike', mult: 1.6, type: 'physical', cd: 2, effect: { kind: 'parry' } },
-      { id: 'warcry', name: 'War Cry',      mult: 2.5, type: 'physical', cd: 4, effect: { kind: 'buff', stat: 'atk', pct: 25, turns: 2, dmgReduce: 35, pierce: 0.5 } },
+      { id: 'warcry', name: 'War Cry',      mult: 2.5, type: 'physical', cd: 4, effect: { kind: 'buff', stat: 'atk', pct: 25, turns: 2, dmgReduce: 35, pierce: 0.5, pierceEvasion: true } },
     ],
   },
   mage: {
     name: 'Mage',
     emoji: '🔮',
     base:   { hp: 70,  atk: 4,  matk: 14, def: 5,  mdef: 9,  spd: 7 },
-    growth: { hp: 15,  atk: 1.0, matk: 3.0, def: 2.1, mdef: 3.2, spd: 3.0 },
+    growth: { hp: 15,  atk: 1.0, matk: 3.0, def: 2.0, mdef: 3.2, spd: 3.0 }, // v1.2: DEF 2.1→2.0 (equal to Warrior DEF — PvP balance via pvpManager instead)
     skills: [
       { id: 'bolt',     name: 'Bolt',     mult: 1.0, type: 'magic', cd: 0 },
       { id: 'fireball', name: 'Fireball', mult: 1.7, type: 'magic', cd: 2, effect: { kind: 'burn', pct: 10, turns: 3 } },
-      { id: 'meteor',   name: 'Meteor',   mult: 2.5, type: 'magic', cd: 4, effect: { kind: 'burn', pct: 20, turns: 3, pierce: 0.5 } },
+      { id: 'meteor',   name: 'Meteor',   mult: 2.5, type: 'magic', cd: 4, effect: { kind: 'burn', pct: 20, turns: 3, pierce: 0.5, pierceEvasion: true } },
     ],
   },
 };
@@ -175,7 +175,8 @@ const CRIT = { mult: 1.75, cap: 0.50, enemyFloor: 45, enemyChance: 0.20 };
 // PASSIVE_CAPS — stacking across multiple gear is capped to prevent degenerate builds
 // (5× Lifesteal = 100% invulnerability, 5× Fortify = 110% → negative dmg, etc.).
 // Swift/Greed/Wisdom uncapped (flat/utility, diminishing returns naturally).
-const PASSIVE_CAPS = { berserker: 100, lifesteal: 80, fortify: 80, evasion: 40 };
+// v1.2 nerfs: Fortify 80→45 (was 100-0 PvP), Lifesteal 80→65. Evasion stays 40 (ult pierce is enough counter).
+const PASSIVE_CAPS = { berserker: 100, lifesteal: 65, fortify: 45, evasion: 40 };
 
 module.exports = { CLASSES, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, GEAR, MERCHANT_FLAT,
   TIER_INFO, LEGEND_GEAR_RANGES, MYSTERY_BOXES, PASSIVES, PASSIVE_CAPS, CRIT };

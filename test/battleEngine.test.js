@@ -10,7 +10,7 @@ let s = E.computeStats(1, 'warrior', {});
 ok(s.hp === 100 && s.atk === 12 && s.spd === 6, 'warrior lvl1 base exact');
 let s10 = E.computeStats(10, 'warrior', {});
 ok(s10.hp === 280, 'warrior lvl10 hp = 280 (100 + growth 20*9)');
-ok(s10.atk === 30, 'warrior lvl10 atk = 30 (12 + growth 2.0*9)');
+ok(s10.atk === 32, 'warrior lvl10 atk = 32 (12 + growth 2.2*9)');
 ok(s10.hp > E.computeStats(10, 'mage', {}).hp, 'warrior tankier than mage same lvl');
 let withGear = E.computeStats(1, 'warrior', { weapon: 'g1' });
 ok(withGear.atk === 15, 'gear adds atk: 12 + g1(3) = 15');
@@ -24,7 +24,7 @@ const uniq = {
             passives: [{ id: 'swift', emoji: '💨', value: 10, unit: '' }, { id: 'precision', emoji: '🎯', value: 14, unit: '%' }] },
 };
 let su = E.computeStats(10, 'warrior', { weapon: 'ky1111', boots: 'ky2222' }, uniq);
-ok(su.atk === 55, 'unique weapon atk applied: 30 + 25 = 55');
+ok(su.atk === 57, 'unique weapon atk applied: 32 + 25 = 57');
 let base10sp = E.computeStats(10, 'warrior', {});
 ok(su.spd === base10sp.spd + 30 + 10, 'swift passive adds flat spd on top of boots');
 
