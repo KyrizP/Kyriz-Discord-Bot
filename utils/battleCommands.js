@@ -746,6 +746,13 @@ function _onForfeitFor(fightId) {
   return (fid, f) => _pvpFinish(fid, f);
 }
 
+const PVP_CHALLENGE_MS = 60_000; // challenge auto-expires after 60s
+const challengeTimers = new Map(); // `${aId}_${bId}` -> setTimeout handle
+function clearChallengeTimer(aId, bId) {
+  const key = `${aId}_${bId}`;
+  if (challengeTimers.has(key)) { clearTimeout(challengeTimers.get(key)); challengeTimers.delete(key); }
+}
+
 async function handlePvp(context, userId, targetId) {
   if (!targetId) return context.reply({ content: 'Mention someone to duel: `ky battle @user`' });
   if (targetId === userId) return context.reply({ content: 'You cannot duel yourself.' });
@@ -759,12 +766,18 @@ async function handlePvp(context, userId, targetId) {
   if (!foe || !foe.battle || !foe.battle.charClass) return context.reply({ content: 'That player has no character.' });
   const embed = new EmbedBuilder().setColor(PVP_COLOR)
     .setTitle('⚔️ Duel Challenge')
-    .setDescription(`<@${userId}> challenges <@${targetId}> to a duel!\nAccept to begin (turn-based, 1-min turn timer).`);
+    .setDescription(`<@${userId}> challenges <@${targetId}> to a duel!\nAccept within **60s** or it expires. Turn-based, 1-min turn timer.`);
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`pvp_accept_${userId}_${targetId}`).setLabel('Accept').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`pvp_decline_${userId}_${targetId}`).setLabel('Decline').setStyle(ButtonStyle.Danger),
   );
-  return context.reply({ embeds: [embed], components: [row], allowedMentions: { users: [targetId] } });
+  const msg = await context.reply({ embeds: [embed], components: [row], allowedMentions: { users: [targetId] } });
+  // Challenge expiry timer — auto-decline after 60s if no response
+  const key = `${userId}_${targetId}`;
+  challengeTimers.set(key, setTimeout(() => {
+    challengeTimers.delete(key);
+    try { msg.edit({ embeds: [infoEmbed('', 'Duel challenge expired (no response in 60s).')], components: [] }); } catch (_) {}
+  }, PVP_CHALLENGE_MS));
 }
 
 async function handlePvpButton(interaction) {
@@ -773,6 +786,7 @@ async function handlePvpButton(interaction) {
   if (customId.startsWith('pvp_accept_')) {
     const parts = customId.split('_'); // pvp_accept_<aId>_<bId>
     const aId = parts[2], bId = parts[3];
+    clearChallengeTimer(aId, bId); // cancel expiry timer — challenge being resolved
     if (interaction.user.id !== bId) return interaction.reply({ content: '⛔ This challenge is not yours.', ephemeral: true });
     if (battle.hasActiveRun(aId) || battle.hasActiveRun(bId) || pvp.isInFight(aId) || pvp.isInFight(bId))
       return interaction.update({ embeds: [infoEmbed('', 'Duel cancelled — a player is now busy.')], components: [] });
@@ -798,6 +812,7 @@ async function handlePvpButton(interaction) {
     const parts = customId.split('_');
     const aId = parts[2], bId = parts[3];
     if (interaction.user.id !== bId && interaction.user.id !== aId) return interaction.reply({ content: '⛔ Not yours.', ephemeral: true });
+    clearChallengeTimer(aId, bId); // cancel expiry timer — challenge being resolved
     return interaction.update({ embeds: [infoEmbed('', 'Duel declined.')], components: [] });
   }
 
