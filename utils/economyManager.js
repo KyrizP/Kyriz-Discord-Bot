@@ -155,7 +155,6 @@ function getUser(userId) {
  * Update username (in case they changed it)
  */
 function updateUsername(userId, username) {
-  if (isSuperAdmin(userId)) return;
   const data = readJSON(ECONOMY_PATH);
   if (data[userId]) {
     data[userId].username = username;

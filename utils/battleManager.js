@@ -176,7 +176,7 @@ function applySellGear(data, userId, itemId, qty) {
     }
     if (sold === 0) return { ok: false, reason: 'No unequipped ' + tier + ' gear to sell.' };
     b.kryptonite += kry;
-    return { ok: true, kryptonite: kry, sold, name: sold + '× ' + tier };
+    return { ok: true, kryptonite: kry, sold, name: tier };
   }
   const item = GEAR[itemId];
   if (!item) return { ok: false, reason: 'Not equipment.' };
@@ -351,7 +351,9 @@ function extractRun(userId) {
   const data = economy.readEconomy();
   const res = applyExtract(data, userId, run);
   economy.writeEconomy(data);
-  try { economy.addXP(userId, PROFILE_XP_EXTRACT); } catch (_) { /* profile XP best-effort */ }
+  if ((run.cleared || 0) > 0) { // only give profile XP if at least 1 floor was cleared (anti ky end spam farm)
+    try { economy.addXP(userId, PROFILE_XP_EXTRACT); } catch (_) { /* profile XP best-effort */ }
+  }
   activeRuns.delete(userId);
   return { ok: true, banked: res.banked, exp: res.exp, depth, leveledUp: res.leveledUp, newLevel: res.newLevel };
 }

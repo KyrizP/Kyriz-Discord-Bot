@@ -95,9 +95,17 @@ function fightFrameEmbed(username, floor, frame, playerMaxHp, enemyMaxHp) {
     )
     .setTimestamp();
 }
-function equipStr(equipment) {
+function equipStr(equipment, uniqueItems) {
   return ['weapon', 'head', 'armor', 'boots', 'accessory']
-    .map((s) => { const id = equipment && equipment[s]; const it = id ? GEAR[id] : null; return `**${s}:** ${it ? it.name : '—'}`; })
+    .map((s) => {
+      const id = equipment && equipment[s];
+      if (!id) return `**${s}:** —`;
+      let rarity, name;
+      if (GEAR[id]) { rarity = GEAR[id].rarity; name = GEAR[id].name; }
+      else if (uniqueItems && uniqueItems[id]) { rarity = uniqueItems[id].rarity; name = uniqueItems[id].name; }
+      else return `**${s}:** \`${id}\``;
+      return `**${s}:** ${tierBadge(rarity)} ${name} \`${id}\``;
+    })
     .join('\n');
 }
 function tierBadge(rarity) {
@@ -131,7 +139,7 @@ function delveFloorEmbed(username, run, note) {
       `❤️ **${hp}/${maxHp}**\n${hpBar(hp, maxHp)}\n\n` +
       `🎒 Run bag: **${bagCount}** drop(s) · ✨ EXP: **${run.expAccum}** _(lost if you die)_\n\n${note}`
     )
-    .addFields({ name: '⚔️ Equipped', value: equipStr(run.equipment), inline: true })
+    .addFields({ name: '⚔️ Equipped', value: equipStr(run.equipment, run.uniqueItems), inline: true })
     .setTimestamp();
 }
 function pushWinEmbed(username, res, run) {
@@ -332,12 +340,34 @@ function handleCharacter(context, userId, targetArg) {
 }
 
 function handleBag(context, userId, page) {
+  // Admin inspect: @mention or userID
+  const argStr = String(page || '');
+  const mentionMatch = argStr.match(/^<@!?(\d+)>$/) || (/^\d{17,20}$/.test(argStr) ? [, argStr] : null);
+  if (mentionMatch) {
+    if (!economy.isAdmin(userId)) return context.reply({ content: 'Only admins can inspect other players.' });
+    const targetId = mentionMatch[1];
+    const targetUser = economy.getUser(targetId);
+    if (!targetUser) return context.reply({ content: 'User not found.' });
+    const { embed } = renderBag(targetId, targetUser.username || targetId, 1);
+    return context.reply({ embeds: [embed] });
+  }
   const username = uname(context, userId);
-  const { embed } = renderBag(userId, username, page || 1);
+  const { embed } = renderBag(userId, username, parseInt(page) || 1);
   return context.reply({ embeds: [embed] });
 }
 const RARITY_INITIAL = { common: 'C', uncommon: 'U', rare: 'R', epic: 'E', legendary: 'L', mythic: 'M', divine: 'D' };
 function handleGear(context, userId, itemId) {
+  // Admin inspect: @mention or userID → show target's spare gear list
+  const argStr = String(itemId || '');
+  const mentionMatch = argStr.match(/^<@!?(\d+)>$/) || (/^\d{17,20}$/.test(argStr) ? [, argStr] : null);
+  if (mentionMatch) {
+    if (!economy.isAdmin(userId)) return context.reply({ content: 'Only admins can inspect other players.' });
+    const targetId = mentionMatch[1];
+    const targetUser = economy.getUser(targetId);
+    if (!targetUser) return context.reply({ content: 'User not found.' });
+    const { embed, components } = renderGearList(targetId, targetUser.username || targetId, 1);
+    return context.reply({ embeds: [embed], components });
+  }
   const username = uname(context, userId);
   const bd = getBattle(userId);
   if (!bd) return context.reply({ content: 'Not registered.' });

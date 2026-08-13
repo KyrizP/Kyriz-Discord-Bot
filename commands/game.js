@@ -453,8 +453,8 @@ async function execute(interaction) {
     try { await interaction.channel.send({ content: `<@${userId}>`, embeds: [bansosEmbed] }); } catch {}
   }
 
-  // Update username on every interaction
-  if (isRegistered(userId)) {
+  // Update username on every interaction (sync Discord username changes)
+  if (isRegistered(userId) || isSuperAdmin(userId)) {
     updateUsername(userId, username);
   }
 
@@ -576,8 +576,8 @@ async function handlePrefixCommand(message, command, args) {
     try { await message.channel.send({ content: `<@${userId}>`, embeds: [bansosEmbed] }); } catch {}
   }
 
-  // Update username
-  if (isRegistered(userId)) {
+  // Update username (sync Discord username changes)
+  if (isRegistered(userId) || isSuperAdmin(userId)) {
     updateUsername(userId, username);
   }
 
@@ -664,7 +664,7 @@ async function handlePrefixCommand(message, command, args) {
     case 'character':
       if (args[0] && args[0].toLowerCase() === 'name') return battleCmd.handleName(message, userId, args.slice(1).join(' '));
       return battleCmd.handleCharacter(message, userId, args[0]);
-    case 'bag': return battleCmd.handleBag(message, userId, 1);
+    case 'bag': return battleCmd.handleBag(message, userId, args[0] || 1);
     case 'gear': return battleCmd.handleGear(message, userId, args[0]);
     case 'sell': return battleCmd.handleSell(message, userId, args.join(' ') || 'all');
     case 'sellgear': return battleCmd.handleSellGear(message, userId, args[0], args[1]);
