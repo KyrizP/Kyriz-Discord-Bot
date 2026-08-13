@@ -14,7 +14,7 @@ const { CRIT } = require('./battleConfig');
 const activePvpFights = new Map(); // fightId -> fight
 const AFK_MS = 60_000;
 const TURN_CAP = 26; // v1.3 balance: 20→26 — enough room for kills, W vs W uses HP% tiebreak at cap
-const PVP_HP_RATIO = 1.0; // v1.3 balance: 1.5→1.0 — lower HP = fights end via kill (not timeout), reduces Warrior HP advantage
+const PVP_HP_RATIO = 1.15; // v1.4 balance: 1.0→1.15 — slight HP boost for sustain (fights ~6-7t/player instead of ~3t)
 // PvP level dampen (sqrt): higher level gives a SMALL edge (grinding still useful) but a few levels
 // don't auto-win (strategy decides nearby levels), and stats don't explode at extreme levels.
 // PvE uses the REAL level (untouched) — this is PvP-only, in startFight.
@@ -24,7 +24,7 @@ function pvpEffLevel(level) { return 1 + PVP_LEVEL_K * Math.sqrt(Math.max(0, (le
 // Multiplicative defense: stacking DEF/MRED gives %-reduction (additive formula let burst ignore DEF).
 // Damage scalar: lengthens fights (spec wants 4-10 rounds, not 1-2 turn one-shots). Ults gated turn 1.
 // After live playtest: if one class dominates, adjust PVP_DAMAGE_MULT (lower = tankier/slower).
-const PVP_DAMAGE_MULT = 1.0; // v1.3 balance: 0.8→1.0 — full damage so fights resolve via kill, not timeout (Warrior HP advantage)
+const PVP_DAMAGE_MULT = 0.7; // v1.4 balance: 1.0→0.7 — slower fights, more sustain/strategy. Burn bypasses this (Mage class identity)
 const PVP_GATE_ULTS = true;
 const PVP_DEF_MODE = 'add'; // additive defense (dampen bounds stats so burst can't explode; more damage through = faster fights)
 const PVP_DEF_K = 80;
@@ -96,7 +96,7 @@ function resolvePvpTurn(fightId, actorId, skillId) {
 
   // 1. burn ticks at start of the actor's (victim's) turn
   if (actor.burn.turns > 0) {
-    const bdmg = Math.max(1, Math.round(actor.burn.dmg * PVP_DAMAGE_MULT));
+    const bdmg = Math.max(1, actor.burn.dmg); // v1.4: burn bypasses PVP_DAMAGE_MULT — Mage burn stays full strength while skill damage is dampened
     actor.hp -= bdmg; actor.burn.turns -= 1;
     events.push({ type: 'burn', target: actorKey, dmg: bdmg });
     if (actor.hp <= 0) { actor.hp = 0; return _endTurn(fight, defKey, actorKey, events, true); } // burn killed the ACTOR → defender (burn caster) wins
@@ -140,7 +140,7 @@ function resolvePvpTurn(fightId, actorId, skillId) {
   if (skill.effect) {
     if (skill.effect.kind === 'buff') { actor.buff.atkPct = skill.effect.pct; actor.buff.turns = skill.effect.turns; actor.buff.dmgReduce = Math.min(skill.effect.dmgReduce || 0, 25); }
     else if (skill.effect.kind === 'parry') { actor.parryBlocks = 1; } // blocks next incoming hit (cd 2 — not spammable)
-    else if (skill.effect.kind === 'burn') { def.burn.dmg = Math.round(actor.stats.matk * skill.effect.pct / 100 * 1.3); def.burn.turns = skill.effect.turns; }
+    else if (skill.effect.kind === 'burn') { def.burn.dmg = Math.round(actor.stats.matk * skill.effect.pct / 100 * 1.2); def.burn.turns = skill.effect.turns; } // v1.4: burn×1.2 (was 1.3) — lowered since burn now bypasses DMG_MULT
   }
   if (skill.cd) actor.cdLeft[skill.id] = skill.cd;
 
