@@ -81,6 +81,7 @@ Kamu adalah developer berpengalaman 20 tahun yang spesialis dalam bot Discord, k
 ### Utilities (9 files)
 - `utils/economyManager.js` (605 lines) — ALL economy logic: register, balance CRUD, transfer (with limits), XP/leveling, daily reward, leaderboard, admin management. Data: `data/economy.json`. Every operation does `readFileSync` → mutate → `writeFileSync`
 - `utils/dataManager.js` (177 lines) — Auto-reply CRUD + authorized users CRUD. Data: `data/replies.json`, `data/users.json`
+- `utils/botState.js` — Persistent cross-restart state, data: `data/botState.json`: maintenance flag, bansos round + per-round claimers, `ky patch` notes + announcement message ids (edit-not-repost). Missing/corrupt file → live-safe defaults
 - `utils/permissionCheck.js` (29 lines) — `isSuperAdmin(userId)` (checks env) + `isAuthorizedUser(guildId, userId)` (checks users.json)
 - `utils/cardDeck.js` (114 lines) — Blackjack card utilities: createDeck (52-card, Fisher-Yates shuffle), drawCard, calculateHand (Ace 1/11 logic), formatCard/Hand, isBlackjack
 - `utils/shopItems.js` (114 lines) — Data-driven shop catalog (21 items). ITEMS object, wheel configs (LUCKY_WHEEL, MYSTERY_WHEEL), spinWheel, pure helpers. Has self-check (`node utils/shopItems.js`)

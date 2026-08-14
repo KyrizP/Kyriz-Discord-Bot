@@ -47,6 +47,16 @@ client.once('ready', () => {
   console.log(`║   Servers: ${String(client.guilds.cache.size).padEnd(28)} ║`);
   console.log(`║   Players: ${String(playerCount).padEnd(28)} ║`);
   console.log('╚══════════════════════════════════════════╝');
+  // Maintenance persisted ON across a restart → restore the DND presence too
+  if (gameCommand.isMaintenanceActive && gameCommand.isMaintenanceActive()) {
+    try {
+      client.user.setPresence({
+        activities: [{ name: 'Under Maintenance', type: 4, state: 'Under Maintenance' }],
+        status: 'dnd',
+      });
+      console.log('║   Maintenance: ON (restored from state)  ║');
+    } catch { /* non-fatal */ }
+  }
 });
 
 // ============================================================

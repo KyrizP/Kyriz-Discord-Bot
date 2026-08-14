@@ -28,6 +28,7 @@ const { createDeck, drawCard, calculateHand, formatHand, isBlackjack } = require
 const { listBuyable, getItem } = require('../utils/shopItems');
 const shopManager = require('../utils/shopManager');
 const battleCmd = require('../utils/battleCommands');
+const botState = require('../utils/botState');
 
 // ============================================================
 // Active games tracker (in-memory, per user)
@@ -40,11 +41,30 @@ const activeHiloGames = new Map(); // userId -> hilo game state
 const activeTowerGames = new Map(); // userId -> tower game state
 
 // ============================================================
-// Maintenance mode (in-memory, superadmin toggle)
+// Maintenance mode + bansos (persisted via botState — survive restarts)
 // ============================================================
 
-let maintenanceMode = { active: false, message: 'Bot is currently under maintenance. Please try again later.' };
-let pendingBansos = { active: false, amount: 0, message: '', claimedUsers: new Set() };
+let maintenanceMode = { active: botState.state.maintenance.active, message: botState.state.maintenance.message };
+let pendingBansos = {
+  active: botState.state.bansos.active,
+  amount: botState.state.bansos.amount,
+  message: botState.state.bansos.message,
+  claimedUsers: new Set(botState.state.bansos.claimedUsers),
+};
+function persistMaintenance() {
+  botState.state.maintenance = { active: maintenanceMode.active, message: maintenanceMode.message };
+  botState.save();
+}
+function isMaintenanceActive() { return maintenanceMode.active; }
+function persistBansos() {
+  botState.state.bansos = {
+    active: pendingBansos.active,
+    amount: pendingBansos.amount,
+    message: pendingBansos.message,
+    claimedUsers: [...pendingBansos.claimedUsers],
+  };
+  botState.save();
+}
 
 // ============================================================
 // XP rewards constants
@@ -439,6 +459,7 @@ async function execute(interaction) {
   // Bansos check — one-time reward claim
   if (pendingBansos.active && isRegistered(userId) && !isSuperAdmin(userId) && !pendingBansos.claimedUsers.has(userId)) {
     pendingBansos.claimedUsers.add(userId);
+    persistBansos(); // persist immediately — a restart must not allow a second claim
     addBalance(userId, pendingBansos.amount);
     const bansosEmbed = new EmbedBuilder()
       .setColor(0x57f287)
@@ -545,6 +566,11 @@ async function handlePrefixCommand(message, command, args) {
   if (command === 'backup') {
     return handleBackup(message, userId);
   }
+  // Patch admin subcommands bypass maintenance (superadmin only); plain `ky patch` falls
+  // through to the normal gates below (maintenance block + T&C) for everyone.
+  if (command === 'patch' && isSuperAdmin(userId) && ['add', 'clear'].includes((args[0] || '').toLowerCase())) {
+    return handlePatchAdmin(message, args);
+  }
 
   // Maintenance check (superadmin bypasses)
   if (maintenanceMode.active && !isSuperAdmin(userId) && !isAdmin(userId)) {
@@ -563,6 +589,7 @@ async function handlePrefixCommand(message, command, args) {
   // Bansos check — one-time reward claim
   if (pendingBansos.active && isRegistered(userId) && !isSuperAdmin(userId) && !pendingBansos.claimedUsers.has(userId)) {
     pendingBansos.claimedUsers.add(userId);
+    persistBansos(); // persist immediately — a restart must not allow a second claim
     addBalance(userId, pendingBansos.amount);
     const bansosEmbed = new EmbedBuilder()
       .setColor(0x57f287)
@@ -582,7 +609,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'end'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'patch', 'end'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -640,6 +667,8 @@ async function handlePrefixCommand(message, command, args) {
       return handleHelpPrefix(message);
     case 'odds':
       return handleOddsPrefix(message);
+    case 'patch':
+      return handlePatch(message);
     case 'players':
       return handlePlayersPrefix(message, userId);
     case 'shop':
@@ -689,6 +718,7 @@ async function handleBansos(message, userId, args) {
   if (action === 'off' || action === 'stop') {
     const claimed = pendingBansos.claimedUsers.size;
     pendingBansos = { active: false, amount: 0, message: '', claimedUsers: new Set() };
+    persistBansos();
     return message.reply(`Bansos **stopped**. Total claimed: **${claimed}** users.`);
   }
 
@@ -721,8 +751,9 @@ async function handleBansos(message, userId, args) {
     active: true,
     amount: amount,
     message: customMessage,
-    claimedUsers: new Set(),
+    claimedUsers: new Set(), // fresh round — everyone can claim once again
   };
+  persistBansos(); // survive restarts — active bansos + claimers persist
 
   return message.reply(
     `🎁 Bansos **activated**!\n` +
@@ -730,6 +761,86 @@ async function handleBansos(message, userId, args) {
     `Message: ${customMessage}\n\n` +
     `Users will receive it on their next command.`
   );
+}
+
+// ============================================================
+// PATCH NOTES — `ky patch` (public view, registration-gated like
+// other commands). Admin: `ky patch add <text|line2>` / `clear` —
+// appends a version and EDITS the stored announcement message
+// (replaces it) instead of spamming a new one each patch.
+// ============================================================
+
+function buildPatchEmbed() {
+  const versions = botState.state.patch.versions || [];
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('📜 Kyriz | Patch Notes')
+    .setTimestamp();
+  if (!versions.length) {
+    embed.setDescription('No patch notes yet. Stay tuned!');
+    return embed;
+  }
+  for (const v of versions.slice(-5).reverse()) { // latest first, max 5 entries
+    embed.addFields({ name: `${v.title || 'v' + v.version} — ${v.date}`, value: v.lines.join('\n') });
+  }
+  return embed;
+}
+
+async function handlePatch(message) {
+  return message.reply({ embeds: [buildPatchEmbed()] });
+}
+
+async function handlePatchAdmin(message, args) {
+  const action = (args[0] || '').toLowerCase();
+
+  if (action === 'clear') {
+    botState.state.patch.versions = [];
+    botState.save();
+    return message.reply('Patch notes **cleared**.');
+  }
+
+  // ky patch add <text | line2 | line3>  (| = new line)
+  const text = args.slice(1).join(' ').trim();
+  if (!text) {
+    return message.reply(
+      'Usage:\n' +
+      '`ky patch add <text | line2 | ...>` — add a patch entry (`|` = new line)\n' +
+      '`ky patch clear` — clear all patch notes'
+    );
+  }
+
+  const patch = botState.state.patch;
+  const version = patch.versions.length ? patch.versions[patch.versions.length - 1].version + 1 : 1;
+  patch.versions.push({
+    version,
+    date: new Date().toISOString().slice(0, 10),
+    title: 'v2.' + version, // sequential: v2.1, v2.2, ... (matches the seeded v2.1 = version 1)
+    lines: text.split('|').map((s) => s.trim()).filter(Boolean),
+  });
+  if (!patch.versions[patch.versions.length - 1].lines.length) {
+    patch.versions.pop();
+    return message.reply('Patch text is empty after parsing.');
+  }
+  botState.save();
+
+  // Replace the stored announcement (edit) — fall back to posting a new one.
+  try {
+    if (patch.channelId && patch.messageId) {
+      const ch = await message.client.channels.fetch(patch.channelId);
+      const msg = await ch.messages.fetch(patch.messageId);
+      await msg.edit({ embeds: [buildPatchEmbed()] });
+      return message.reply(`Patch **#${version}** added — announcement updated.`);
+    }
+  } catch { /* announcement deleted/unreachable → post a new one below */ }
+  try {
+    const sent = await message.channel.send({ embeds: [buildPatchEmbed()] });
+    patch.channelId = sent.channelId;
+    patch.messageId = sent.id;
+    botState.save();
+    return message.reply(`Patch **#${version}** added — announcement posted.`);
+  } catch {
+    return message.reply(`Patch **#${version}** added (couldn't post the announcement here — I'll try again next time).`);
+  }
 }
 
 async function handleMaintenance(message, userId, args) {
@@ -742,6 +853,7 @@ async function handleMaintenance(message, userId, args) {
     maintenanceMode.active = true;
     if (customMsg) maintenanceMode.message = customMsg;
     else maintenanceMode.message = 'Bot is currently under maintenance. Please try again later.';
+    persistMaintenance(); // survive restarts — no need to re-enable after a deploy
 
     // Update bot status
     try {
@@ -756,6 +868,7 @@ async function handleMaintenance(message, userId, args) {
 
   if (action === 'off') {
     maintenanceMode.active = false;
+    persistMaintenance();
 
     // Reset bot status
     try {
@@ -777,7 +890,7 @@ async function handleBackup(message, userId) {
   if (!isSuperAdmin(userId)) return; // Only superadmin
 
   const DATA_DIR = path.join(__dirname, '..', 'data');
-  const targets = ['economy.json', 'replies.json', 'users.json'];
+  const targets = ['economy.json', 'replies.json', 'users.json', 'botState.json'];
   const attachments = [];
   const summary = [];
   for (const name of targets) {
@@ -4317,7 +4430,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'end'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'patch', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'end'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
@@ -4342,7 +4455,7 @@ function createHelpEmbed() {
       '🛍️ **Shop**\n' +
       '`shop` · `buy <id>` · `use <id>` · `inv` · `profile [@user]`\n\n' +
       'ℹ️ **Info**\n' +
-      '`help` · `odds` · `battle help`'
+      '`help` · `odds` · `patch` · `battle help`'
     )
     .setFooter({ text: '💎 Kryztal (games/economy) · 🧪 Kryptonite (battle) | Prefix: ky' })
     .setTimestamp();
@@ -4596,6 +4709,7 @@ module.exports = {
   handleSelectMenu,
   handleShop,
   isValidPrefixCommand,
+  isMaintenanceActive, // index.js restores the DND presence on boot when maintenance persisted ON
   generateCrashPoint, // diekspor untuk test (test/crash.test.js)
   crashTierVisual,    // diekspor untuk test
 };

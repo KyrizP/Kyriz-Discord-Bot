@@ -112,6 +112,7 @@ function tierBadge(rarity) {
   const t = TIER_INFO[rarity];
   return t ? `${t.color}[${t.letter}]` : `[?]`;
 }
+const STAT_EMOJI = { hp: '❤️', atk: '⚔️', matk: '🔮', def: '🛡️', mdef: '✨', spd: '💨' }; // inline gear stats on `ky char`
 function passiveDesc(p) {
   const v = p.value + (p.unit || '');
   switch (p.id) {
@@ -309,11 +310,20 @@ function handleCharacter(context, userId, targetArg) {
     .map((slot) => {
       const id = b.equipment[slot];
       if (!id) return `**${slot}:** —`;
-      let rarity, name;
-      if (id.startsWith('ky') && b.uniqueItems && b.uniqueItems[id]) { rarity = b.uniqueItems[id].rarity; name = b.uniqueItems[id].name; }
-      else if (GEAR[id]) { rarity = GEAR[id].rarity; name = GEAR[id].name; }
-      else return `**${slot}:** \`${id}\``;
-      return `**${slot}:** ${tierBadge(rarity)} ${name} \`${id}\``;
+      let rarity, name, stats, passives;
+      if (id.startsWith('ky') && b.uniqueItems && b.uniqueItems[id]) {
+        rarity = b.uniqueItems[id].rarity; name = b.uniqueItems[id].name;
+        stats = b.uniqueItems[id].stats; passives = b.uniqueItems[id].passives || [];
+      } else if (GEAR[id]) {
+        rarity = GEAR[id].rarity; name = GEAR[id].name; stats = GEAR[id].stats; passives = [];
+      } else return `**${slot}:** \`${id}\``;
+      // inline stats + per-item passives — no more checking items one by one
+      const statStr = Object.entries(stats || {}).map(([k, v]) => `${STAT_EMOJI[k] || k}+${v}`).join(' · ');
+      const passStr = passives.map((p) => {
+        if (!PASSIVES[p.id]) return '';
+        return PASSIVES[p.id].unit ? `${PASSIVES[p.id].emoji}${p.value}${PASSIVES[p.id].unit}` : `${PASSIVES[p.id].emoji}+${p.value}`; // %: 🩸20% · flat: 💨+16
+      }).filter(Boolean).join(' · '); // compact: emoji+value only (full desc stays on `ky gear <id>`)
+      return `**${slot}:** ${tierBadge(rarity)} ${name} \`${id}\` — ${statStr}${passStr ? ' · ' + passStr : ''}`;
     }).join('\n');
   // Passive summary from equipped unique items
   const { getPassives } = require('./battleEngine');
