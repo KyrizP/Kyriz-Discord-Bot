@@ -799,12 +799,15 @@ async function handlePatchAdmin(message, args) {
     return message.reply('Patch notes **cleared**.');
   }
 
-  // ky patch add <text | line2 | line3>  (| = new line)
-  const text = args.slice(1).join(' ').trim();
+  // ky patch add [version] <text | line2 | line3>  (| = new line; a lone leading vX.Y.Z token becomes the title)
+  let rest = args.slice(1);
+  let title = null;
+  if (rest.length && /^v\d+(?:\.\d+){0,2}$/i.test(rest[0].trim())) title = rest.shift().trim();
+  const text = rest.join(' ').trim();
   if (!text) {
     return message.reply(
       'Usage:\n' +
-      '`ky patch add <text | line2 | ...>` — add a patch entry (`|` = new line)\n' +
+      '`ky patch add [version] <text | line2 | ...>` — add a patch entry (`|` = new line; optional leading `v3.1.0` sets the version title)\n' +
       '`ky patch clear` — clear all patch notes'
     );
   }
@@ -814,7 +817,7 @@ async function handlePatchAdmin(message, args) {
   patch.versions.push({
     version,
     date: new Date().toISOString().slice(0, 10),
-    title: 'v2.' + version, // sequential: v2.1, v2.2, ... (matches the seeded v2.1 = version 1)
+    title: title || ('v2.' + version), // explicit title wins; otherwise sequential
     lines: text.split('|').map((s) => s.trim()).filter(Boolean),
   });
   if (!patch.versions[patch.versions.length - 1].lines.length) {

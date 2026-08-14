@@ -20,12 +20,13 @@ const SEED_VERSIONS = [
   {
     version: 1,
     date: '2026-08-14',
-    title: 'v2.1',
+    title: 'v3.0.0',
     lines: [
-      '⚔️ **Battle Mode v1.1** — Legend/Mythic/Divine mystery-box gear with gacha passives, deeper dungeons, and admin inspect tools',
-      '🥊 **PvP Duels v1.5** — hits now roll ±15% damage (comebacks are real!), mage burn scales with level, War Cry damage reduction capped, parried hits now show their damage',
-      '🛒 **Shop v2.0** — new catalog: daily boosts, lucky tokens, mystery boxes, titles, badges & profile colors',
-      '💎 QoL — username sync, `ky backup`, PvP challenge auto-expire',
+      '⚔️ **Battle Mode is LIVE** — `ky battle` takes you into the dungeon. Clear floors, push your luck, and whatever you do: don\'t die holding the loot.',
+      '🧪 Loot → power: `ky sell all` turns drops into Kryptonite, `ky buygear` + `ky equip` turn it into stats.',
+      '🥊 Grudges welcome: `ky battle @user`. Every hit rolls ±15% damage — no duel is decided on turn one.',
+      '🎒 Full guide at `ky battle help` · name your hero with `ky char name` · window-shop at `ky shop gear`.',
+      '📋 `ky help` rebuilt — the whole bot in one clean list.',
     ],
   },
 ];
