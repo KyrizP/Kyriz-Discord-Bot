@@ -25,6 +25,12 @@ function pvpEffLevel(level) { return 1 + PVP_LEVEL_K * Math.sqrt(Math.max(0, (le
 // Damage scalar: lengthens fights (spec wants 4-10 rounds, not 1-2 turn one-shots). Ults gated turn 1.
 // After live playtest: if one class dominates, adjust PVP_DAMAGE_MULT (lower = tankier/slower).
 const PVP_DAMAGE_MULT = 0.7; // v1.4 balance: 1.0→0.7 — slower fights, more sustain/strategy. Burn bypasses this (Mage class identity)
+const PVP_DAMAGE_ROLL = 0.15; // v1.5: ±15% per-hit roll. Deterministic races made winrates cliff (100/0 flips); the roll smooths them into comebacks. Sim-gated.
+const PVP_WARCRY_DR_CAP = 15; // v1.5: 25→15 — parry uptime + DR stacked to lock mages out (sim: WvM epic 100% warrior pre-nerf)
+// v1.5: burn scales with PvP effLevel. The class growth gap (mage matk 3.0 vs warrior atk 2.2/level) shifts WvM
+// by level — a flat mult can't track it. Formula keeps epic WvM at 38-64% across Lv80-500 (sim). PvE burn untouched.
+const PVP_BURN_BASE = 0.95, PVP_BURN_SLOPE = 0.0100;
+function pvpBurnMult(level) { return PVP_BURN_BASE + PVP_BURN_SLOPE * pvpEffLevel(level || 1); }
 const PVP_GATE_ULTS = true;
 const PVP_DEF_MODE = 'add'; // additive defense (dampen bounds stats so burst can't explode; more damage through = faster fights)
 const PVP_DEF_K = 80;
@@ -47,6 +53,7 @@ function _combatant(p, hpMax, passives) {
     cdLeft: {}, buff: { atkPct: 0, turns: 0, dmgReduce: 0 }, burn: { dmg: 0, turns: 0 }, parryBlocks: 0,
   };
 }
+
 
 function startFight(fightId, p1, p2) {
   const hpMax1 = Math.max(1, Math.floor(p1.stats.hp * PVP_HP_RATIO));
@@ -111,7 +118,7 @@ function resolvePvpTurn(fightId, actorId, skillId) {
   let dmg = PVP_DEF_MODE === 'mult'
     ? Math.max(1, Math.round(rawAtk * skill.mult * (1 - rawDef / (rawDef + PVP_DEF_K))))
     : (skill.type === 'magic' ? magicDamage(rawAtk, rawDef, skill.mult) : physicalDamage(rawAtk, rawDef, skill.mult));
-  if ((actor.passives.berserker || 0) > 0) dmg = Math.round(dmg * (1 + actor.passives.berserker / 100));
+  if ((actor.passives.berserker || 0) > 0) dmg = Math.round(dmg * (1 + actor.passives.berserker / 100 * 0.7));
   let critted = false;
   const crit = getCritChance(actor.passives);
   if (crit > 0 && Math.random() < crit) { dmg = Math.floor(dmg * CRIT.mult); critted = true; }
@@ -125,7 +132,7 @@ function resolvePvpTurn(fightId, actorId, skillId) {
     if ((def.passives.fortify || 0) > 0) dmg = Math.round(dmg * (1 - def.passives.fortify / 100));
     if (dmg < 1) dmg = 1;
   }
-  dmg = Math.round(dmg * PVP_DAMAGE_MULT); // PvP tuning: lengthen fights so sustain/parry matters
+  dmg = Math.round(dmg * PVP_DAMAGE_MULT * (1 - PVP_DAMAGE_ROLL + Math.random() * 2 * PVP_DAMAGE_ROLL)); // PvP tuning: lengthen fights + ±roll (comebacks)
   if (dmg === 0 && !evaded) dmg = 1; // guard: a min-chip parried/fortified hit must not become 0 (free evade) if scalar is ever lowered
   if (dmg > 0) def.hp -= dmg;
   events.push({ type: 'hit', actor: actorKey, skill: skill.name, dmg, crit: critted, parried, evaded });
@@ -138,9 +145,9 @@ function resolvePvpTurn(fightId, actorId, skillId) {
 
   // 5. skill effects
   if (skill.effect) {
-    if (skill.effect.kind === 'buff') { actor.buff.atkPct = skill.effect.pct; actor.buff.turns = skill.effect.turns; actor.buff.dmgReduce = Math.min(skill.effect.dmgReduce || 0, 25); }
+    if (skill.effect.kind === 'buff') { actor.buff.atkPct = skill.effect.pct; actor.buff.turns = skill.effect.turns; actor.buff.dmgReduce = Math.min(skill.effect.dmgReduce || 0, PVP_WARCRY_DR_CAP); }
     else if (skill.effect.kind === 'parry') { actor.parryBlocks = 1; } // blocks next incoming hit (cd 2 — not spammable)
-    else if (skill.effect.kind === 'burn') { def.burn.dmg = Math.round(actor.stats.matk * skill.effect.pct / 100 * 1.2); def.burn.turns = skill.effect.turns; } // v1.4: burn×1.2 (was 1.3) — lowered since burn now bypasses DMG_MULT
+    else if (skill.effect.kind === 'burn') { def.burn.dmg = Math.round(actor.stats.matk * skill.effect.pct / 100 * pvpBurnMult(actor.charLevel)); def.burn.turns = skill.effect.turns; } // v1.5: burn × effLevel formula (see constants)
   }
   if (skill.cd) actor.cdLeft[skill.id] = skill.cd;
 
@@ -199,5 +206,5 @@ function endFight(fightId) {
 module.exports = {
   activePvpFights, isInFight, getFight, startFight, resolvePvpTurn,
   forfeitByAfk, forfeitManual, startAfkTimer, clearAfkTimer, endFight,
-  pvpEffLevel, AFK_MS, TURN_CAP,
+  pvpEffLevel, pvpBurnMult, AFK_MS, TURN_CAP,
 };

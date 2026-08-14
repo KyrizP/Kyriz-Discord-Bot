@@ -12,11 +12,11 @@ function mkPlayer(id, stats, cls) {
 const strongWar = { hp: 1000, atk: 200, matk: 10, def: 50, mdef: 50, spd: 30 };
 const weakMage = { hp: 600, atk: 10, matk: 120, def: 30, mdef: 60, spd: 10 };
 
-// ---- startFight: HP 70%, turn order by SPD ----
+// ---- startFight: HP × PVP_HP_RATIO (1.15), turn order by SPD ----
 P.activePvpFights.clear();
 let f = P.startFight('F1', mkPlayer('A', strongWar, 'warrior'), mkPlayer('B', weakMage, 'mage'));
-ok(f.p1.hp === 1500 && f.p1.hpMax === 1500, 'p1 hp = 1.5× (1500)');
-ok(f.p2.hp === 900 && f.p2.hpMax === 900, 'p2 hp = 1.5× (900)');
+ok(f.p1.hp === 1150 && f.p1.hpMax === 1150, 'p1 hp = 1.15× (1150)');
+ok(f.p2.hp === 690 && f.p2.hpMax === 690, 'p2 hp = 1.15× (690)');
 ok(f.active === 'p1', 'higher SPD (p1) goes first');
 
 // ---- resolvePvpTurn: damage + swap ----
@@ -52,7 +52,10 @@ ok(parryReady.ok, 'parry ready after 2 valid turns using other skills');
 
 // ---- parry blocks next incoming hit (consumed) ----
 // ---- parry: reduces damage ~75% (NOT full block — prevents WvW mutual-parry stall) ----
+// (mock random=0.5 so the ±15% damage roll is exactly ×1.0 in both fights)
 P.activePvpFights.clear();
+const _r0 = Math.random;
+Math.random = () => 0.5;
 let f3 = P.startFight('F3', mkPlayer('A', { hp: 5000, atk: 5, matk: 5, def: 5, mdef: 5, spd: 30 }, 'warrior'),
                               mkPlayer('B', { hp: 5000, atk: 200, matk: 5, def: 5, mdef: 5, spd: 10 }, 'warrior'));
 P.resolvePvpTurn('F3', 'A', 'parry'); // A sets parry
@@ -69,15 +72,43 @@ P.resolvePvpTurn('F3b', 'A', 'slash'); // A does NOT parry
 let hpF = f3b.p1.hp;
 P.resolvePvpTurn('F3b', 'B', 'slash'); // B hits A, full
 let fullDmg = hpF - f3b.p1.hp;
+Math.random = _r0;
 ok(parriedDmg > 0 && parriedDmg < fullDmg, 'parry reduced damage (' + parriedDmg + ' < full ' + fullDmg + ')');
 ok(parriedDmg <= Math.ceil(fullDmg * 0.35), 'parry mitigated ~75% (parried ' + parriedDmg + ' <= 35% of ' + fullDmg + ')');
 
-// ---- burn ticks at start of victim turn ----
+// ---- damage roll: ±15% per hit (mock 0.0 = low roll, 1.0 = high roll) ----
+P.activePvpFights.clear();
+Math.random = () => 0.0;
+let fR1 = P.startFight('FR1', mkPlayer('A', { hp: 1000, atk: 200, matk: 5, def: 5, mdef: 5, spd: 30 }, 'warrior'),
+                                 mkPlayer('B', { hp: 100000, atk: 5, matk: 5, def: 0, mdef: 0, spd: 10 }, 'mage'));
+let hpRLow = fR1.p2.hp;
+P.resolvePvpTurn('FR1', 'A', 'slash');
+let dmgLow = hpRLow - fR1.p2.hp;
+P.activePvpFights.clear();
+Math.random = () => 1.0;
+let fR2 = P.startFight('FR2', mkPlayer('A', { hp: 1000, atk: 200, matk: 5, def: 5, mdef: 5, spd: 30 }, 'warrior'),
+                                 mkPlayer('B', { hp: 100000, atk: 5, matk: 5, def: 0, mdef: 0, spd: 10 }, 'mage'));
+let hpRHigh = fR2.p2.hp;
+P.resolvePvpTurn('FR2', 'A', 'slash');
+let dmgHigh = hpRHigh - fR2.p2.hp;
+Math.random = _r0;
+ok(dmgLow > 0 && dmgHigh > dmgLow * 1.2, 'damage roll spreads hits (low ' + dmgLow + ' vs high ' + dmgHigh + ')');
+
+// ---- War Cry: self-buff + DR capped at PVP_WARCRY_DR_CAP (15) ----
+P.activePvpFights.clear();
+let fW = P.startFight('FW', mkPlayer('A', { hp: 5000, atk: 100, matk: 5, def: 5, mdef: 5, spd: 30 }, 'warrior'),
+                               mkPlayer('B', { hp: 5000, atk: 5, matk: 5, def: 5, mdef: 5, spd: 10 }, 'mage'));
+fW.p1.cdLeft = {}; // bypass ult gate for the unit test
+P.resolvePvpTurn('FW', 'A', 'warcry');
+ok(fW.p1.buff.atkPct === 25 && fW.p1.buff.turns === 2, 'War Cry atk buff applied');
+ok(fW.p1.buff.dmgReduce === 15, 'War Cry DR capped at 15 in PvP (config 35)');
+
+// ---- burn ticks at start of victim turn (dmg = pct × matk × pvpBurnMult) ----
 P.activePvpFights.clear();
 let f4 = P.startFight('F4', mkPlayer('A', { hp:1000, atk:5, matk:300, def:5, mdef:5, spd:30 }, 'mage'),
                               mkPlayer('B', { hp:1000, atk:5, matk:5, def:5, mdef:5, spd:10 }, 'warrior'));
-P.resolvePvpTurn('F4', 'A', 'fireball'); // burns B: 10% of 300 = 30/turn, 3 turns
-ok(f4.p2.burn.turns === 3 && f4.p2.burn.dmg === 30, 'B burned 30/turn for 3 turns');
+P.resolvePvpTurn('F4', 'A', 'fireball'); // burns B: 10% of 300 × burnMult(charLevel 10)
+ok(f4.p2.burn.turns === 3 && f4.p2.burn.dmg === Math.round(300 * 0.10 * P.pvpBurnMult(10)), 'B burned pct×matk×pvpBurnMult for 3 turns');
 let hpB = f4.p2.hp;
 P.resolvePvpTurn('F4', 'B', 'slash'); // B's turn -> burn ticks first
 ok(f4.p2.hp < hpB && (hpB - f4.p2.hp) >= 1, 'burn ticked (positive dmg) at start of B turn');
@@ -88,7 +119,8 @@ let f5 = P.startFight('F5', mkPlayer('A', { hp:1000, atk:100, matk:5, def:5, mde
                               mkPlayer('B', { hp:100000, atk:5, matk:5, def:0, mdef:0, spd:10 }, 'mage'));
 f5.p1.passives = { precision: 50 }; // getCritChance -> 0.5
 const _r = Math.random;
-Math.random = () => 1.0; // 1.0 < 0.5 false -> no crit (baseline)
+let seqN = 0;
+Math.random = () => (seqN++ === 0 ? 0.9 : 0.0); // 1st call = crit check (0.9 -> no crit), 2nd = damage roll (min)
 let hpN = f5.p2.hp;
 P.resolvePvpTurn('F5', 'A', 'slash');
 let nonCrit = hpN - f5.p2.hp;
@@ -96,7 +128,8 @@ P.activePvpFights.clear();
 let f5c = P.startFight('F5c', mkPlayer('A', { hp:1000, atk:100, matk:5, def:5, mdef:5, spd:30 }, 'warrior'),
                                 mkPlayer('B', { hp:100000, atk:5, matk:5, def:0, mdef:0, spd:10 }, 'mage'));
 f5c.p1.passives = { precision: 50 };
-Math.random = () => 0.0; // 0 < 0.5 -> force crit
+let seqC = 0;
+Math.random = () => (seqC++ === 0 ? 0.4 : 1.0); // 1st call = crit check (0.4 < 0.5 -> crit), 2nd = damage roll (max)
 let hpC = f5c.p2.hp;
 P.resolvePvpTurn('F5c', 'A', 'slash');
 let crit = hpC - f5c.p2.hp;
@@ -177,11 +210,15 @@ ok(!P.isInFight('Z'), 'non-combatant not in fight');
 P.activePvpFights.clear();
 let fB = P.startFight('FB', mkPlayer('A', { hp: 1000, atk: 1, matk: 1000, def: 5, mdef: 5, spd: 30 }, 'mage'),
                               mkPlayer('B', { hp: 50, atk: 1, matk: 1, def: 5, mdef: 9999, spd: 10 }, 'warrior'));
-P.resolvePvpTurn('FB', 'A', 'fireball'); // A burns B: 10% of 1000 = 100/turn; direct hit ~1 (B mdef huge)
-ok(fB.p2.burn.dmg === 100 && fB.p2.burn.turns === 3, 'B burned 100/turn for 3 turns');
+P.resolvePvpTurn('FB', 'A', 'fireball'); // A burns B: 10% of 1000 × burnMult; direct hit ~1 (B mdef huge)
+ok(fB.p2.burn.dmg === Math.round(1000 * 0.10 * P.pvpBurnMult(10)) && fB.p2.burn.turns === 3, 'B burned pct×matk×pvpBurnMult for 3 turns');
 let bk = P.resolvePvpTurn('FB', 'B', 'slash'); // B's turn: burn ticks first → B dies
 ok(bk.over && bk.winner === 'p1', 'burn-kill: caster (p1 mage) wins, NOT the burned victim');
 ok(fB.p2.hp === 0, 'B died from burn tick');
+
+// ---- pvpBurnMult: level-scaled burn compensation (v1.5) ----
+ok(Math.abs(P.pvpBurnMult(1) - 0.96) < 1e-9, 'burn mult at Lv1 = 0.96 (base only)');
+ok(P.pvpBurnMult(100) < P.pvpBurnMult(400), 'burn mult grows with level (tracks class growth gap)');
 
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);

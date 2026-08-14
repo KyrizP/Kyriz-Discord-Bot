@@ -240,7 +240,8 @@ function handleBattleHelp(context) {
       'Bolt — 1.0× MATK\n' +
       'Fireball — 1.7× MATK + burn 10%/turn 3 turns (CD2)\n' +
       'Meteor — 2.5× MATK + heavy burn + 50% MDEF pierce + **pierces evasion** (CD4)\n\n' +
-      '_Burn bypasses Parry. Enemies crit from floor 45+._\n\n' +
+      '_Burn bypasses Parry. Enemies crit from floor 45+._\n' +
+      '_PvP duels use tuned rules: hits have a ±15% damage roll, burn scales with level, War Cry DR capped._\n\n' +
       '💀 **Death** = lose drops + EXP (this run only). **Extract** to keep them.\n' +
       '_Push your luck: extract early (safe) or go deeper (more loot, more risk)._\n\n' +
       '💰 **KRYPTONITE (🧪)** — drops are NOT 🧪, you must **sell** them:\n' +
@@ -830,7 +831,7 @@ async function handlePvpButton(interaction) {
 
     const eventStr = (res.events || []).map((e) => {
       if (e.type === 'hit') {
-        if (e.parried) return '🛡️ Parried!';
+        if (e.parried) return `${e.crit ? '💥 CRIT! ' : ''}🛡️ Parried! ${e.skill} — ${e.dmg}`;
         if (e.evaded) return '💨 Missed!';
         return `${e.crit ? '💥 CRIT! ' : ''}🗡️ ${e.skill} — ${e.dmg}`;
       }
