@@ -40,7 +40,7 @@ function computeStats(charLevel, charClass, equipment = {}, uniqueItems = {}) {
 }
 
 // Sum each passive type across equipped uniques. Legend+ only (g* has none).
-function getPassives(equipment = {}, uniqueItems = {}) {
+function getPassivesRaw(equipment = {}, uniqueItems = {}) {
   const sums = {};
   for (const slot of EQUIP_SLOTS) {
     const id = equipment[slot];
@@ -50,6 +50,10 @@ function getPassives(equipment = {}, uniqueItems = {}) {
       }
     }
   }
+  return sums;
+}
+function getPassives(equipment = {}, uniqueItems = {}) {
+  const sums = getPassivesRaw(equipment, uniqueItems);
   // apply stacking caps (prevent degenerate builds: 5× Lifesteal=100%, 5× Fortify=110%, etc.)
   for (const id of Object.keys(PASSIVE_CAPS)) {
     if (sums[id] != null && sums[id] > PASSIVE_CAPS[id]) sums[id] = PASSIVE_CAPS[id];
@@ -235,6 +239,6 @@ function simulateDelve(charLevel, charClass, equipment = {}, uniqueItems = {}, o
 }
 
 module.exports = {
-  computeStats, getPassives, getCritChance, physicalDamage, magicDamage, generateEnemy, resolveFight,
+  computeStats, getPassivesRaw, getPassives, getCritChance, physicalDamage, magicDamage, generateEnemy, resolveFight,
   rollDrop, merchantPrice, simulateDelve, STAT_KEYS, EQUIP_SLOTS, MAX_ROUNDS,
 };

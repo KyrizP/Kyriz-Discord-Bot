@@ -350,11 +350,13 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
       return `**${slot}:** ${tierBadge(rarity)} ${name} \`${id}\` — ${statStr}${passStr ? ' · ' + passStr : ''}`;
     }).join('\n');
   // Passive summary from equipped unique items
-  const { getPassives } = require('./battleEngine');
+  const { getPassives, getPassivesRaw } = require('./battleEngine');
+  const CAPS = require('./battleConfig').PASSIVE_CAPS;
   const passSum = getPassives(c.equipment, b.uniqueItems || {});
+  const passRaw = getPassivesRaw(c.equipment, b.uniqueItems || {});
   const passLines = Object.entries(passSum)
     .filter(([id, v]) => v > 0 && PASSIVES[id])
-    .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}`)
+    .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(capped)*' : ''}`)
     .join('\n');
   const passSection = passLines ? `\n\n**✨ Active Passives:**\n${passLines}` : '';
   const banner = isActive
