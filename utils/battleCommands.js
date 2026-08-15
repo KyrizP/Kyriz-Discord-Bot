@@ -368,7 +368,7 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
   return new EmbedBuilder()
     .setAuthor({ name: `${displayName}'s character` })
     .setColor(COLOR)
-    .setTitle(c.charName ? `🧙 ${c.charName}` : '🧙 Character')
+    .setTitle(`${clsDef.emoji} ${clsDef.name}`)
     .setDescription(
       `${banner}\n\n` +
       `🏷️ Name: ${c.charName || `_(unset — \`ky char name <nama>\`)`}\n` +
