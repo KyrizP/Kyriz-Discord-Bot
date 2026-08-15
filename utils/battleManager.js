@@ -104,7 +104,7 @@ function ensureUser(data, userId) {
 // ---------- pure apply-functions (mutate the passed data object; no IO) ----------
 function applyCreateCharacter(data, userId, classId) {
   const b = ensureBattleData(data[userId]);
-  if (!Object.hasOwn(CLASSES, classId)) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
+  if (!Object.hasOwn(CLASSES, classId)) return { ok: false, reason: 'Invalid class. Pick warrior, mage, or rogue.' };
   // First-time registration only. Anyone who already owns a character must use the
   // paid changeclass path — a free second class here would bypass the 🧪 5,000 sink.
   if (b.characters && Object.keys(b.characters).length > 0) return { ok: false, reason: 'You already have a character. Create another with `ky switch <class>` (🧪 5,000).' };
@@ -121,7 +121,7 @@ function applyChangeClass(data, userId, classId) {
   const u = data[userId];
   if (!u) return { ok: false, reason: 'You are not registered.' };
   const b = ensureBattleData(u);
-  if (!Object.hasOwn(CLASSES, classId)) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
+  if (!Object.hasOwn(CLASSES, classId)) return { ok: false, reason: 'Invalid class. Pick warrior, mage, or rogue.' };
   if (b.characters && b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switch ' + classId + '` (free).' };
   if (!getActiveChar(b)) return { ok: false, reason: 'Create a character first (`ky battle`).' };
   if ((b.kryptonite || 0) < CHAR_CHANGE_COST) return { ok: false, reason: 'Creating a new character costs 🧪 ' + CHAR_CHANGE_COST.toLocaleString() + ' Kryptonite.' };
@@ -524,7 +524,7 @@ function nextFloor(userId) {
   if (!run) return { ok: false, reason: 'No active battle. Use `ky battle`.' };
   const enemy = generateEnemy(run.floor);
   const passives = getPassives(run.equipment, run.uniqueItems || {});
-  const fight = resolveFight({ stats: run.stats, hp: run.hp, skills: CLASSES[run.classId].skills, passives }, enemy);
+  const fight = resolveFight({ stats: run.stats, hp: run.hp, skills: CLASSES[run.classId].skills, passives, charClass: run.classId }, enemy);
   if (fight.winner === 'player') {
     run.hp = fight.playerHpLeft;
     const drop = rollDrop(run.floor);

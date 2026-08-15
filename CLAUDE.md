@@ -86,7 +86,7 @@ Kamu adalah developer berpengalaman 20 tahun yang spesialis dalam bot Discord, k
 - `utils/cardDeck.js` (114 lines) — Blackjack card utilities: createDeck (52-card, Fisher-Yates shuffle), drawCard, calculateHand (Ace 1/11 logic), formatCard/Hand, isBlackjack
 - `utils/shopItems.js` (114 lines) — Data-driven shop catalog (21 items). ITEMS object, wheel configs (LUCKY_WHEEL, MYSTERY_WHEEL), spinWheel, pure helpers. Has self-check (`node utils/shopItems.js`)
 - `utils/shopManager.js` (361 lines) — Shop logic: purchase (atomic read-modify-write), useItem (daily_boost/spin), equipCosmetic, getInventoryState. Has comprehensive self-check with 16 test cases
-- `utils/battleConfig.js` (182 lines) — Pure data: CLASSES (warrior/mage with skills), ENEMY_BASE (exponential scaling), DROP_ZONES, DROPS (d1-d7), GEAR (g1-g23), MYSTERY_BOXES, PASSIVES (8 types), TIER_INFO, LEGEND_GEAR_RANGES, CRIT config
+- `utils/battleConfig.js` (182 lines) — Pure data: CLASSES (warrior/mage/rogue with skills), ENEMY_BASE (exponential scaling), DROP_ZONES, DROPS (d1-d7), GEAR (g1-g23), MYSTERY_BOXES, PASSIVES (8 types), TIER_INFO, LEGEND_GEAR_RANGES, CRIT config, EVASION_TOTAL_CAP (48 — additive base+gear, single source for engine + display)
 - `utils/battleEngine.js` (241 lines) — Pure combat math (no Discord/IO): computeStats, resolveFight (PvE auto-resolve with skills/passives/crit/burn/parry/lifesteal/evasion/fortify), rollDrop, generateEnemy, simulateDelve (balance sim)
 - `utils/battleManager.js` (484 lines) — Stateful manager: apply-* pure functions (createCharacter, delveStart, extract, die, sell, sellGear, equip, unequip, buyGear, buyUnique, setCharName, pvpResult) + IO wrappers (read→apply→write). In-memory `activeRuns` Map. Entry fee 5000💎, sweep buffer 5 floors, gear sellback 35%
 - `utils/pvpManager.js` (210 lines) — PvP duel engine: turn-based combat, skill selection, AFK timer (60s), turn cap (26), PvP HP ratio 1.15x, damage scalar 0.7x with ±15% roll, level-scaled burn (0.95+0.01×effLevel), War Cry DR cap 15, ult gating (half-CD start). In-memory `activePvpFights` Map
@@ -127,8 +127,9 @@ Kamu adalah developer berpengalaman 20 tahun yang spesialis dalam bot Discord, k
 ## Battle Mode Details
 
 ### Classes
-- **Warrior** ⚔️: HP 100, ATK 12, DEF 10 (tank/physical). Skills: Slash (1.0x), Parry Strike (1.6x, blocks next hit), War Cry (2.5x, +25% ATK buff 2 turns, 35% DR)
-- **Mage** 🔮: HP 70, MATK 14, MDEF 9 (glass cannon/magic). Skills: Bolt (1.0x), Fireball (1.7x, 10% burn 3 turns), Meteor (2.5x, 20% burn, 50% pierce)
+- **Warrior** ⚔️: HP 100, ATK 12, DEF 10 (tank/physical). Skills: Slash (1.0x), Parry Strike (1.6x, blocks next hit), War Cry (2.5x, +25% ATK buff 2 turns, 35% DR, pierceEvasion)
+- **Mage** 🔮: HP 70, MATK 14, MDEF 9 (glass cannon/magic). Skills: Bolt (1.0x), Fireball (1.7x, 10% burn 3 turns), Meteor (2.5x, 20% burn, 50% pierce, pierceEvasion)
+- **Rogue** 🗡️: HP 80, ATK 13, SPD 12, baseEvasion 8 (assassin/physical-DoT). Skills: Backstab (1.0x), Venom Fang (1.5x, 15% ATK poison 3 turns — DoT bypasses all defenses), Shadow Dance (2.0x, 2 guaranteed dodge charges — consumed by ANY attack, ults pierce but still burn a charge). Growth tuned def 1.3/mdef 2.5 for the W>R>M>W counter-cycle (sim-gated; PvE parity with warrior)
 
 ### PvE Dungeon Delve
 1. `ky battle` → Pay 5,000💎 entry → Auto-sweep to (bestDepth - 5)
@@ -139,9 +140,11 @@ Kamu adalah developer berpengalaman 20 tahun yang spesialis dalam bot Discord, k
 
 ### PvP Duel
 1. `ky battle @user` → Accept/Decline → Turn-based skill picks
-2. PvP adjustments: HP×1.5, damage×0.8, ult starts at half-CD, turn cap 20
-3. AFK timer: 60s per turn → forfeit
-4. Win/loss record tracked (no ELO)
+2. PvP adjustments: HP×1.15, damage×0.7 with ±15% per-hit roll, level dampen `effLevel = 1+4√(level−1)` (stats computed at effLevel), ult starts at half-CD, turn cap 26
+3. Defense chain per hit: parry (−75%) > dodge charges > evasion (non-pierce only) > War Cry DR (cap 15) + Fortify — reduction layer applies to every landed hit incl. pierce
+4. Burn/poison DoT: fixed ticks at victim's turn start, bypass ALL defenses and the 0.7 scalar; caster wins if victim dies to their DoT
+5. AFK timer: 60s per turn → forfeit
+6. Win/loss record tracked (no ELO)
 
 ### Gear System
 - **Template gear** (g1-g23): Fixed stats, buy with 🧪 Kryptonite
@@ -150,12 +153,12 @@ Kamu adalah developer berpengalaman 20 tahun yang spesialis dalam bot Discord, k
 - **Sellback**: 35% of buy price (all tiers)
 
 ### 8 Passive Types (Legend+ gear only)
-- 🗡️ Berserker: +X% damage dealt (cap 100%)
+- 🗡️ Berserker: +X% damage dealt (cap 100%; PvP-dampened ×0.7)
 - 🎯 Precision: +X% crit chance (crit = 1.75x, cap 50%)
-- 🩸 Lifesteal: +X% damage healed (cap 80%)
+- 🩸 Lifesteal: +X% damage healed (cap 65%)
 - 💨 Swift: +X flat SPD (uncapped)
-- 🛡️ Fortify: +X% damage reduction (cap 80%)
-- 🌀 Evasion: +X% dodge chance (cap 40%)
+- 🛡️ Fortify: +X% damage reduction (cap 45%)
+- 🌀 Evasion: +X% dodge chance (gear cap 40% — Rogue adds 8% base on top, total cap 48% via EVASION_TOTAL_CAP; ults with pierceEvasion ignore it)
 - 🧪 Greed: +X% sell price for drops (uncapped) — applies per-item, NOT cumulative
 - 📚 Wisdom: +X% char EXP gain (uncapped)
 

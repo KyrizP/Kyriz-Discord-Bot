@@ -220,6 +220,66 @@ ok(fB.p2.hp === 0, 'B died from burn tick');
 ok(Math.abs(P.pvpBurnMult(1) - 0.96) < 1e-9, 'burn mult at Lv1 = 0.96 (base only)');
 ok(P.pvpBurnMult(100) < P.pvpBurnMult(400), 'burn mult grows with level (tracks class growth gap)');
 
+// ---- fortify applies to NORMAL skills too (not just pierceEvade ults) ----
+// regression: restructuring the defense chain for dodge charges once left the fortify block
+// reachable only in the pierce branch — fortify 45 did nothing vs a basic Slash.
+{
+  const stats = (fort) => { // attacker dmg is deterministic-ish: no crit/brs, ±15% roll only
+    P.activePvpFights.clear();
+    const f = P.startFight('FT' + fort, mkPlayer('A', { hp: 999999, atk: 230, matk: 4, def: 208, mdef: 100, spd: 50 }, 'warrior'),
+                                      mkPlayer('B', { hp: 999999, atk: 1, matk: 1, def: 208, mdef: 100, spd: 10 }, 'warrior'));
+    P.clearAfkTimer('FT' + fort);
+    f.p2.passives = { fortify: fort };
+    const sums = []; // collect slash hits over several fights (turn cap forces restart)
+    for (let rep = 0; rep < 25; rep++) {
+      const fid = 'FT' + fort + '_' + rep;
+      const ff = P.startFight(fid, mkPlayer('A', { hp: 999999, atk: 230, matk: 4, def: 208, mdef: 100, spd: 50 }, 'warrior'),
+                                        mkPlayer('B', { hp: 999999, atk: 1, matk: 1, def: 208, mdef: 100, spd: 10 }, 'warrior'));
+      P.clearAfkTimer(fid);
+      ff.p2.passives = { fortify: fort };
+      while (!ff.over) {
+        if (ff.active === 'p1') {
+          const r = P.resolvePvpTurn(fid, 'A', 'slash');
+          const hit = r.events && r.events.find((e) => e.type === 'hit');
+          if (hit && hit.dmg > 0) sums.push(hit.dmg);
+        } else P.resolvePvpTurn(fid, 'B', 'slash');
+      }
+      P.endFight(fid);
+    }
+    P.activePvpFights.clear();
+    return sums.reduce((a, b) => a + b, 0) / sums.length;
+  };
+  const avg0 = stats(0), avg45 = stats(45);
+  // expected ×0.55 undampened / ×0.685 with the ×0.7 PvP dampen — anything ≥0.9 means fortify is dead again
+  ok(avg45 < avg0 * 0.9 && avg45 < avg0 * 0.7 + 2, `fortify 45 reduces basic-skill dmg (×0.685 dampened): avg ${avg0.toFixed(1)} → ${avg45.toFixed(1)}`);
+}
+
+// ---- evasion: ADDITIVE base+gear, capped at EVASION_TOTAL_CAP (regression: this session had TWO silent
+// evasion bugs — base dead in PvE, and max() instead of additive). Rogue base 8 + gear 40 (capped) => 48%.
+{
+  const { EVASION_TOTAL_CAP, CLASSES: C2 } = require('../utils/battleConfig');
+  ok(C2.rogue.baseEvasion > 0 && EVASION_TOTAL_CAP === 48, 'config sanity: rogue baseEvasion set, total cap 48');
+  let miss = 0, total = 0;
+  for (let rep = 0; rep < 25; rep++) {
+    const fid = 'EV_' + rep;
+    const ff = P.startFight(fid, mkPlayer('A', { hp: 999999, atk: 230, matk: 4, def: 208, mdef: 100, spd: 50 }, 'warrior'),
+                                  mkPlayer('B', { hp: 999999, atk: 1, matk: 1, def: 208, mdef: 100, spd: 10 }, 'rogue'));
+    P.clearAfkTimer(fid);
+    ff.p2.passives = { evasion: 40 }; // gear at PASSIVE_CAPS cap; base 8 from _combatant => total must cap at 48, not 48+ or 40
+    while (!ff.over) {
+      if (ff.active === 'p1') {
+        const r = P.resolvePvpTurn(fid, 'A', 'slash'); // non-pierce: evasion applies
+        const hit = r.events && r.events.find((e) => e.type === 'hit');
+        if (hit) { total++; if (hit.dmg === 0) miss++; }
+      } else P.resolvePvpTurn(fid, 'B', 'backstab');
+    }
+    P.endFight(fid);
+  }
+  P.activePvpFights.clear();
+  const rate = miss / total;
+  ok(rate > 0.40 && rate < 0.56, `rogue evasion = additive capped (base 8 + gear 40 → ~48%): measured ${(rate * 100).toFixed(1)}% over ${total} hits`);
+}
+
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail === 0 ? 0 : 1);

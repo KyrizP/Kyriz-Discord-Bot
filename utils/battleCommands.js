@@ -52,13 +52,14 @@ function classPickEmbed(username) {
     .setAuthor({ name: `${username}'s battle` })
     .setColor(COLOR)
     .setTitle('🎭 Create your character')
-    .setDescription('Pick a class to begin your dungeon battle (entry **5,000 💎 Kryztal**):\n\n⚔️ **Warrior** — tanky physical bruiser (ATK/DEF/HP)\n🔮 **Mage** — glass-cannon magic (MATK, squishy)')
+    .setDescription('Pick a class to begin your dungeon battle (entry **5,000 💎 Kryztal**):\n\n⚔️ **Warrior** — tanky physical bruiser (ATK/DEF/HP)\n🔮 **Mage** — glass-cannon magic (MATK, squishy)\n🗡️ **Rogue** — fast assassin (SPD/evasion/poison)')
     .setTimestamp();
 }
 function classPickRow(userId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`battle_class_warrior_${userId}`).setLabel('⚔️ Warrior').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`battle_class_mage_${userId}`).setLabel('🔮 Mage').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`battle_class_rogue_${userId}`).setLabel('🗡️ Rogue').setStyle(ButtonStyle.Secondary),
   );
 }
 function actionRow(userId, run, disableAll = false) {
@@ -231,62 +232,66 @@ async function handleBattle(context, userId) {
     });
   } catch {}
 }
+// Battle help — paginated (2 pages, ◀▶ buttons, executor-locked)
+const HELP_PAGES = [
+  {
+    title: '⚔️ Battle Mode — Classes & Combat',
+    build: () => new EmbedBuilder()
+      .setColor(COLOR)
+      .setTitle('⚔️ Battle Mode — Classes & Combat (1/2)')
+      .setDescription(
+        '💡 **THE LOOP**\n`ky battle` → fight floors → collect drops → **Extract** (bank) → `ky sell all` → 🧪 → `ky buygear` + `ky equip` → stronger → delve deeper!\n\n' +
+        '🎮 **COMMANDS**\n' +
+        '`ky battle` — enter dungeon (**5,000 💎** entry). First time: pick a class.\n' +
+        '`ky char` — stats, gear, depth · `ky switch <class>` — swap character\n' +
+        '`ky preset [n]` — gear loadouts · `ky bag` — drops · `ky gear` — equipment\n\n' +
+        '🎭 **MULTIPLE CHARACTERS**\n' +
+        '`ky switch <class>` — one command: owned = free swap, unowned = create (**🧪 5,000**). Gear **per-character**, 🧪/bag/collection **shared**.\n\n' +
+        '🎒 **GEAR PRESETS**\n' +
+        '`ky preset save <n>` → snapshot 5 slots · `ky preset <n>` → load back instantly.\nFirst **2 free**, unlock 3/4/5 for 🧪 **2k / 5k / 10k**.\n\n' +
+        '⚔️ **IN BATTLE (buttons)**\n' +
+        '⏩ **Push** — fight 1 floor (can die)\n⚡ **Fast Sweep** — auto 5 floors\n🧪 **Extract** — bank drops + EXP\n\n' +
+        '⚔️ **COMBAT** (auto in PvE, pick skills in PvP):\n\n' +
+        'Warrior ⚔️ — tank\nSlash 1.0× · Parry Strike 1.6× +block (CD2) · War Cry 2.5× +pierce +DR (CD4)\n\n' +
+        'Mage 🔮 — burst\nBolt 1.0× · Fireball 1.7× +burn (CD2) · Meteor 2.5× +burn +pierce (CD4)\n\n' +
+        'Rogue 🗡️ — speed\nBackstab 1.0× · Venom Fang 1.5× +poison (CD2) · Shadow Dance 2.0× +2 dodge (CD4)\n_Rogue passive: 8% base evasion (adds with gear, total cap 48%)._\n\n' +
+        '_Burn/poison bypass Parry & dodge. Dodge charges consumed by ALL attacks (ults pierce but still use a charge)._'
+      )
+      .setTimestamp(),
+  },
+  {
+    title: '⚔️ Battle Mode — Gear & Progression',
+    build: () => new EmbedBuilder()
+      .setColor(COLOR)
+      .setTitle('⚔️ Battle Mode — Gear & Progression (2/2)')
+      .setDescription(
+        '💀 **Death** = lose drops + EXP (this run). **Extract** to keep.\n\n' +
+        '💰 **KRYPTONITE (🧪)** — sell drops to get 🧪:\n`ky sell all` · `ky sell d83 5`\n\n' +
+        '⚔️ **GEAR** (pass walls):\n`ky shop gear [tier|rates]` → browse\nCommon–Epic fixed (`g1–g23`) · **Legend+ mystery boxes** (`g100+`) — random stats + passive!\nWeapon/head/armor = **pure gacha** (random ATK/MATK, DEF/MDEF)\n`ky buygear <code>` · `ky equip <id>` · `ky sellgear <id|rarity all>`\n⚠️ **Gear locked during battle/duel**\n\n' +
+        '🎲 **REROLL**: bad roll? Sell (35% refund) → rebuy → new random!\n\n' +
+        '✨ **PASSIVES** (Legend+ gear, auto in PvE & PvP):\n🗡️ Berserker +dmg (100%) · 🎯 Precision crit (50%)\n🩸 Lifesteal heal (65%) · 💨 Swift +SPD\n🛡️ Fortify −dmg (45%) · 🌀 Evasion dodge (40%)\n🧪 Greed +🧪 sell · 📚 Wisdom +EXP\n\n' +
+        '📈 **PROGRESSION**\nPush → EXP → level → stats grow → delve deeper → better drops.\nFloor & level **NO CAP** — grind forever!\n\n' +
+        '⚔️ **PvP DUELS**: `ky battle @user`\nTurn-based, pick skills, passives active. Level gap dampened. AFK 1 min = forfeit. 🏆'
+      )
+      .setFooter({ text: '💎 Kryztal = entry · 🧪 Kryptonite = battle currency' })
+      .setTimestamp(),
+  },
+];
+function helpPageRow(page, userId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`battle_help_${page - 1}_${userId}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`battle_help_${page + 1}_${userId}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= HELP_PAGES.length),
+  );
+}
+function buildHelpPage(page, userId) {
+  page = Math.min(Math.max(1, page || 1), HELP_PAGES.length);
+  const embed = HELP_PAGES[page - 1].build();
+  embed.setFooter({ text: `Page ${page}/${HELP_PAGES.length} · ` + (embed.data.footer ? embed.data.footer.text : '') });
+  return { embed, components: HELP_PAGES.length > 1 ? [helpPageRow(page, userId)] : [] };
+}
 function handleBattleHelp(context) {
-  const embed = new EmbedBuilder()
-    .setColor(COLOR)
-    .setTitle('⚔️ Battle Mode — How to Play')
-    .setDescription(
-      '💡 **THE LOOP**\n' +
-      '`ky battle` → fight floors → collect drops → **Extract** (bank) → `ky sell all` → 🧪 → `ky buygear` + `ky equip` → stronger → delve deeper!\n\n' +
-      '🎮 **COMMANDS**\n' +
-      '`ky battle` — enter dungeon (**5,000 💎** entry). First time: pick a class.\n' +
-      '`ky char` — view stats, gear, 🧪, best depth · `ky char name <nama>` — set name\n' +
-      '`ky switch <class>` — swap character (free) · unowned class? offers creation (**🧪 5,000**)\n' +
-      '`ky preset [n]` — gear loadouts: `preset save|delete <n>` · `preset buy slot`\n' +
-      '`ky bag` — your drops (sellable) · `ky gear` — your equipment\n\n' +
-      '🎭 **MULTIPLE CHARACTERS**\n' +
-      '`ky switch <class>` is your one command: owned classes swap instantly **free**; a class you do not own yet offers creation at **🧪 5,000** (starts **Lv.1**, confirm button — no accidental spend). Gear is **per-character** (each keeps its own equipment, level and best depth), but your 🧪 Kryptonite, drops bag and unique collection are **shared**. `ky char` pages through all your characters — click ◀ ▶ or `ky char <class>`. An item can only be equipped on ONE character at a time.\n\n' +
-      '🎒 **GEAR PRESETS** (loadouts):\n' +
-      '`ky preset save <n>` snapshots all 5 equipped items into slot n · `ky preset <n>` loads it back — swaps **all 5 slots instantly** (old gear returns to bag/collection). `ky preset` opens the panel, `ky preset delete <n>` clears a slot.\n' +
-      'First **2 slots are free**; unlock slots 3/4/5 for 🧪 **2,000 / 5,000 / 10,000** (`ky preset buy slot`, confirm button).\n' +
-      'Gear is shared across your characters, but one item can be equipped on **ONE character at a time** — loading checks that and asks you to unequip it there first.\n\n' +
-      '⚔️ **IN BATTLE (buttons)**\n' +
-      '⏩ **Push** — fight **1 floor** (animated clash). Can die.\n' +
-      '⚡ **Fast Sweep** — auto-fight **5 floors** at once (fast, blind — riskier).\n' +
-      '🧪 **Extract** — bank drops + EXP (safe). Locked until you clear ≥1 floor.\n\n' +
-      '⚔️ **COMBAT** (auto in PvE, pick skills in PvP):\n\n' +
-      'Warrior ⚔️\n' +
-      'Slash — 1.0× ATK\n' +
-      'Parry Strike — 1.6× ATK + block next hit (CD2)\n' +
-      'War Cry — 2.5× ATK + 50% DEF pierce + buff + **pierces evasion** (CD4)\n\n' +
-      'Mage 🔮\n' +
-      'Bolt — 1.0× MATK\n' +
-      'Fireball — 1.7× MATK + burn 10%/turn 3 turns (CD2)\n' +
-      'Meteor — 2.5× MATK + heavy burn + 50% MDEF pierce + **pierces evasion** (CD4)\n\n' +
-      '_Burn bypasses Parry. Enemies crit from floor 45+._\n' +
-      '_PvP duels use tuned rules: hits have a ±15% damage roll, burn scales with level, War Cry DR capped._\n\n' +
-      '💀 **Death** = lose drops + EXP (this run only). **Extract** to keep them.\n' +
-      '_Push your luck: extract early (safe) or go deeper (more loot, more risk)._\n\n' +
-      '💰 **KRYPTONITE (🧪)** — drops are NOT 🧪, you must **sell** them:\n' +
-      '`ky sell all` → sell all drops → 🧪 · `ky sell d83 5` → sell 5 of d83\n\n' +
-      '⚔️ **GEAR** (get stronger — pass walls):\n' +
-      '`ky shop gear [tier]` → browse. `ky shop gear rates` → see all stat + passive % ranges.\n' +
-      'Common–Epic = fixed gear (`g1`–`g23`). **Legend/Mythic/Divine = mystery boxes** (`g100`+) — random stats + passive!\n' +
-      'Buy: `ky buygear <code>`. Weapon/head/armor = **pure gacha** (random ATK/MATK, DEF/MDEF — can\'t pick).\n' +
-      '`ky equip <id>` · `ky sellgear <id>` · `ky sellgear <rarity> all` (sell ALL spares of a tier, e.g. `ky sellgear d all`)\n' +
-      '⚠️ **Gear locked during battle/duel** — finish first (`ky end`).\n\n' +
-      '🎲 **REROLL**: bad roll? `ky sellgear <id>` (35% refund) → rebuy → new random!\n\n' +
-      '✨ **PASSIVES** (on Legend+ gear, auto-active in PvE & PvP — see shop for stat ranges per tier):\n' +
-      '🗡️ Berserker (+% dmg, cap 100%) · 🎯 Precision (crit 1.75×, cap 50%) · 🩸 Lifesteal (heal % of dmg dealt, cap 65%) · 💨 Swift (+flat SPD) · 🛡️ Fortify (−% dmg taken, cap 45%) · 🌀 Evasion (dodge %, cap 40% — ults pierce) · 🧪 Greed (+% 🧪 sell) · 📚 Wisdom (+% EXP)\n' +
-      '_Lifesteal works on BOTH physical & magic damage! Stacks across gear (capped)._\n\n' +
-      '📈 **PROGRESSION**\n' +
-      'Push → Char EXP → level up → base stats grow. Gear → more stats → delve deeper → better drops.\n' +
-      'Stuck at a floor? **Grind** (sweep + push + extract) → level/gear up → pass it!\n' +
-      '_Floor & level have **NO CAP** — grind forever._'
-    )
-    .addFields({ name: '⚔️ PvP DUELS', value: "`ky battle @user` — challenge a player! Turn-based, pick your skills each turn, all passives active. Level gap shrinks (dampened) so nearby levels = strategy decides. Win → W/L on `ky char`. AFK 1 min = forfeit; `ky end` anytime. No loot lost. 🏆", inline: false })
-    .setFooter({ text: 'ky battle help | 💎 Kryztal = entry · 🧪 Kryptonite = battle currency' });
-  return context.reply({ embeds: [embed] });
+  const { embed, components } = buildHelpPage(1, context.author?.id || context.user?.id);
+  return context.reply({ embeds: [embed], components });
 }
 async function handleEnd(context, userId) {
   if (battle.hasActiveRun(userId)) {
@@ -364,11 +369,19 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
   const CAPS = require('./battleConfig').PASSIVE_CAPS;
   const passSum = getPassives(c.equipment, b.uniqueItems || {});
   const passRaw = getPassivesRaw(c.equipment, b.uniqueItems || {});
+  const baseEva = clsDef.baseEvasion || 0; // Rogue class passive
+  const EVA_TOTAL_CAP = require('./battleConfig').EVASION_TOTAL_CAP; // single source of truth (engine + display)
+  const effEva = Math.min(baseEva + (passSum.evasion || 0), EVA_TOTAL_CAP);
   const passLines = Object.entries(passSum)
     .filter(([id, v]) => v > 0 && PASSIVES[id])
-    .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(MAX)*' : ''}`)
+    .map(([id, v]) => {
+      if (id === 'evasion' && baseEva > 0) return `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${effEva}${PASSIVES[id].unit}${effEva >= EVA_TOTAL_CAP ? ' *(MAX)*' : ''}`;
+      return `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(MAX)*' : ''}`;
+    })
     .join('\n');
-  const passSection = passLines ? `\n\n**✨ Active Passives:**\n${passLines}` : '';
+  let passSection = '';
+  if (passLines) passSection = `\n\n**✨ Active Passives:**\n${passLines}`;
+  else if (baseEva > 0) passSection = `\n\n**✨ Active Passives:**\n🌀 Evasion ${baseEva}% *(class)*`;
   const banner = isActive
     ? `🟢 ACTIVE · ${clsDef.emoji} ${clsDef.name} — Lv.${c.charLevel}`
     : `⚪ INACTIVE · ${clsDef.emoji} ${clsDef.name} — Lv.${c.charLevel}`;
@@ -677,7 +690,7 @@ async function handleSwitchClass(context, userId, args) {
   args = args || [];
   const cls = String(args[0] || '').toLowerCase();
   if (!cls) {
-    return context.reply({ content: 'Usage: `ky switch <warrior|mage>` — free swap to a character you own (a class you don\'t own yet offers creation, 🧪 5,000). See `ky char` for your characters.' });
+    return context.reply({ content: 'Usage: `ky switch <class>` — free swap to a character you own (a class you don\'t own yet offers creation, 🧪 5,000). See `ky char` for your characters.' });
   }
   if (!Object.hasOwn(CLASSES, cls)) { // hasOwn: inherited keys ('constructor') must not pass
     const bd = getBattle(userId);
@@ -1132,10 +1145,12 @@ async function handlePvpButton(interaction) {
     const eventStr = (res.events || []).map((e) => {
       if (e.type === 'hit') {
         if (e.parried) return `${e.crit ? '💥 CRIT! ' : ''}🛡️ Parried! ${e.skill} — ${e.dmg}`;
+        if (e.dodged) return e.dmg > 0 ? `🗡️ Shadow Dodge pierced! ${e.skill} — ${e.dmg}` : '🗡️ Shadow Dodge!';
         if (e.evaded) return '💨 Missed!';
         return `${e.crit ? '💥 CRIT! ' : ''}🗡️ ${e.skill} — ${e.dmg}`;
       }
       if (e.type === 'burn') return `🔥 Burn — ${e.dmg}`;
+      if (e.type === 'poison') return `🧪 Poison — ${e.dmg}`;
       if (e.type === 'lifesteal') return `🩸 +${e.heal}`;
       return '';
     }).filter(Boolean).join('\n');
@@ -1238,7 +1253,7 @@ async function handleButton(interaction) {
   const username = uname(interaction, userId);
 
   // class pick -> create character + start delve
-  const classMatch = customId.match(/^battle_class_(warrior|mage)_/);
+  const classMatch = customId.match(/^battle_class_(warrior|mage|rogue)_/);
   if (classMatch) {
     const create = battle.createCharacter(userId, classMatch[1]);
     if (!create.ok) return interaction.update({ embeds: [infoEmbed(username, create.reason)], components: [] });
@@ -1334,6 +1349,13 @@ async function handleButton(interaction) {
     return interaction.update({ embeds: [embed], components });
   }
 
+  // battle_help_<page>_<userId> — same pattern: page before userId
+  const helpPageMatch = customId.match(/^battle_help_(\d+)_(\d+)$/);
+  if (helpPageMatch) {
+    const { embed, components } = buildHelpPage(parseInt(helpPageMatch[1], 10) || 1, userId);
+    return interaction.update({ embeds: [embed], components });
+  }
+
   return interaction.deferUpdate();
 }
 
@@ -1345,7 +1367,7 @@ async function handleBattleLb(context, subArgs) {
   for (const a of args) {
     if (a === 'all') continue;
     if (Object.hasOwn(CLASSES, a)) { classFilter = a; continue; }
-    return context.reply({ content: 'Usage: `ky lb battle [all] [warrior|mage]` — `all` = global scope, class name = per-class board. Combine freely: `ky lb battle mage all`.' });
+    return context.reply({ content: 'Usage: `ky lb battle [all] [class]` — `all` = global scope, class name = per-class board. Combine freely: `ky lb battle mage all`.' });
   }
   let memberIds = null;
   let scopeLabel = 'Global';
@@ -1375,7 +1397,7 @@ async function handleBattleLb(context, subArgs) {
     .setColor(COLOR)
     .setTitle(`🏆 Battle Leaderboard — ${scopeLabel}${classFilter ? ` · ${CLASSES[classFilter].emoji} ${CLASSES[classFilter].name}` : ''}`)
     .setDescription(lines.join('\n'))
-    .setFooter({ text: `🏰 = best floor depth · ky lb battle [all] [warrior|mage]${isAll ? ' — global' : ' — add "all" for global'}` })
+    .setFooter({ text: `🏰 = best floor depth · ky lb battle [all] [class]${isAll ? ' — global' : ' — add "all" for global'}` })
     .setTimestamp();
   return context.reply({ embeds: [embed] });
 }

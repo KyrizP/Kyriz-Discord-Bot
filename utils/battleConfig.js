@@ -31,6 +31,18 @@ const CLASSES = {
       { id: 'meteor',   name: 'Meteor',   mult: 2.5, type: 'magic', cd: 4, effect: { kind: 'burn', pct: 20, turns: 3, pierce: 0.5, pierceEvasion: true } },
     ],
   },
+  rogue: {
+    name: 'Rogue',
+    emoji: '🗡️',
+    base:   { hp: 80,  atk: 13, matk: 4,  def: 6,  mdef: 6,  spd: 12 },
+    growth: { hp: 17,  atk: 2.8, matk: 1.0, def: 1.3, mdef: 2.5, spd: 3.5 }, // def 1.8→1.3 / mdef 1.8→2.5: shifts rogue's power from "vs physical(W)" to "vs magic(M)" — completes the W>R>M>W cycle (sim-gated, PvE parity unchanged 66/76/86)
+    baseEvasion: 8, // class passive: % chance to dodge — ADDS with gear evasion, total capped 48% (engine: min(base+gear, 48))
+    skills: [
+      { id: 'backstab',    name: 'Backstab',     mult: 1.0, type: 'physical', cd: 0 },
+      { id: 'venomfang',   name: 'Venom Fang',   mult: 1.5, type: 'physical', cd: 2, effect: { kind: 'poison', pct: 15, turns: 3 } }, // poison = ATK-based DoT, bypasses all defenses
+      { id: 'shadowdance', name: 'Shadow Dance', mult: 2.0, type: 'physical', cd: 4, effect: { kind: 'dodge', charges: 2 } }, // 2 guaranteed dodges — pierced by ults (pierceEvasion), consumed by ALL attacks
+    ],
+  },
 };
 
 // ENEMY GROWTH — exponential per floor. stat = base * scale^(floor-1)
@@ -169,6 +181,11 @@ const PASSIVES = {
   wisdom:    { emoji: '📚', name: 'Wisdom',    weight: 11, unit: '%', ranges: { legendary: [12, 18], mythic: [17, 23], divine: [22, 30] } },
 };
 
+// EVASION_TOTAL_CAP — additive total of class baseEvasion + gear evasion (Rogue's edge:
+// 8 base + 40 gear = 48; every other class has base 0 so their total stays ≤ PASSIVE_CAPS.evasion).
+// Single source of truth — battleEngine, pvpManager and the `ky char` display all read THIS.
+const EVASION_TOTAL_CAP = 48;
+
 // CRIT — player crit source is Precision passive only; enemy crit floor 45+.
 const CRIT = { mult: 1.75, cap: 0.50, enemyFloor: 45, enemyChance: 0.20 };
 
@@ -179,4 +196,4 @@ const CRIT = { mult: 1.75, cap: 0.50, enemyFloor: 45, enemyChance: 0.20 };
 const PASSIVE_CAPS = { berserker: 100, precision: Math.round(CRIT.cap * 100), lifesteal: 65, fortify: 45, evasion: 40 }; // precision capped here TOO so the panel can show (MAX) — combat already capped it via getCritChance (keep in sync with CRIT.cap)
 
 module.exports = { CLASSES, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, GEAR, MERCHANT_FLAT,
-  TIER_INFO, LEGEND_GEAR_RANGES, MYSTERY_BOXES, PASSIVES, PASSIVE_CAPS, CRIT };
+  TIER_INFO, LEGEND_GEAR_RANGES, MYSTERY_BOXES, PASSIVES, PASSIVE_CAPS, CRIT, EVASION_TOTAL_CAP };

@@ -5,7 +5,7 @@
 // Fully unit-tested (test/battleEngine.test.js, incl. balance sim).
 // ============================================================
 
-const { CLASSES, GEAR, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, CRIT, PASSIVE_CAPS } = require('./battleConfig');
+const { CLASSES, GEAR, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, CRIT, PASSIVE_CAPS, EVASION_TOTAL_CAP } = require('./battleConfig');
 
 const STAT_KEYS = ['hp', 'atk', 'matk', 'def', 'mdef', 'spd'];
 const EQUIP_SLOTS = ['weapon', 'head', 'armor', 'boots', 'accessory'];
@@ -105,11 +105,15 @@ function resolveFight(player, enemy) {
   const cdLeft = {};               // skill id -> turns of CD remaining
   const buff = { atkPct: 0, turns: 0, dmgReduce: 0 }; // War Cry self-buff (atk + damage-taken reduce)
   let parryBlocks = 0;              // Parry Strike -> blocks next N enemy hits
+  let dodgeCharges = 0;             // Shadow Dance -> guaranteed dodges (consumed by any hit)
   const enemyBurn = { dmg: 0, turns: 0 }; // player's burn on the enemy
+  const enemyPoison = { dmg: 0, turns: 0 }; // player's poison on the enemy (Rogue)
   const pattern = skills ? [0, 1, 0, 1, 2] : null; // basic, s2, basic, s2, ult
   let pi = 0, ei = 0, rounds = 0;
   const log = [];
   const crit = getCritChance(p);
+  const baseEva = (CLASSES[player.charClass] || {}).baseEvasion || 0; // Rogue class passive — looked up here so callers can't forget it
+  const totalEva = Math.min(baseEva + (p.evasion || 0), EVASION_TOTAL_CAP); // base + gear additive (Rogue's class edge; others 0+gear ≤ 40)
 
   const _playerHit = () => {
     if (skills) for (const k of Object.keys(cdLeft)) if (cdLeft[k] > 0) cdLeft[k] -= 1; // tick CDs
@@ -134,15 +138,19 @@ function resolveFight(player, enemy) {
       if (skill.effect.kind === 'buff') { buff.atkPct = skill.effect.pct; buff.turns = skill.effect.turns; buff.dmgReduce = skill.effect.dmgReduce || 0; }
       else if (skill.effect.kind === 'parry') { parryBlocks = 1; }
       else if (skill.effect.kind === 'burn') { enemyBurn.dmg = Math.round(stats.matk * skill.effect.pct / 100); enemyBurn.turns = skill.effect.turns; }
+      else if (skill.effect.kind === 'poison') { enemyPoison.dmg = Math.round(stats.atk * skill.effect.pct / 100); enemyPoison.turns = skill.effect.turns; }
+      else if (skill.effect.kind === 'dodge') { dodgeCharges = skill.effect.charges || 2; }
     }
     if (skill.cd) cdLeft[skill.id] = skill.cd;
   };
 
   const _enemyHit = () => {
     if (enemyBurn.turns > 0) { ehp -= enemyBurn.dmg; enemyBurn.turns -= 1; if (ehp <= 0) return; } // burn ticks first
+    if (enemyPoison.turns > 0) { ehp -= enemyPoison.dmg; enemyPoison.turns -= 1; if (ehp <= 0) return; } // poison ticks too
     let dmg;
     if (parryBlocks > 0) { dmg = 0; parryBlocks -= 1; }            // parry blocks the hit
-    else if ((p.evasion || 0) > 0 && Math.random() < p.evasion / 100) { dmg = 0; } // dodge
+    else if (dodgeCharges > 0) { dmg = 0; dodgeCharges -= 1; }     // Shadow Dance: guaranteed dodge
+    else if (totalEva > 0 && Math.random() < totalEva / 100) { dmg = 0; } // base + gear evasion (additive, cap 48)
     else {
       const sk = enemy.rotation[ei % enemy.rotation.length]; ei++;
       dmg = sk.type === 'magic' ? magicDamage(enemy.matk, stats.mdef, sk.mult) : physicalDamage(enemy.atk, stats.def, sk.mult);
@@ -220,7 +228,7 @@ function simulateDelve(charLevel, charClass, equipment = {}, uniqueItems = {}, o
   for (let floor = 1; floor <= maxFloors; floor++) {
     if (php <= 0) { deathFloor = floor - 1; break; }
     const enemy = generateEnemy(floor);
-    const result = resolveFight({ stats, hp: php, skills: cls.skills, passives }, enemy);
+    const result = resolveFight({ stats, hp: php, skills: cls.skills, passives, charClass }, enemy);
     if (result.winner === 'player') {
       floorsCleared = floor;
       php = result.playerHpLeft; // HP persists across floors (no heal in v1)

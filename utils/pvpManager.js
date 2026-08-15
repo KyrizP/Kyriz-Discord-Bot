@@ -9,7 +9,7 @@
 // ============================================================
 
 const { getPassives, getCritChance, physicalDamage, magicDamage } = require('./battleEngine');
-const { CRIT } = require('./battleConfig');
+const { CRIT, CLASSES, EVASION_TOTAL_CAP } = require('./battleConfig');
 
 const activePvpFights = new Map(); // fightId -> fight
 const AFK_MS = 60_000;
@@ -50,7 +50,8 @@ function _combatant(p, hpMax, passives) {
     charLevel: p.charLevel, charClass: p.charClass, equipment: p.equipment || {}, uniqueItems: p.uniqueItems || {},
     stats: p.stats, hpMax, hp: hpMax,
     skills: p.skills, passives,
-    cdLeft: {}, buff: { atkPct: 0, turns: 0, dmgReduce: 0 }, burn: { dmg: 0, turns: 0 }, parryBlocks: 0,
+    cdLeft: {}, buff: { atkPct: 0, turns: 0, dmgReduce: 0 }, burn: { dmg: 0, turns: 0 }, poison: { dmg: 0, turns: 0 }, parryBlocks: 0, dodgeCharges: 0,
+    baseEvasion: (CLASSES[p.charClass] && CLASSES[p.charClass].baseEvasion) || 0, // Rogue class passive
   };
 }
 
@@ -108,6 +109,13 @@ function resolvePvpTurn(fightId, actorId, skillId) {
     events.push({ type: 'burn', target: actorKey, dmg: bdmg });
     if (actor.hp <= 0) { actor.hp = 0; return _endTurn(fight, defKey, actorKey, events, true); } // burn killed the ACTOR → defender (burn caster) wins
   }
+  // 1b. poison ticks (Rogue DoT — same rules as burn: bypasses all defenses)
+  if (actor.poison.turns > 0) {
+    const pdmg = Math.max(1, actor.poison.dmg);
+    actor.hp -= pdmg; actor.poison.turns -= 1;
+    events.push({ type: 'poison', target: actorKey, dmg: pdmg });
+    if (actor.hp <= 0) { actor.hp = 0; return _endTurn(fight, defKey, actorKey, events, true); } // poison killed the ACTOR → defender (poison caster) wins
+  }
 
   // 2. compute outgoing damage (+ berserker + crit)
   const atkMult = actor.buff.turns > 0 ? (1 + actor.buff.atkPct / 100) : 1;
@@ -123,19 +131,29 @@ function resolvePvpTurn(fightId, actorId, skillId) {
   const crit = getCritChance(actor.passives);
   if (crit > 0 && Math.random() < crit) { dmg = Math.floor(dmg * CRIT.mult); critted = true; }
 
-  // 3. defender defenses: parry > evasion > fortify
-  let parried = false, evaded = false;
+  // 3. defender defenses: parry > dodge charges > evasion (base OR gear) > fortify/WarCry DR (reduction layer — applies to ANY hit that lands)
+  let parried = false, evaded = false, dodged = false;
+  const pierceEvade = !!(skill.effect && skill.effect.pierceEvasion);
   if ((def.parryBlocks || 0) > 0) { dmg = Math.max(1, Math.round(dmg * 0.25)); def.parryBlocks -= 1; parried = true; } // parry: -75% (not full block) — prevents WvW mutual-parry stall; still a strong counter
-  else if (!(skill.effect && skill.effect.pierceEvasion) && (def.passives.evasion || 0) > 0 && Math.random() < def.passives.evasion / 100) { dmg = 0; evaded = true; } // ults pierce evasion
   else {
-    if ((def.buff.turns > 0) && (def.buff.dmgReduce || 0) > 0) dmg = Math.round(dmg * (1 - def.buff.dmgReduce / 100)); // War Cry self-DR
-    if ((def.passives.fortify || 0) > 0) dmg = Math.round(dmg * (1 - def.passives.fortify / 100));
-    if (dmg < 1) dmg = 1;
+    if ((def.dodgeCharges || 0) > 0) {
+      def.dodgeCharges -= 1; dodged = true; // charge consumed by ANY attack (incl pierce)
+      if (!pierceEvade) dmg = 0; // non-pierce: guaranteed miss; pierce (ults): damage goes through, charge still consumed
+    }
+    else if (!pierceEvade) {
+      const totalEva = Math.min((def.baseEvasion || 0) + (def.passives.evasion || 0), EVASION_TOTAL_CAP); // base + gear additive (Rogue's class edge; others 0+gear ≤ 40)
+      if (totalEva > 0 && Math.random() < totalEva / 100) { dmg = 0; evaded = true; }
+    }
+    if (dmg > 0) { // reduction layer: landed hits (incl. pierce-through-charge) — restores committed semantics where a FAILED evade roll still got fortify
+      if ((def.buff.turns > 0) && (def.buff.dmgReduce || 0) > 0) dmg = Math.round(dmg * (1 - def.buff.dmgReduce / 100)); // War Cry self-DR
+      if ((def.passives.fortify || 0) > 0) dmg = Math.round(dmg * (1 - def.passives.fortify / 100));
+      if (dmg < 1) dmg = 1;
+    }
   }
   dmg = Math.round(dmg * PVP_DAMAGE_MULT * (1 - PVP_DAMAGE_ROLL + Math.random() * 2 * PVP_DAMAGE_ROLL)); // PvP tuning: lengthen fights + ±roll (comebacks)
-  if (dmg === 0 && !evaded) dmg = 1; // guard: a min-chip parried/fortified hit must not become 0 (free evade) if scalar is ever lowered
+  if (dmg === 0 && !evaded && !dodged) dmg = 1; // guard: a min-chip parried/fortified hit must not become 0 (free evade) if scalar is ever lowered
   if (dmg > 0) def.hp -= dmg;
-  events.push({ type: 'hit', actor: actorKey, skill: skill.name, dmg, crit: critted, parried, evaded });
+  events.push({ type: 'hit', actor: actorKey, skill: skill.name, dmg, crit: critted, parried, evaded, dodged });
 
   // 4. lifesteal (on actual damage dealt)
   if (dmg > 0 && (actor.passives.lifesteal || 0) > 0) {
@@ -148,6 +166,8 @@ function resolvePvpTurn(fightId, actorId, skillId) {
     if (skill.effect.kind === 'buff') { actor.buff.atkPct = skill.effect.pct; actor.buff.turns = skill.effect.turns; actor.buff.dmgReduce = Math.min(skill.effect.dmgReduce || 0, PVP_WARCRY_DR_CAP); }
     else if (skill.effect.kind === 'parry') { actor.parryBlocks = 1; } // blocks next incoming hit (cd 2 — not spammable)
     else if (skill.effect.kind === 'burn') { def.burn.dmg = Math.round(actor.stats.matk * skill.effect.pct / 100 * pvpBurnMult(actor.charLevel)); def.burn.turns = skill.effect.turns; } // v1.5: burn × effLevel formula (see constants)
+    else if (skill.effect.kind === 'poison') { def.poison.dmg = Math.round(actor.stats.atk * skill.effect.pct / 100); def.poison.turns = skill.effect.turns; } // Rogue: ATK-based DoT, no level scaling needed (ATK already scales)
+    else if (skill.effect.kind === 'dodge') { actor.dodgeCharges = skill.effect.charges || 2; } // Rogue: guaranteed dodges
   }
   if (skill.cd) actor.cdLeft[skill.id] = skill.cd;
 
