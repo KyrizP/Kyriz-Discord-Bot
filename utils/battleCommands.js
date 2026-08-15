@@ -768,8 +768,8 @@ function buildPresetPanel(b, userId, page, viewerId) {
     const passLine = Object.entries(passSum)
       .filter(([id, v]) => v > 0 && PASSIVES[id])
       .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}`)
-      .join(' · ');
-    desc = `${gearLines}\n\n**✨ Active Passives:** ${passLine || '—'}`;
+      .join('\n');
+    desc = `${gearLines}\n\n**✨ Active Passives:**\n${passLine || '—'}`;
   }
   const nextPrice = battle.PRESET_SLOT_PRICES[b.presetSlots + 1];
   const footerTail = b.presetSlots >= battle.PRESET_SLOTS_CAP || !nextPrice
