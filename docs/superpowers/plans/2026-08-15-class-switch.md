@@ -13,7 +13,7 @@
 - **NO COMMIT** — workflow owner: edit langsung di master, owner yang commit. Setiap akhir task = checkpoint "run suite", bukan commit.
 - **Bot text FULL ENGLISH** (embed, error, label); diskusi internal Indonesia.
 - **Jangan sentuh**: `pvpManager.js`, `battleEngine.js`, `battleConfig.js`, `uniqueItems.js`, `economyManager.js`, `data/*.json` di repo.
-- Konstanta: `CHAR_CHANGE_COST = 5000` (🧪 Kryptonite). Constructor default: `charLevel: 1, charExp: 0, charExpNeeded: 200, charName: null, bestDepth: 0, equipment: 5 slot null, scoreAchievedAt: null`.
+- Konstanta: `CHAR_CHANGE_COST = 5000` (🧪 Kryptonite). Constructor default: `charLevel: 1, charExp: 0, charExpNeeded: 100 (= CHAR_EXP_BASE, live value — do NOT change), charName: null, bestDepth: 0, equipment: 5 slot null, scoreAchievedAt: null`.
 - Test runner: `node test/<file>.test.js`, exit code 0/1, format `ok(cond, msg)` + summary `Pass/Fail`.
 - Semua suite harus hijau di akhir tiap task: `for t in battleManager pvp battleConfig battleEngine uniqueItems classSwitch crash; do node test/$t.test.js; done`.
 
@@ -43,7 +43,7 @@ const mkData = (uid) => ({ [uid]: { username: 'T', balance: 100000, level: 1, xp
 
 // ---- constructor: default record persis pemain baru (D3/G10) ----
 const rec = BM.createCharacterRecord();
-ok(rec.charLevel === 1 && rec.charExp === 0 && rec.charExpNeeded === 200, 'record: lv1 exp0 need200');
+ok(rec.charLevel === 1 && rec.charExp === 0 && rec.charExpNeeded === 100, 'record: lv1 exp0 need100');
 ok(rec.charName === null && rec.bestDepth === 0 && rec.scoreAchievedAt === null, 'record: no name, depth 0, no score date');
 ok(rec.equipment && rec.equipment.weapon === null && Object.keys(rec.equipment).length === 5, 'record: 5 empty slots');
 
@@ -82,9 +82,9 @@ ok(JSON.stringify(b3.characters.warrior) === JSON.stringify(BM.createCharacterRe
 // ---- applyGainCharExp menulis ke karakter aktif ----
 const data4 = mkData('U4');
 BM.ensureBattleData(data4.U4); BM.applyCreateCharacter(data4, 'U4', 'mage');
-BM.applyGainCharExp(data4, 'U4', 250);
+BM.applyGainCharExp(data4, 'U4', 150);
 const b4 = BM.ensureBattleData(data4.U4);
-ok(b4.characters.mage.charLevel === 2 && b4.characters.mage.charExp === 50, 'exp naik ke char aktif (250 = 200+50)');
+ok(b4.characters.mage.charLevel === 2 && b4.characters.mage.charExp === 50, 'exp naik ke char aktif (150 = 100+50)');
 
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);

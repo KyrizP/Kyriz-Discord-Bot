@@ -101,7 +101,7 @@ function getActiveChar(b) { return b.characters[b.activeClass]; }
 
 ```js
 function createCharacterRecord() {
-  return { charLevel: 1, charExp: 0, charExpNeeded: 200, charName: null,
+  return { charLevel: 1, charExp: 0, charExpNeeded: 100 (CHAR_EXP_BASE), charName: null,
            bestDepth: 0, equipment: emptySlots(), scoreAchievedAt: null };
 }
 ```

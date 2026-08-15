@@ -7,7 +7,7 @@ const mkData = (uid) => ({ [uid]: { username: 'T', balance: 100000, level: 1, xp
 
 // ---- constructor: default record persis pemain baru (D3/G10) ----
 const rec = BM.createCharacterRecord();
-ok(rec.charLevel === 1 && rec.charExp === 0 && rec.charExpNeeded === 200, 'record: lv1 exp0 need200');
+ok(rec.charLevel === 1 && rec.charExp === 0 && rec.charExpNeeded === 100, 'record: lv1 exp0 need100');
 ok(rec.charName === null && rec.bestDepth === 0 && rec.scoreAchievedAt === null, 'record: no name, depth 0, no score date');
 ok(rec.equipment && rec.equipment.weapon === null && Object.keys(rec.equipment).length === 5, 'record: 5 empty slots');
 
@@ -46,9 +46,9 @@ ok(JSON.stringify(b3.characters.warrior) === JSON.stringify(BM.createCharacterRe
 // ---- applyGainCharExp menulis ke karakter aktif ----
 const data4 = mkData('U4');
 BM.ensureBattleData(data4.U4); BM.applyCreateCharacter(data4, 'U4', 'mage');
-BM.applyGainCharExp(data4, 'U4', 250);
+BM.applyGainCharExp(data4, 'U4', 150);
 const b4 = BM.ensureBattleData(data4.U4);
-ok(b4.characters.mage.charLevel === 2 && b4.characters.mage.charExp === 50, 'exp naik ke char aktif (250 = 200+50)');
+ok(b4.characters.mage.charLevel === 2 && b4.characters.mage.charExp === 50, 'exp naik ke char aktif (150 = 100+50)');
 
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);

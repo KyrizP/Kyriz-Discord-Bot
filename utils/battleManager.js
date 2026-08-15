@@ -19,7 +19,7 @@ const unique = require('./uniqueItems');
 const ENTRY_FEE = 5000;
 const SWEEP_BUFFER = 5;          // sweep resolves floors 1..(bestDepth - SWEEP_BUFFER) instantly
 const GEAR_SELLBACK = 0.35;      // sell-back gear at 35% (all tiers, v1.1)
-const CHAR_EXP_BASE = 200;
+const CHAR_EXP_BASE = 100;
 const charExpFor = (f) => 8 + Math.floor(f * 1.5);   // char exp per floor cleared (tunable)
 const PROFILE_XP_EXTRACT = 50; // fixed profile XP on successful extract
 const PROFILE_XP_DIE = 20; // fixed profile XP on death (consolation)
