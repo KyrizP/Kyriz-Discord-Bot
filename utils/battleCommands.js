@@ -1144,12 +1144,14 @@ async function handleButton(interaction) {
 }
 
 async function handleBattleLb(context, subArgs) {
-  const arg0 = subArgs && subArgs[0] ? subArgs[0].toLowerCase() : null;
-  const isAll = arg0 === 'all';
+  // Args: [all] [warrior|mage] in ANY order — e.g. `ky lb battle mage all` = global mage board.
+  const args = (subArgs || []).map((a) => String(a).toLowerCase());
+  const isAll = args.includes('all');
   let classFilter = null;
-  if (!isAll && arg0) {
-    if (Object.keys(CLASSES).includes(arg0)) classFilter = arg0;
-    else return context.reply({ content: 'Usage: `ky lb battle [all|warrior|mage]` — `all` = global, class name = per-class board.' });
+  for (const a of args) {
+    if (a === 'all') continue;
+    if (Object.hasOwn(CLASSES, a)) { classFilter = a; continue; }
+    return context.reply({ content: 'Usage: `ky lb battle [all] [warrior|mage]` — `all` = global scope, class name = per-class board. Combine freely: `ky lb battle mage all`.' });
   }
   let memberIds = null;
   let scopeLabel = 'Global';
@@ -1179,7 +1181,7 @@ async function handleBattleLb(context, subArgs) {
     .setColor(COLOR)
     .setTitle(`🏆 Battle Leaderboard — ${scopeLabel}${classFilter ? ` · ${CLASSES[classFilter].emoji} ${CLASSES[classFilter].name}` : ''}`)
     .setDescription(lines.join('\n'))
-    .setFooter({ text: `🏰 = best floor depth · ky lb battle${isAll ? ' all' : ' (use "all" for global)'}${classFilter ? ' [warrior|mage]' : ''}` })
+    .setFooter({ text: `🏰 = best floor depth · ky lb battle [all] [warrior|mage]${isAll ? ' — global' : ' — add "all" for global'}` })
     .setTimestamp();
   return context.reply({ embeds: [embed] });
 }
