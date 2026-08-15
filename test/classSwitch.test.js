@@ -232,6 +232,20 @@ ok(dN.UN.battle.characters.warrior.charName === 'Valid Name-1' && dN.UN.battle.c
   delete process.env.SUPERADMIN_ID;
 }
 
+
+// ---- IMMORTAL gear: unsellable (one-of-a-kind, no value) ----
+{
+  const dI = mkData('UI');
+  BM.ensureBattleData(dI.UI); BM.applyCreateCharacter(dI, 'UI', 'warrior');
+  const bI = BM.ensureBattleData(dI.UI);
+  bI.uniqueItems.kyragn = { id: 'kyragn', rarity: 'immortal', slot: 'weapon', stats: { atk: 999 }, passives: [], name: 'Ragnarök' };
+  bI.kryptonite = 100;
+  const sgI = BM.applySellGear(dI, 'UI', 'kyragn', 1);
+  ok(sgI.ok === false, 'kyragn single sell: ditolak');
+  ok(bI.uniqueItems.kyragn && bI.kryptonite === 100, 'kyragn utuh, 🧪 tak berubah');
+  ok(BM.applySellGear(dI, 'UI', 'i', 'all').ok === false, 'bulk "i all": tidak dikenali (aman)');
+}
+
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail === 0 ? 0 : 1);

@@ -168,6 +168,18 @@ function fastSweepEmbed(username, res, run) {
     )
     .setTimestamp();
 }
+// Mirrors game.js sendLevelUpNotification (can't import it — game.js requires this module).
+// Battle profile-XP level-ups deserve the same announcement as casino games.
+async function notifyProfileLevelUp(channel, userId, xpResult) {
+  if (!channel || !xpResult || !xpResult.leveledUp) return;
+  try {
+    await channel.send({ embeds: [new EmbedBuilder()
+      .setColor(0xfee75c)
+      .setTitle('🎉 Level Up!')
+      .setDescription(`<@${userId}> is now **Level ${xpResult.newLevel}**!\n\nReward: 💎 **+${xpResult.rewardTotal.toLocaleString()}** Kryztal`)
+      .setTimestamp()] });
+  } catch {}
+}
 function dieEmbed(username, res) {
   return new EmbedBuilder()
     .setAuthor({ name: `${username}'s battle` })
@@ -213,6 +225,7 @@ async function handleBattle(context, userId) {
       if (battle.getRun(userId) === myRun) { // only if THIS run is still the active one
         const r = battle.extractRun(userId);
         try { await msg.edit({ embeds: [extractEmbed(username, r)], components: [] }); } catch {}
+        notifyProfileLevelUp(msg.channel, userId, r.xpResult);
       }
     });
   } catch {}
@@ -272,6 +285,7 @@ function handleBattleHelp(context) {
 async function handleEnd(context, userId) {
   if (battle.hasActiveRun(userId)) {
     const res = battle.extractRun(userId);
+    notifyProfileLevelUp(context.channel, userId, res.xpResult);
     return context.reply({ embeds: [extractEmbed(uname(context, userId), res)] });
   }
   // PvP forfeit (works any time — your turn or not)
@@ -1070,7 +1084,7 @@ async function handleButton(interaction) {
         await sleep(700);
       }
       if (res.won) { try { await interaction.message.edit({ embeds: [pushWinEmbed(username, res, battle.getRun(userId))], components: [actionRow(userId, battle.getRun(userId))] }); } catch {} }
-      else { try { await interaction.message.edit({ embeds: [dieEmbed(username, res)], components: [] }); } catch {} }
+      else { try { await interaction.message.edit({ embeds: [dieEmbed(username, res)], components: [] }); } catch {} notifyProfileLevelUp(interaction.channel, userId, res.xpResult); }
     } finally { run0.animating = false; }
     return;
   }
@@ -1083,7 +1097,7 @@ async function handleButton(interaction) {
     try {
       const res = battle.fastSweep(userId, 5);
       if (!res.ok) { await interaction.reply({ content: res.reason, ephemeral: true }); return; }
-      if (res.died) { await interaction.update({ embeds: [dieEmbed(username, res)], components: [] }); return; }
+      if (res.died) { await interaction.update({ embeds: [dieEmbed(username, res)], components: [] }); notifyProfileLevelUp(interaction.channel, userId, res.xpResult); return; }
       const run = battle.getRun(userId);
       await interaction.update({ embeds: [fastSweepEmbed(username, res, run)], components: [actionRow(userId, run)] });
     } catch (_) { /* ignore edit/race errors */ } finally { run0.animating = false; }
@@ -1095,6 +1109,7 @@ async function handleButton(interaction) {
     if (run0 && run0.animating) return interaction.deferUpdate(); // don't extract mid-Push/FastSweep animation
     const res = battle.extractRun(userId);
     if (!res.ok) return interaction.reply({ content: res.reason, ephemeral: true });
+    notifyProfileLevelUp(interaction.channel, userId, res.xpResult);
     return interaction.update({ embeds: [extractEmbed(username, res)], components: [] });
   }
 

@@ -218,6 +218,7 @@ function applySellGear(data, userId, itemId, qty) {
   if (itemId && itemId.startsWith('ky')) {
     const uq = b.uniqueItems[itemId];
     if (!uq) return { ok: false, reason: 'Not in your collection.' };
+    if (uq.rarity === 'immortal') return { ok: false, reason: 'This item cannot be sold.' }; // one-of-a-kind tier, no sell value — never deletable
     if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Unequip it first.' };
     const kry = unique.sellValue(uq);
     delete b.uniqueItems[itemId];
@@ -445,9 +446,10 @@ function nextFloor(userId) {
   const data = economy.readEconomy();
   const res = applyDie(data, userId, run);
   economy.writeEconomy(data);
-  try { economy.addXP(userId, PROFILE_XP_DIE); } catch (_) { /* consolation profile XP */ }
+  let xpResult = null;
+  try { xpResult = economy.addXP(userId, PROFILE_XP_DIE); } catch (_) { /* consolation profile XP */ }
   activeRuns.delete(userId);
-  return { ok: true, won: false, diedAt, lost: res.lost, enemyMaxHp: enemy.hp, log: fight.log };
+  return { ok: true, won: false, diedAt, lost: res.lost, enemyMaxHp: enemy.hp, log: fight.log, xpResult };
 }
 
 function extractRun(userId) {
@@ -457,11 +459,12 @@ function extractRun(userId) {
   const data = economy.readEconomy();
   const res = applyExtract(data, userId, run);
   economy.writeEconomy(data);
+  let xpResult = null;
   if ((run.cleared || 0) > 0) { // only give profile XP if at least 1 floor was cleared (anti ky end spam farm)
-    try { economy.addXP(userId, PROFILE_XP_EXTRACT); } catch (_) { /* profile XP best-effort */ }
+    try { xpResult = economy.addXP(userId, PROFILE_XP_EXTRACT); } catch (_) { /* profile XP best-effort */ }
   }
   activeRuns.delete(userId);
-  return { ok: true, banked: res.banked, exp: res.exp, depth, leveledUp: res.leveledUp, newLevel: res.newLevel };
+  return { ok: true, banked: res.banked, exp: res.exp, depth, leveledUp: res.leveledUp, newLevel: res.newLevel, xpResult };
 }
 
 // Fast Sweep: auto-resolve up to N floors (bulk push). Same risk as Push (can die mid-sweep).
@@ -472,7 +475,7 @@ function fastSweep(userId, maxFloors) {
   for (let i = 0; i < cap; i++) {
     const r = nextFloor(userId);
     if (!r.ok) break;
-    if (!r.won) { result = { ok: true, cleared, drops, died: true, diedAt: r.diedAt, lost: r.lost }; break; }
+    if (!r.won) { result = { ok: true, cleared, drops, died: true, diedAt: r.diedAt, lost: r.lost, xpResult: r.xpResult }; break; }
     cleared++;
     if (r.drop) drops[r.drop.id] = (drops[r.drop.id] || 0) + 1;
   }
