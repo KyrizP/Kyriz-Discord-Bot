@@ -47,6 +47,13 @@ client.once('ready', () => {
   console.log(`║   Servers: ${String(client.guilds.cache.size).padEnd(28)} ║`);
   console.log(`║   Players: ${String(playerCount).padEnd(28)} ║`);
   console.log('╚══════════════════════════════════════════╝');
+  // One-time battle data migration sweep (v1.6 flat -> characters) so the leaderboard
+  // shows everyone immediately, not just players who already ran a battle command.
+  try {
+    const r = require('./utils/battleManager').migrateAllBattleData();
+    if (r.migrated > 0) console.log(`║   Battle data migrated: ${String(r.migrated).padEnd(25)} ║`);
+  } catch (e) { console.error('[migrate] battle sweep failed:', e.message); }
+
   // Maintenance persisted ON across a restart → restore the DND presence too
   if (gameCommand.isMaintenanceActive && gameCommand.isMaintenanceActive()) {
     try {

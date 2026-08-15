@@ -608,6 +608,23 @@ function applyPvpResult(data, winnerId, loserId) {
   bl.pvpLosses = (bl.pvpLosses || 0) + 1;
   return { ok: true }; // NOTE: no scoreAchievedAt bump — W/L isn't part of Combat Score, so it shouldn't move the LB tiebreak
 }
+// One-time boot sweep: migrate every user's flat battle data NOW so the leaderboard
+// (a pure read) shows everyone immediately — without this, players who hadn't run a
+// battle command since v1.6 stay invisible on `ky lb battle` until they play.
+// Idempotent: writes ONLY when something actually changed.
+function migrateAllBattleData() {
+  const data = economy.readEconomy();
+  const before = JSON.stringify(data);
+  let migrated = 0;
+  for (const user of Object.values(data)) {
+    if (!user || !user.battle) continue;
+    if (user.battle.charClass && !user.battle.characters) migrated++; // count real migrations
+    ensureBattleData(user);
+  }
+  if (JSON.stringify(data) !== before) economy.writeEconomy(data);
+  return { migrated, total: Object.keys(data).length };
+}
+
 function recordPvp(winnerId, loserId) {
   const data = economy.readEconomy();
   applyPvpResult(data, winnerId, loserId);
@@ -619,7 +636,7 @@ module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
   applySell, applySellGear, applyEquip, applyUnequip, applyUnequipAll, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
   applyChangeClass, applySwitchClass,
-  createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
+  migrateAllBattleData, createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
   sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, changeClass, switchClass, setCharName, getCharName, getBattleLeaderboard, getBattleLeaderboardFor, recordPvp,
   createCharacterRecord, getActiveChar, getCharClass, isEquippedOnAnyChar, EQUIP_SLOTS,
   ENTRY_FEE, GEAR_SELLBACK, CHAR_CHANGE_COST,
