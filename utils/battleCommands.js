@@ -894,6 +894,20 @@ function _onForfeitFor(fightId) {
 
 const PVP_CHALLENGE_MS = 60_000; // challenge auto-expires after 60s
 const challengeTimers = new Map(); // `${aId}_${bId}` -> setTimeout handle
+// buyclass confirm expiry: 60s no click -> auto-cancel (buttons die, no charge). One timer per user;
+// any manual action (Create/Cancel) or a NEW confirm clears the old one first.
+const BUYCLASS_MS = 60_000;
+const buyclassTimers = new Map(); // userId -> setTimeout handle
+function clearBuyclassTimer(userId) {
+  if (buyclassTimers.has(userId)) { clearTimeout(buyclassTimers.get(userId)); buyclassTimers.delete(userId); }
+}
+function armBuyclassTimer(userId, message) {
+  clearBuyclassTimer(userId); // a fresh confirm supersedes any pending one
+  buyclassTimers.set(userId, setTimeout(async () => {
+    buyclassTimers.delete(userId);
+    try { await message.edit({ embeds: [infoEmbed('', '⌛ Character creation expired — no Kryptonite spent.')], components: [] }); } catch { /* message deleted — nothing to do */ }
+  }, BUYCLASS_MS));
+}
 function clearChallengeTimer(aId, bId) {
   const key = `${aId}_${bId}`;
   if (challengeTimers.has(key)) { clearTimeout(challengeTimers.get(key)); challengeTimers.delete(key); }
@@ -1029,6 +1043,8 @@ async function handleButton(interaction) {
     const ownerId = parts[2];
     const tail = parts.slice(3).join('_');
     if (interaction.user.id !== ownerId) return interaction.reply({ content: "This isn't your character creation.", ephemeral: true });
+    if (!buyclassTimers.has(ownerId)) return interaction.deferUpdate(); // panel expired (auto-cancelled) — ignore stale click
+    clearBuyclassTimer(ownerId); // manual action reached first — stop the timer
     if (tail === 'cancel') return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'Cancelled — no Kryptonite spent.')], components: [] });
     // Re-run guards at click time (state may have changed since the embed was posted)
     if (pvp.isInFight(ownerId)) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'Finish your duel first (`ky end`).')], components: [] });
