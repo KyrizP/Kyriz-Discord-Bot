@@ -115,7 +115,7 @@ function tierBadge(rarity) {
 }
 const STAT_EMOJI = { hp: '❤️', atk: '⚔️', matk: '🔮', def: '🛡️', mdef: '✨', spd: '💨' }; // inline gear stats on `ky char`
 function passiveDesc(p) {
-  const v = p.value + (p.unit || '');
+  const v = p.value + (p.unit ?? ((PASSIVES[p.id] && PASSIVES[p.id].unit) || ''));
   switch (p.id) {
     case 'berserker': return `Deal enhanced ${v} ATK/MATK damage`;
     case 'precision': return `${v} chance to deal 1.75× critical damage`;
@@ -496,7 +496,7 @@ function handleGear(context, userId, itemId) {
       .setTimestamp();
     if (passives.length) {
       embed.addFields({ name: 'Passive' + (passives.length > 1 ? 's' : ''),
-        value: passives.map((p) => `${p.emoji} ${PASSIVES[p.id].name} +${p.value}${p.unit}\n_${passiveDesc(p)}_`).join('\n') });
+        value: passives.map((p) => `${p.emoji || PASSIVES[p.id].emoji} ${PASSIVES[p.id].name} +${p.value}${p.unit ?? PASSIVES[p.id].unit}\n_${passiveDesc(p)}_`).join('\n') });
     }
     if (!isForeign) {
       embed.setFooter({ text: `ky equip ${id} · ky sellgear ${id} → 🧪 ${sell.toLocaleString()}` });
@@ -533,7 +533,7 @@ function renderGearList(userId, username, page, viewerId) {
   for (const id of uniqIds) {
     const u = b.uniqueItems[id];
     const st = Object.entries(u.stats).map(([k, v]) => `+${v} ${k.toUpperCase()}`).join(', ');
-    const ps = (u.passives || []).map((p) => `${p.emoji} ${PASSIVES[p.id].name} ${p.value}${p.unit}`).join(' ');
+    const ps = (u.passives || []).map((p) => `${p.emoji || PASSIVES[p.id].emoji} ${PASSIVES[p.id].name} ${p.value}${p.unit ?? PASSIVES[p.id].unit}`).join(' ');
     lines.push(`\`${id}\` ${tierBadge(u.rarity)} ${u.name} (${u.slot}) | ${st}${ps ? ' | ' + ps : ''}`);
   }
   for (const id of tmplIds) {
@@ -692,7 +692,7 @@ function handleBuyGear(context, userId, code) {
     if (!res.ok) return context.reply({ content: res.reason });
     const u = res.unique;
     const statStr = Object.entries(u.stats).map(([k, v]) => `+${v} ${k.toUpperCase()}`).join(' · ');
-    const passStr = u.passives.map((p) => `${p.emoji} ${PASSIVES[p.id].name} ${p.value}${p.unit}`).join(' | ');
+    const passStr = u.passives.map((p) => `${p.emoji || PASSIVES[p.id].emoji} ${PASSIVES[p.id].name} ${p.value}${p.unit ?? PASSIVES[p.id].unit}`).join(' | ');
     const sell = unique.sellValue(u);
     const embed = new EmbedBuilder()
       .setAuthor({ name: `${uname(context, userId)}` }).setColor(COLOR)
