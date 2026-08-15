@@ -360,15 +360,15 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
     .join('\n');
   const passSection = passLines ? `\n\n**✨ Active Passives:**\n${passLines}` : '';
   const banner = isActive
-    ? `🟢 ACTIVE — ${clsDef.emoji} ${clsDef.name} · Lv.${c.charLevel}`
-    : `⚪ INACTIVE — ${clsDef.emoji} ${clsDef.name} · Lv.${c.charLevel}`;
+    ? `🟢 ACTIVE · ${clsDef.emoji} ${clsDef.name} — Lv.${c.charLevel}`
+    : `⚪ INACTIVE · ${clsDef.emoji} ${clsDef.name} — Lv.${c.charLevel}`;
   const footer = isActive
     ? `Page ${pageIdx}/${totalPages} • ky equip <code> · ky unequip <slot>`
     : `Page ${pageIdx}/${totalPages} • ky switch ${cls} to play this character`;
   return new EmbedBuilder()
     .setAuthor({ name: `${displayName}'s character` })
     .setColor(COLOR)
-    .setTitle(`${clsDef.emoji} ${clsDef.name} — Level ${c.charLevel}`)
+    .setTitle(c.charName ? `🧙 ${c.charName}` : '🧙 Character')
     .setDescription(
       `${banner}\n\n` +
       `🏷️ Name: ${c.charName || `_(unset — \`ky char name <nama>\`)`}\n` +
