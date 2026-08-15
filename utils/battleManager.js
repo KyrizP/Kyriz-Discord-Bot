@@ -17,7 +17,8 @@ const { isSuperAdmin } = economy;
 const unique = require('./uniqueItems');
 
 const ENTRY_FEE = 5000;
-const PRESET_SLOTS_FREE = 2, PRESET_SLOTS_CAP = 5, PRESET_SLOT_PRICE = 2000; // preset gear slots (P3)
+const PRESET_SLOTS_FREE = 2, PRESET_SLOTS_CAP = 5;
+const PRESET_SLOT_PRICES = { 3: 2000, 4: 5000, 5: 10000 }; // key = slot being REACHED (P3: escalating price)
 const CHAR_CHANGE_COST = 5000; // 🧪 per NEW character (D1)
 const SWEEP_BUFFER = 5;          // sweep resolves floors 1..(bestDepth - SWEEP_BUFFER) instantly
 const GEAR_SELLBACK = 0.35;      // sell-back gear at 35% (all tiers, v1.1)
@@ -216,6 +217,15 @@ function applySell(data, userId, itemId, qty) {
   return { sold: n, kryptonite: kry, name: item.name };
 }
 
+// Q6 layer 1: every sell path must drop the item from all presets.
+// (Layer 2 = applyPresetLoad's ownership validation — belt and suspenders.)
+function purgePresetsItem(b, itemId) {
+  for (const p of b.presets) {
+    if (!p) continue;
+    for (const slot of Object.keys(p.slots)) if (p.slots[slot] === itemId) p.slots[slot] = null;
+  }
+}
+
 function applySellGear(data, userId, itemId, qty) {
   const b = ensureBattleData(data[userId]);
   if (itemId && itemId.startsWith('ky')) {
@@ -225,6 +235,7 @@ function applySellGear(data, userId, itemId, qty) {
     if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Unequip it first.' };
     const kry = unique.sellValue(uq);
     delete b.uniqueItems[itemId];
+    purgePresetsItem(b, itemId);
     b.kryptonite += kry;
     return { ok: true, kryptonite: kry, name: uq.name, sold: 1 };
   }
@@ -238,7 +249,7 @@ function applySellGear(data, userId, itemId, qty) {
     // unique items
     for (const id of Object.keys(b.uniqueItems)) {
       if (isEquippedOnAnyChar(b, id)) continue;
-      if (b.uniqueItems[id].rarity === tier) { kry += unique.sellValue(b.uniqueItems[id]); delete b.uniqueItems[id]; sold++; }
+      if (b.uniqueItems[id].rarity === tier) { kry += unique.sellValue(b.uniqueItems[id]); delete b.uniqueItems[id]; sold++; purgePresetsItem(b, id); }
     }
     // template g-items
     for (const id of Object.keys(b.bag)) {
@@ -246,6 +257,7 @@ function applySellGear(data, userId, itemId, qty) {
         kry += Math.round(GEAR[id].price * GEAR_SELLBACK * b.bag[id]);
         sold += b.bag[id];
         delete b.bag[id];
+        purgePresetsItem(b, id);
       }
     }
     if (sold === 0) return { ok: false, reason: 'No unequipped ' + tier + ' gear to sell.' };
@@ -260,7 +272,7 @@ function applySellGear(data, userId, itemId, qty) {
   if (have <= 0) return { ok: false, reason: 'Not in your bag. (To sell the equipped copy, `ky unequip` it first.)' };
   const n = qty === 'all' ? have : Math.min(have, Math.max(1, Math.floor(qty || 1))); // default 1, each at sellback
   b.bag[itemId] -= n;
-  if (b.bag[itemId] <= 0) delete b.bag[itemId];
+  if (b.bag[itemId] <= 0) { delete b.bag[itemId]; purgePresetsItem(b, itemId); } // last copy gone -> presets lose it too (Q6)
   const kry = Math.round((item.price || 0) * GEAR_SELLBACK * n);
   b.kryptonite += kry;
   return { ok: true, kryptonite: kry, name: item.name, sold: n };
@@ -394,6 +406,18 @@ function applyPresetLoad(data, userId, n) {
   }
   c.scoreAchievedAt = new Date().toISOString();
   return { ok: true, loaded: num };
+}
+
+// `ky preset buy`: unlock the next preset slot with 🧪 (escalating price, cap 5).
+// Check-then-deduct in ONE apply (G9 pattern) — insufficient = reject, nothing touched.
+function applyBuyPresetSlot(data, userId) {
+  const b = ensureBattleData(data[userId]);
+  const price = PRESET_SLOT_PRICES[b.presetSlots + 1];
+  if (!price) return { ok: false, reason: 'Preset slots maxed out (' + PRESET_SLOTS_CAP + ').' };
+  if ((b.kryptonite || 0) < price) return { ok: false, reason: 'The next preset slot costs 🧪 ' + price.toLocaleString() + ' Kryptonite.' };
+  b.kryptonite -= price;
+  b.presetSlots += 1;
+  return { ok: true, presetSlots: b.presetSlots, kryptonite: b.kryptonite, price };
 }
 
 // Set character display name (shown in ky char/battle/gear/bag). Validated.
@@ -632,6 +656,13 @@ function presetLoad(userId, n) {
   if (r.ok) economy.writeEconomy(data); // atomic: full swap persisted or nothing
   return r;
 }
+function buyPresetSlot(userId) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
+  const data = economy.readEconomy(); ensureUser(data, userId);
+  const r = applyBuyPresetSlot(data, userId);
+  if (r.ok) economy.writeEconomy(data);
+  return r;
+}
 function changeClass(userId, classId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' }; // G1
   const data = economy.readEconomy();
@@ -728,8 +759,8 @@ function recordPvp(winnerId, loserId) {
 module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
   applySell, applySellGear, applyEquip, applyUnequip, applyUnequipAll, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
-  applyChangeClass, applySwitchClass, applyPresetSave, applyPresetDelete, applyPresetLoad,
-  presetSave, presetDelete, presetLoad, PRESET_SLOTS_FREE, PRESET_SLOTS_CAP, PRESET_SLOT_PRICE,
+  applyChangeClass, applySwitchClass, applyPresetSave, applyPresetDelete, applyPresetLoad, applyBuyPresetSlot,
+  purgePresetsItem, presetSave, presetDelete, presetLoad, buyPresetSlot, PRESET_SLOTS_FREE, PRESET_SLOTS_CAP, PRESET_SLOT_PRICES,
   migrateAllBattleData, createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
   sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, changeClass, switchClass, setCharName, getCharName, getBattleLeaderboard, getBattleLeaderboardFor, recordPvp,
   createCharacterRecord, getActiveChar, getCharClass, isEquippedOnAnyChar, EQUIP_SLOTS,
