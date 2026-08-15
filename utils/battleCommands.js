@@ -7,7 +7,7 @@
 // handleButton rejects anyone else. Username shown via setAuthor.
 // ============================================================
 
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const battle = require('./battleManager');
 const economy = require('./economyManager');
 const { CLASSES, GEAR, DROPS, TIER_INFO, PASSIVES, LEGEND_GEAR_RANGES, MYSTERY_BOXES, CRIT } = require('./battleConfig');
@@ -512,22 +512,38 @@ function handleGear(context, userId, itemId) {
 }
 
 const GEAR_PAGE_SIZE = 8;
-function gearRow(targetId, page, total, viewerId) {
-  // customId: battle_gear_(next|prev)_<page>_<targetId>_<viewerId> — LAST segment = executor
+const GEAR_SLOTS = ['weapon', 'head', 'armor', 'boots', 'accessory'];
+const SLOT_EMOJI = { weapon: '⚔️', head: '🪖', armor: '🛡️', boots: '💨', accessory: '💍' };
+function gearRow(targetId, page, total, viewerId, slotFilter) {
+  // customId: battle_gear_(next|prev)_<page>_<targetId>_<viewerId>_<slot> — viewer = executor, slot = active filter
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`battle_gear_prev_${page}_${targetId}_${viewerId}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
-    new ButtonBuilder().setCustomId(`battle_gear_next_${page}_${targetId}_${viewerId}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
+    new ButtonBuilder().setCustomId(`battle_gear_prev_${page}_${targetId}_${viewerId}_${slotFilter || 'all'}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`battle_gear_next_${page}_${targetId}_${viewerId}_${slotFilter || 'all'}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
   );
 }
-function renderGearList(userId, username, page, viewerId) {
+// Slot filter dropdown — executor-locked (viewerId = whoever ran `ky gear`)
+function gearFilterRow(targetId, viewerId, slotFilter) {
+  const sel = new StringSelectMenuBuilder()
+    .setCustomId(`battle_gearsel_${targetId}_${viewerId}`)
+    .setPlaceholder('Filter by slot…')
+    .addOptions(
+      { label: 'All slots', value: 'all', emoji: '🗂️', default: slotFilter === 'all' || !slotFilter },
+      ...GEAR_SLOTS.map((sl) => ({ label: sl.charAt(0).toUpperCase() + sl.slice(1), value: sl, emoji: SLOT_EMOJI[sl], default: slotFilter === sl })),
+    );
+  return new ActionRowBuilder().addComponents(sel);
+}
+function renderGearList(userId, username, page, viewerId, slotFilter) {
+  slotFilter = GEAR_SLOTS.includes(slotFilter) ? slotFilter : 'all';
   const bd = getBattle(userId);
   if (!bd) return { embed: infoEmbed(username, 'Not registered.'), components: [] };
   const b = bd.b;
   const uniqIds = Object.keys(b.uniqueItems || {})
     .filter((id) => !battle.isEquippedOnAnyChar(b, id)) // G5/G6: an item equips on ONE char — hide equipped copies
     .filter((id) => b.uniqueItems[id].rarity !== 'immortal') // hide IMMORTAL items from gear list (hidden until equipped)
+    .filter((id) => slotFilter === 'all' || b.uniqueItems[id].slot === slotFilter)
     .sort((a, c) => (b.uniqueItems[c].boughtAt || '').localeCompare(b.uniqueItems[a].boughtAt || ''));
   const tmplIds = Object.keys(b.bag).filter((id) => GEAR[id] && b.bag[id] > 0)
+    .filter((id) => slotFilter === 'all' || GEAR[id].slot === slotFilter)
     .sort((a, c) => (RARITY_RANK[GEAR[c].rarity] || 0) - (RARITY_RANK[GEAR[a].rarity] || 0));
   const lines = [];
   for (const id of uniqIds) {
@@ -541,6 +557,13 @@ function renderGearList(userId, username, page, viewerId) {
     const st = Object.entries(g.stats).map(([k, v]) => `+${v} ${k.toUpperCase()}`).join(', ');
     lines.push(`\`${id}\` ${tierBadge(g.rarity)} ${g.name} (${g.slot}) ×${b.bag[id]} | ${st}`);
   }
+  const filterLabel = slotFilter === 'all' ? '' : `${SLOT_EMOJI[slotFilter]} ${slotFilter} · `;
+  if (!lines.length && slotFilter !== 'all') {
+    return { embed: new EmbedBuilder().setAuthor({ name: `${username}'s gear` }).setColor(COLOR).setTitle('⚔️ Gear — Spares')
+      .setDescription(`_No ${slotFilter} spares._`)
+      .setFooter({ text: 'ky gear <id> for details · ky equip <id> · ky sellgear <id>' }),
+      components: [gearFilterRow(userId, viewerId || userId, slotFilter)] };
+  }
   if (!lines.length) {
     return { embed: new EmbedBuilder().setAuthor({ name: `${username}'s gear` }).setColor(COLOR).setTitle('⚔️ Gear')
       .setDescription('_No spare gear. Visit `ky shop gear` to buy._')
@@ -552,8 +575,10 @@ function renderGearList(userId, username, page, viewerId) {
   const embed = new EmbedBuilder()
     .setAuthor({ name: `${username}'s gear` }).setColor(COLOR).setTitle('⚔️ Gear — Spares')
     .setDescription(slice.join('\n'))
-    .setFooter({ text: `Page ${page}/${total} • ky gear <id> · ky equip <id> · ky sellgear <id>` });
-  return { embed, components: total > 1 ? [gearRow(userId, page, total, viewerId || userId)] : [] };
+    .setFooter({ text: `${filterLabel}Page ${page}/${total} • ky gear <id> · ky equip <id> · ky sellgear <id>` });
+  const rows = [gearFilterRow(userId, viewerId || userId, slotFilter)];
+  if (total > 1) rows.push(gearRow(userId, page, total, viewerId || userId, slotFilter));
+  return { embed, components: rows };
 }
 
 function renderBag(userId, username, page, viewerId) {
@@ -1158,13 +1183,14 @@ async function handleButton(interaction) {
     return interaction.update({ embeds: [embed], components });
   }
 
-  const gearMatch = customId.match(/^battle_gear_(next|prev)_(\d+)_(\d+)_(\d+)$/);
+  const gearMatch = customId.match(/^battle_gear_(next|prev)_(\d+)_(\d+)_(\d+)_(all|weapon|head|armor|boots|accessory)$/);
   if (gearMatch) {
     let page = parseInt(gearMatch[2], 10);
     page = gearMatch[1] === 'next' ? page + 1 : page - 1;
     const targetId = gearMatch[3]; // viewer == userId from the generic owner check above
+    const slotFilter = gearMatch[5];
     const targetName = (economy.getUser(targetId) || {}).username || targetId;
-    const { embed, components } = renderGearList(targetId, targetName, page, userId);
+    const { embed, components } = renderGearList(targetId, targetName, page, userId, slotFilter);
     return interaction.update({ embeds: [embed], components });
   }
 
@@ -1214,8 +1240,27 @@ async function handleBattleLb(context, subArgs) {
   return context.reply({ embeds: [embed] });
 }
 
+
+// Select menus: battle_gearsel_<targetId>_<viewerId> — slot filter on ky gear (executor-locked)
+async function handleSelectMenu(interaction) {
+  const customId = interaction.customId || '';
+  if (customId.startsWith('battle_gearsel_')) {
+    const parts = customId.split('_'); // battle, gearsel, targetId, viewerId
+    if (parts.length < 4) return interaction.deferUpdate();
+    const targetId = parts[2];
+    const viewerId = parts[3];
+    if (interaction.user.id !== viewerId)
+      return interaction.reply({ content: "This isn't your gear panel — run `ky gear` yourself.", ephemeral: true });
+    const slot = (interaction.values && interaction.values[0]) || 'all';
+    const targetName = (economy.getUser(targetId) || {}).username || targetId;
+    const { embed, components } = renderGearList(targetId, targetName, 1, viewerId, slot);
+    return interaction.update({ embeds: [embed], components });
+  }
+  return interaction.deferUpdate();
+}
+
 module.exports = {
-  attachSubcommands, handleButton,
+  attachSubcommands, handleButton, handleSelectMenu,
   handleBattle, handleBattleHelp, handleBattleLb, handleEnd, handleName, handleCharacter, handleBag, handleGear, handleSell, handleSellGear, handleBuyGear, handleEquip, handleUnequip, handleShopEquipment,
   handlePvp, handleChangeClass, handleSwitchClass,
   getKryptonite,

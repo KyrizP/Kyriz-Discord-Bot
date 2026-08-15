@@ -3560,6 +3560,7 @@ async function showLeaderboard(context, scope = 'server') {
 // Shop select-menu → routes to the (ephemeral) buy-confirm. The confirm's buttons reuse the
 // existing shop:buy/shop:cancel handler, so no purchase logic is duplicated.
 async function handleSelectMenu(interaction) {
+  if (interaction.customId.startsWith('battle_')) return battleCmd.handleSelectMenu(interaction);
   if (!interaction.customId.startsWith('shop:select:')) return;
   if (maintenanceMode.active && !isSuperAdmin(interaction.user.id) && !isAdmin(interaction.user.id)) {
     return interaction.reply({ content: `🛠️ ${maintenanceMode.message}`, ephemeral: true });
