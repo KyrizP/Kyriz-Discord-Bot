@@ -34,8 +34,7 @@ battle: {
 
 | Command | Efek | Biaya |
 |---|---|---|
-| `ky changeclass <warrior\|mage>` | Buat karakter class itu (kalau belum ada) + aktifkan | 5,000 🧪 |
-| `ky switchclass [class]` | Aktifkan karakter lain yang sudah ada. Tanpa argumen → picker/daftar | Gratis |
+| `ky switch [class]` | **Satu command, auto-detect**: punya → tukar instan; belum punya → embed konfirmasi + tombol (🧪 5,000, bayar hanya setelah klik). Tanpa argumen → daftar karakter. *(rev 2026-08-15: menggantikan pasangan changeclass/switchclass — keduanya jadi alias tersembunyi)* | Gratis / 5,000 🧪 saat create |
 | `ky unequip all` | Lepas 5 slot karakter aktif sekaligus (g-item → bag dengan count benar, ky-item tetap di koleksi; guard & lock sama dengan unequip single) | Gratis |
 | `ky char [page\|class]` | Panel karakter, **default = karakter aktif** | — |
 

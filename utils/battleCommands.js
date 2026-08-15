@@ -227,10 +227,10 @@ function handleBattleHelp(context) {
       '🎮 **COMMANDS**\n' +
       '`ky battle` — enter dungeon (**5,000 💎** entry). First time: pick a class.\n' +
       '`ky char` — view stats, gear, 🧪, best depth · `ky char name <nama>` — set name\n' +
-      '`ky switchclass [class]` — swap active character (free) · `ky changeclass <class>` — buy a NEW character (**🧪 5,000**)\n' +
+      '`ky switch [class]` — swap character (free) · unowned class? offers creation (**🧪 5,000**)\n' +
       '`ky bag` — your drops (sellable) · `ky gear` — your equipment\n\n' +
       '🎭 **MULTIPLE CHARACTERS**\n' +
-      '`ky changeclass <class>` creates a brand-new character at **Lv.1** (**🧪 5,000** each). `ky switchclass <class>` swaps between your characters for free — anytime, no cooldown. Gear is **per-character** (each keeps its own equipment, level and best depth), but your 🧪 Kryptonite, drops bag and unique collection are **shared**. `ky char` pages through all your characters — click ◀ ▶ or `ky char <class>`. An item can only be equipped on ONE character at a time.\n\n' +
+      '`ky switch <class>` is your one command: owned classes swap instantly **free**; a class you do not own yet offers creation at **🧪 5,000** (starts **Lv.1**, confirm button — no accidental spend). Gear is **per-character** (each keeps its own equipment, level and best depth), but your 🧪 Kryptonite, drops bag and unique collection are **shared**. `ky char` pages through all your characters — click ◀ ▶ or `ky char <class>`. An item can only be equipped on ONE character at a time.\n\n' +
       '⚔️ **IN BATTLE (buttons)**\n' +
       '⏩ **Push** — fight **1 floor** (animated clash). Can die.\n' +
       '⚡ **Fast Sweep** — auto-fight **5 floors** at once (fast, blind — riskier).\n' +
@@ -348,7 +348,7 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
     : `⚪ INACTIVE — ${clsDef.emoji} ${clsDef.name} · Lv.${c.charLevel}`;
   const footer = isActive
     ? `Page ${pageIdx}/${totalPages} • ky equip <code> · ky unequip <slot>`
-    : `Page ${pageIdx}/${totalPages} • ky switchclass ${cls} to play this character`;
+    : `Page ${pageIdx}/${totalPages} • ky switch ${cls} to play this character`;
   return new EmbedBuilder()
     .setAuthor({ name: `${displayName}'s character` })
     .setColor(COLOR)
@@ -622,30 +622,10 @@ function ownedCharsLine(b) {
   if (!owned.length) return 'none yet';
   return owned.map((k) => `${CLASSES[k] ? `${CLASSES[k].emoji} ${CLASSES[k].name}` : k} — Lv.${b.characters[k].charLevel}${k === b.activeClass ? ' **(active)**' : ''}`).join('\n');
 }
-// `ky changeclass <class>` — buy a NEW character (🧪 CHAR_CHANGE_COST), activates at Lv.1.
-function handleChangeClass(context, userId, args) {
-  args = args || [];
-  const cls = String(args[0] || '').toLowerCase();
-  if (!cls) {
-    const bd = getBattle(userId);
-    return context.reply({ embeds: [infoEmbed(uname(context, userId),
-      `🎭 **Change Class** — create a NEW character (starts at **Lv.1**).\n\n` +
-      `Usage: \`ky changeclass <warrior|mage>\`\n` +
-      `Price: **🧪 ${battle.CHAR_CHANGE_COST.toLocaleString()}** Kryptonite per new character.\n\n` +
-      `Your characters:\n${ownedCharsLine(bd && bd.b)}\n\n` +
-      `Already own the other class? Swap for free: \`ky switchclass <class>\`.`)] });
-  }
-  if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
-  if (hasPendingChallenge(userId)) return context.reply({ content: 'You have a pending duel challenge — settle it first.' });
-  const res = battle.changeClass(userId, cls);
-  if (!res.ok) return context.reply({ content: res.reason });
-  const cd = CLASSES[cls];
-  return context.reply({ embeds: [resultEmbed(uname(context, userId),
-    `🎭 New character created: **${cd.emoji} ${cd.name}** — **Lv.1** activated!\n` +
-    `Paid 🧪 ${battle.CHAR_CHANGE_COST.toLocaleString()} · 🧪 left: **${res.kryptonite.toLocaleString()}**\n\n` +
-    `Gear is per-character — equip it with \`ky equip <code>\`. Swap anytime: \`ky switchclass ${cls}\`.`)] });
-}
-// `ky switchclass [class]` — free swap between owned characters.
+// `ky switch [class]` — ONE command, auto-detect:
+//   owned class  -> instant free swap
+//   unowned      -> confirmation embed+button (🧪 CHAR_CHANGE_COST) — money NEVER moves without the click
+//   no arg       -> list characters + which is active
 function handleSwitchClass(context, userId, args) {
   args = args || [];
   const cls = String(args[0] || '').toLowerCase();
@@ -653,21 +633,42 @@ function handleSwitchClass(context, userId, args) {
     const bd = getBattle(userId);
     if (!bd || !battle.getActiveChar(bd.b)) return context.reply({ content: 'You have no character yet. Create one with `ky battle`.' });
     return context.reply({ embeds: [infoEmbed(uname(context, userId),
-      `🔄 **Switch Character** — free, swaps your active character.\n\n` +
+      `🔄 **Switch Character** — swap your active character (free).\n\n` +
       `Your characters:\n${ownedCharsLine(bd.b)}\n\n` +
-      `Usage: \`ky switchclass <class>\``)] });
+      `Usage: \`ky switch <class>\` — a class you don't own yet offers creation (🧪 ${battle.CHAR_CHANGE_COST.toLocaleString()}).`)] });
+  }
+  if (!CLASSES[cls]) {
+    const bd = getBattle(userId);
+    return context.reply({ content: 'Invalid class. You own: ' + (bd && bd.b.characters ? Object.keys(bd.b.characters).join(', ') : 'none') + '.' });
   }
   if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
   if (hasPendingChallenge(userId)) return context.reply({ content: 'You have a pending duel challenge — settle it first.' });
+  const bd = getBattle(userId);
+  const owned = bd && bd.b.characters && bd.b.characters[cls];
+  if (!owned) {
+    // Unowned -> paid creation, gated behind an explicit confirm button.
+    const price = battle.CHAR_CHANGE_COST;
+    const kry = bd ? bd.b.kryptonite || 0 : 0;
+    if (kry < price) return context.reply({ content: `You don't own a ${CLASSES[cls].name} yet. Creating one costs 🧪 ${price.toLocaleString()} Kryptonite (you have ${kry.toLocaleString()}).` });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`battle_buyclass_${userId}_${cls}`).setLabel(`Create — 🧪 ${price.toLocaleString()}`).setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`battle_buyclass_${userId}_cancel`).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+    );
+    return context.reply({ embeds: [infoEmbed(uname(context, userId),
+      `🎭 You don't own a **${CLASSES[cls].emoji} ${CLASSES[cls].name}** character yet.\n\n` +
+      `Create one for **🧪 ${price.toLocaleString()} Kryptonite**? It starts at **Lv.1** with no gear.\n` +
+      `Your current character is kept safe — swap back free anytime.`)], components: [row] });
+  }
   const res = battle.switchClass(userId, cls);
   if (!res.ok) return context.reply({ content: res.reason });
-  const bd = getBattle(userId);
-  const c = bd ? battle.getActiveChar(bd.b) : null;
+  const c = battle.getActiveChar(bd.b);
   const cd = CLASSES[res.switchedTo];
   return context.reply({ embeds: [resultEmbed(uname(context, userId),
     `🔄 Switched to **${cd.emoji} ${cd.name}** — Lv.${c ? c.charLevel : '?'} · 🏰 Best depth **${c ? c.bestDepth : 0}**.\n\n` +
     `Gear is per-character — check \`ky char\` and re-equip.`)] });
 }
+// Legacy alias (pre-deploy naming; hidden from help): identical behavior.
+function handleChangeClass(context, userId, args) { return handleSwitchClass(context, userId, args); }
 function handleBuyGear(context, userId, code) {
   if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
   const args = String(code || '').toLowerCase().split(/\s+/).filter(Boolean);
@@ -1009,6 +1010,26 @@ async function handleButton(interaction) {
   const customId = interaction.customId;
   if (customId.startsWith('pvp_')) return handlePvpButton(interaction);
   if (!customId.startsWith('battle_')) return null;
+  // battle_buyclass_<userId>_<class|cancel> — paid char creation confirm. BEFORE the generic
+  // owner check: last segment is the class (or 'cancel'), not the userId.
+  if (customId.startsWith('battle_buyclass_')) {
+    const parts = customId.split('_'); // battle, buyclass, userId, cls|cancel
+    const ownerId = parts[2];
+    const tail = parts.slice(3).join('_');
+    if (interaction.user.id !== ownerId) return interaction.reply({ content: "This isn't your character creation.", ephemeral: true });
+    if (tail === 'cancel') return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'Cancelled — no Kryptonite spent.')], components: [] });
+    // Re-run guards at click time (state may have changed since the embed was posted)
+    if (pvp.isInFight(ownerId)) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'Finish your duel first (`ky end`).')], components: [] });
+    if (hasPendingChallenge(ownerId)) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'You have a pending duel challenge — settle it first.')], components: [] });
+    const res = battle.changeClass(ownerId, tail); // manager re-checks: owned class, cap, kryptonite, run-lock (G1/G9)
+    if (!res.ok) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), res.reason)], components: [] });
+    const cd = CLASSES[tail];
+    return interaction.update({ embeds: [resultEmbed(uname(interaction, ownerId),
+      `🎭 New character created: **${cd.emoji} ${cd.name}** — **Lv.1** activated!\n` +
+      `Paid 🧪 ${battle.CHAR_CHANGE_COST.toLocaleString()} · 🧪 left: **${res.kryptonite.toLocaleString()}**\n\n` +
+      `Gear is per-character — equip it with \`ky equip <code>\`.`)], components: [] });
+  }
+
   // battle_charpage_<targetId>_<page> — handled BEFORE the generic owner check (last segment = page, not userId).
   if (customId.startsWith('battle_charpage_')) {
     const parts = customId.split('_'); // battle, charpage, targetId, page

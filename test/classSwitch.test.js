@@ -40,7 +40,7 @@ const b3 = BM.ensureBattleData(data3.U3);
 ok(b3.characters.warrior.charLevel === 1 && b3.characters.warrior.bestDepth === 0, 'char baru: lv1 depth0 (bukan warisan)');
 ok(b3.activeClass === 'warrior', 'create: aktif');
 const r3 = BM.applyCreateCharacter(data3, 'U3', 'mage');
-ok(!r3.ok && /changeclass/.test(r3.reason), 'multi-char via register ditolak, diarahkan ke changeclass (guard Task 4)');
+ok(!r3.ok && /ky switch/.test(r3.reason), 'multi-char via register ditolak, diarahkan ke ky switch (guard Task 4)');
 // deep-equality jalur register vs constructor:
 ok(JSON.stringify(b3.characters.warrior) === JSON.stringify(BM.createCharacterRecord()), 'record register === constructor (G10)');
 
@@ -181,7 +181,7 @@ ok(Object.keys(bI.characters).length === 1 && bI.kryptonite === 6000, 'inherited
 const dG = mkData('GA');
 BM.ensureBattleData(dG.GA); BM.applyCreateCharacter(dG, 'GA', 'warrior');
 const rg = BM.applyCreateCharacter(dG, 'GA', 'mage');
-ok(!rg.ok && /changeclass/.test(rg.reason), 'register path: second char rejected, points to changeclass');
+ok(!rg.ok && /ky switch/.test(rg.reason), 'register path: second char rejected, points to ky switch');
 // changeclass masih bisa (bayar):
 BM.ensureBattleData(dG.GA).kryptonite = 6000;
 ok(BM.applyChangeClass(dG, 'GA', 'mage').ok, 'changeclass path tetap jalan (bayar 5000)');

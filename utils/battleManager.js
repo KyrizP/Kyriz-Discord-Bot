@@ -103,9 +103,9 @@ function applyCreateCharacter(data, userId, classId) {
   if (!Object.hasOwn(CLASSES, classId)) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
   // First-time registration only. Anyone who already owns a character must use the
   // paid changeclass path — a free second class here would bypass the 🧪 5,000 sink.
-  if (b.characters && Object.keys(b.characters).length > 0) return { ok: false, reason: 'You already have a character. Create another with `ky changeclass <class>` (🧪 5,000).' };
+  if (b.characters && Object.keys(b.characters).length > 0) return { ok: false, reason: 'You already have a character. Create another with `ky switch <class>` (🧪 5,000).' };
   if (!b.characters) b.characters = {};
-  if (b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switchclass ' + classId + '`.' };
+  if (b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switch ' + classId + '`.' };
   b.characters[classId] = createCharacterRecord();
   b.activeClass = classId;
   return { ok: true, reason: '' }; // reason always a string; UI only renders it when !ok
@@ -118,7 +118,7 @@ function applyChangeClass(data, userId, classId) {
   if (!u) return { ok: false, reason: 'You are not registered.' };
   const b = ensureBattleData(u);
   if (!Object.hasOwn(CLASSES, classId)) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
-  if (b.characters && b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switchclass ' + classId + '` (free).' };
+  if (b.characters && b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switch ' + classId + '` (free).' };
   if (!getActiveChar(b)) return { ok: false, reason: 'Create a character first (`ky battle`).' };
   if ((b.kryptonite || 0) < CHAR_CHANGE_COST) return { ok: false, reason: 'Creating a new character costs 🧪 ' + CHAR_CHANGE_COST.toLocaleString() + ' Kryptonite.' };
   b.kryptonite -= CHAR_CHANGE_COST;                 // G9: check-then-deduct in ONE apply (single write in wrapper)
@@ -127,11 +127,11 @@ function applyChangeClass(data, userId, classId) {
   return { ok: true, kryptonite: b.kryptonite };
 }
 
-// `ky switchclass [class]`: swap the active character (free, existing chars only).
+// `ky switch [class]` (unowned branch): swap the active character (free, existing chars only).
 function applySwitchClass(data, userId, classId) {
   if (!data[userId]) return { ok: false, reason: 'You are not registered.' };
   const b = ensureBattleData(data[userId]);
-  if (!classId) return { ok: false, reason: 'Which character? `ky switchclass <class>`. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
+  if (!classId) return { ok: false, reason: 'Which character? `ky switch <class>`. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
   // hasOwn x2: inherited keys ('constructor'/'__proto__') must NOT count as owned —
   // truthy lookup would pass the guard and point activeClass at Object.prototype (proto pollution).
   if (!Object.hasOwn(CLASSES, classId) || !b.characters || !Object.hasOwn(b.characters, classId)) return { ok: false, reason: 'You do not have that character yet. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
