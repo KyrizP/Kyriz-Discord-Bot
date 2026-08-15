@@ -9,20 +9,20 @@ const _savedSup = process.env.SUPERADMIN_ID;
 
 // ---- ensureBattleData ----
 const b = M.ensureBattleData({});
-ok(b.kryptonite === 0 && b.charLevel === 1 && b.charClass === null, 'defaults correct');
+ok(b.kryptonite === 0 && b.activeClass === null && !b.characters, 'defaults correct');
 ok(b.equipment.weapon === null && b.equipment.accessory === null, '5 equip slots null');
-ok(Object.keys(b.bag).length === 0 && b.bestDepth === 0, 'bag empty, bestDepth 0');
+ok(Object.keys(b.bag).length === 0 && M.getActiveChar(b) === null, 'bag empty, no char yet (bestDepth lives per-character)');
 const u = { battle: { kryptonite: 5, charLevel: 3, charClass: 'mage', equipment: {}, bag: {}, charExp: 0, charExpNeeded: 100, bestDepth: 7 } };
 ok(M.ensureBattleData(u) === u.battle, 'idempotent');
 
 // ---- createCharacter + charExp ----
 let d = { u1: {} };
-ok(M.applyCreateCharacter(d, 'u1', 'warrior').ok && d.u1.battle.charClass === 'warrior', 'create warrior');
-ok(!M.applyCreateCharacter(d, 'u1', 'mage').ok, 'no double-create');
+ok(M.applyCreateCharacter(d, 'u1', 'warrior').ok && M.getCharClass(d.u1.battle) === 'warrior', 'create warrior');
+ok(!M.applyCreateCharacter(d, 'u1', 'warrior').ok, 'no duplicate char of same class (multi-class allowed since class-switch)');
 ok(!M.applyCreateCharacter({ u2: {} }, 'u2', 'ninja').ok, 'reject invalid class');
-d.u1.battle.charExpNeeded = 100;
+M.getActiveChar(d.u1.battle).charExpNeeded = 100;
 let lv = M.applyGainCharExp(d, 'u1', 250);
-ok(d.u1.battle.charLevel >= 2 && lv.leveledUp, 'exp grants level up');
+ok(M.getActiveChar(d.u1.battle).charLevel >= 2 && lv.leveledUp, 'exp grants level up');
 ok(!M.applyGainCharExp({ u3: {} }, 'u3', 500).leveledUp, 'no level up without class');
 
 // ---- delveStart (entry fee, superadmin free) ----
@@ -44,16 +44,16 @@ let dB = { u1: { balance: 1000 } };
 M.applyCreateCharacter(dB, 'u1', 'warrior');
 let ex = M.applyExtract(dB, 'u1', { floor: 6, bag: { d1: 3, d2: 1 }, expAccum: 50 });
 ok(ex.banked === 4 && dB.u1.battle.bag.d1 === 3 && dB.u1.battle.bag.d2 === 1, 'extract banks bag');
-ok(dB.u1.battle.bestDepth === 5, 'bestDepth = floor-1 on extract');
-ok(dB.u1.battle.charExp === 50, 'extract banks accumulated char exp');
+ok(M.getActiveChar(dB.u1.battle).bestDepth === 5, 'bestDepth = floor-1 on extract');
+ok(M.getActiveChar(dB.u1.battle).charExp === 50, 'extract banks accumulated char exp');
 
 // ---- die discards run bag, keeps exp, bestDepth=floor ----
 let dC = { u1: { balance: 1000 } };
 M.applyCreateCharacter(dC, 'u1', 'warrior');
 let di = M.applyDie(dC, 'u1', { floor: 9, bag: { d1: 5 }, expAccum: 30 });
 ok(di.lost === 5 && Object.keys(dC.u1.battle.bag).length === 0, 'die discards bag');
-ok(dC.u1.battle.bestDepth === 0, 'die does NOT save checkpoint (extract only)');
-ok(dC.u1.battle.charExp === 0, 'die LOSES char exp (consistent with drops)');
+ok(M.getActiveChar(dC.u1.battle).bestDepth === 0, 'die does NOT save checkpoint (extract only)');
+ok(M.getActiveChar(dC.u1.battle).charExp === 0, 'die LOSES char exp (consistent with drops)');
 
 // ---- sell drops: id / qty / all ----
 let dD = { u1: { balance: 0 } };

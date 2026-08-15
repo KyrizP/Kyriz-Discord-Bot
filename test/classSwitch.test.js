@@ -50,6 +50,38 @@ BM.applyGainCharExp(data4, 'U4', 150);
 const b4 = BM.ensureBattleData(data4.U4);
 ok(b4.characters.mage.charLevel === 2 && b4.characters.mage.charExp === 50, 'exp naik ke char aktif (150 = 100+50)');
 
+// ---- delve: start butuh karakter aktif; sweep dari bestDepth karakter itu ----
+const data5 = mkData('U5');
+BM.ensureBattleData(data5.U5); BM.applyCreateCharacter(data5, 'U5', 'warrior');
+BM.getActiveChar(BM.ensureBattleData(data5.U5)).bestDepth = 30; // simulasi progress warrior
+ok(BM.applyDelveStart(data5, 'U5').ok, 'delve start ok dengan char aktif');
+const data5b = mkData('U9'); BM.ensureBattleData(data5b.U9);
+ok(BM.applyDelveStart(data5b, 'U9').reason === 'no_character', 'delve start tanpa char -> no_character');
+
+// ---- extract menulis ke karakter PEMAIN RUN (G7), bukan aktif sekarang ----
+const data6 = mkData('U6');
+BM.ensureBattleData(data6.U6); BM.applyCreateCharacter(data6, 'U6', 'mage');
+const runState = { classId: 'mage', floor: 51, bag: { d1: 2 }, expAccum: 300 };
+BM.ensureBattleData(data6.U6).activeClass = 'mage';
+BM.applyExtract(data6, 'U6', runState);
+const b6 = BM.ensureBattleData(data6.U6);
+ok(b6.characters.mage.bestDepth === 50, 'extract: depth masuk ke char run (50)');
+ok(b6.bag.d1 === 2, 'extract: bag shared terisi');
+// paksa switch aktif ke warrior SEBELUM extract (defense-in-depth test):
+BM.applyCreateCharacter(data6, 'U6', 'warrior'); // kini aktif = warrior
+BM.applyExtract(data6, 'U6', { classId: 'mage', floor: 71, bag: {}, expAccum: 0 });
+ok(BM.ensureBattleData(data6.U6).characters.mage.bestDepth === 70, 'G7: extract tetap ke characters[run.classId] walau aktif warrior');
+ok(BM.ensureBattleData(data6.U6).characters.warrior.bestDepth === 0, 'char lain tidak terkontaminasi');
+
+// ---- charName per karakter ----
+const data7 = mkData('U7');
+BM.ensureBattleData(data7.U7); BM.applyCreateCharacter(data7, 'U7', 'warrior');
+ok(BM.applySetCharName(data7, 'U7', 'IronKnight').ok, 'set name ok');
+BM.applyCreateCharacter(data7, 'U7', 'mage');
+ok(BM.ensureBattleData(data7.U7).characters.mage.charName === null, 'char kedua belum bernama');
+ok(BM.applySetCharName(data7, 'U7', 'DarkMage').ok, 'set name char kedua ok');
+ok(BM.ensureBattleData(data7.U7).characters.warrior.charName === 'IronKnight', 'nama char pertama tidak berubah');
+
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail === 0 ? 0 : 1);

@@ -102,7 +102,7 @@ function applyDelveStart(data, userId) {
   const u = data[userId];
   if (!u) return { ok: false, reason: 'You are not registered. Use `ky register` first.' };
   const b = ensureBattleData(u);
-  if (!b.charClass) return { ok: false, reason: 'no_character' };
+  if (!getActiveChar(b)) return { ok: false, reason: 'no_character' };
   if (!isSuperAdmin(userId)) {
     if ((u.balance || 0) < ENTRY_FEE) return { ok: false, reason: `Insufficient 💎 Kryztal for entry (need ${ENTRY_FEE.toLocaleString()}).` };
     u.balance -= ENTRY_FEE;
@@ -113,15 +113,26 @@ function applyDelveStart(data, userId) {
 // Extract: bank the run bag (drops) + accumulated char exp; update bestDepth.
 function applyExtract(data, userId, runState) {
   const b = ensureBattleData(data[userId]);
+  const runChar = (runState.classId && b.characters[runState.classId]) || getActiveChar(b); // G7: run owns the writes
   let banked = 0;
   for (const id of Object.keys(runState.bag || {})) {
     b.bag[id] = (b.bag[id] || 0) + runState.bag[id];
     banked += runState.bag[id];
   }
   const reached = Math.max(0, (runState.floor || 1) - 1);
-  if (reached > b.bestDepth) b.bestDepth = reached;
-  let expRes = { leveledUp: false, newLevel: b.charLevel };
-  if (runState.expAccum) expRes = applyGainCharExp(data, userId, runState.expAccum);
+  if (reached > runChar.bestDepth) runChar.bestDepth = reached;
+  let expRes = { leveledUp: false, newLevel: runChar.charLevel };
+  if (runState.expAccum) {
+    // exp juga milik karakter run — tulis langsung, bukan via active:
+    runChar.charExp += runState.expAccum;
+    while (runChar.charExp >= runChar.charExpNeeded) {
+      runChar.charExp -= runChar.charExpNeeded;
+      runChar.charLevel += 1;
+      runChar.charExpNeeded = CHAR_EXP_BASE + 50 * (runChar.charLevel - 1);
+      runChar.scoreAchievedAt = new Date().toISOString();
+      expRes = { leveledUp: true, newLevel: runChar.charLevel };
+    }
+  }
   return { banked, exp: runState.expAccum || 0, leveledUp: expRes.leveledUp, newLevel: expRes.newLevel };
 }
 
@@ -250,12 +261,13 @@ function applySetCharName(data, userId, name) {
   const u = ensureUser(data, userId);
   if (!u) return { ok: false, reason: 'Not registered.' };
   const b = ensureBattleData(u);
-  if (!b.charClass) return { ok: false, reason: 'Create a character first (`ky battle`).' };
+  const c = getActiveChar(b);
+  if (!c) return { ok: false, reason: 'Create a character first (`ky battle`).' };
   name = (name || '').trim();
   if (!name) return { ok: false, reason: 'Name cannot be empty. Usage: `ky name <name>`' };
   if (name.length > 20) return { ok: false, reason: 'Name too long (max 20 chars).' };
   if (!/^[\w\s\-']{1,20}$/.test(name)) return { ok: false, reason: 'Invalid characters. Use letters, numbers, spaces, -, _.' };
-  b.charName = name;
+  c.charName = name;
   return { ok: true, name };
 }
 function setCharName(userId, name) {
@@ -268,7 +280,9 @@ function setCharName(userId, name) {
 function getCharName(userId) {
   const data = economy.readEconomy();
   const u = data[userId];
-  return (u && u.battle && u.battle.charName) ? u.battle.charName : null;
+  if (!u || !u.battle) return null;
+  const c = getActiveChar(u.battle);
+  return (c && c.charName) || null;
 }
 
 // Buy gear with Kryptonite. Guard: registered + sufficient kryptonite. No char required.
@@ -318,11 +332,12 @@ function startDelve(userId) {
   const start = applyDelveStart(data, userId);
   if (!start.ok) return { ok: false, reason: start.reason, needClass: start.reason === 'no_character' };
   const b = ensureBattleData(data[userId]);
-  const stats = computeStats(b.charLevel, b.charClass, b.equipment, b.uniqueItems || {});
-  const run = { userId, floor: 1, hp: stats.hp, bag: {}, expAccum: 0, cleared: 0, classId: b.charClass, stats, equipment: { ...b.equipment }, uniqueItems: { ...(b.uniqueItems || {}) } };
+  const c = getActiveChar(b);
+  const stats = computeStats(c.charLevel, b.activeClass, c.equipment, b.uniqueItems || {});
+  const run = { userId, floor: 1, hp: stats.hp, bag: {}, expAccum: 0, cleared: 0, classId: b.activeClass, stats, equipment: { ...c.equipment }, uniqueItems: { ...(b.uniqueItems || {}) } };
   // sweep: fast-forward through proven-easy floors (below bestDepth). HP-FREE — no fights
   // (you've cleared these before, they're trivial). Full HP at the sweep target. Only Push costs HP.
-  const sweepTo = Math.max(1, b.bestDepth - SWEEP_BUFFER);
+  const sweepTo = Math.max(1, c.bestDepth - SWEEP_BUFFER);
   run.floor = sweepTo;
   economy.writeEconomy(data); // persist entry-fee deduction
   activeRuns.set(userId, run);
