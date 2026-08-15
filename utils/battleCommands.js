@@ -227,7 +227,10 @@ function handleBattleHelp(context) {
       '🎮 **COMMANDS**\n' +
       '`ky battle` — enter dungeon (**5,000 💎** entry). First time: pick a class.\n' +
       '`ky char` — view stats, gear, 🧪, best depth · `ky char name <nama>` — set name\n' +
+      '`ky switchclass [class]` — swap active character (free) · `ky changeclass <class>` — buy a NEW character (**🧪 5,000**)\n' +
       '`ky bag` — your drops (sellable) · `ky gear` — your equipment\n\n' +
+      '🎭 **MULTIPLE CHARACTERS**\n' +
+      '`ky changeclass <class>` creates a brand-new character at **Lv.1** (**🧪 5,000** each). `ky switchclass <class>` swaps between your characters for free — anytime, no cooldown. Gear is **per-character** (each keeps its own equipment, level and best depth), but your 🧪 Kryptonite, drops bag and unique collection are **shared**. `ky char` pages through all your characters — click ◀ ▶ or `ky char <class>`. An item can only be equipped on ONE character at a time.\n\n' +
       '⚔️ **IN BATTLE (buttons)**\n' +
       '⏩ **Push** — fight **1 floor** (animated clash). Can die.\n' +
       '⚡ **Fast Sweep** — auto-fight **5 floors** at once (fast, blind — riskier).\n' +
@@ -286,29 +289,36 @@ function handleName(context, userId, nameStr) {
   return context.reply({ embeds: [resultEmbed(uname(context, userId), `🏷️ Character name set to **${res.name}**.`)] });
 }
 
-function handleCharacter(context, userId, targetArg) {
-  // Superadmin can view others (@mention or user ID)
-  let targetId = userId;
-  let displayName = uname(context, userId);
-  if (targetArg) {
-    if (!economy.isAdmin(userId)) return context.reply({ content: 'Only admins can view other players\' characters.' });
-    const mentionMatch = targetArg.match(/^<@!?(\d+)>$/);
-    targetId = mentionMatch ? mentionMatch[1] : (/^\d+$/.test(targetArg) ? targetArg : null);
-    if (!targetId) return context.reply({ content: 'Invalid user. Use @mention or user ID.' });
-    const targetUser = economy.getUser(targetId);
-    if (!targetUser) return context.reply({ content: 'User not found.' });
-    displayName = battle.getCharName(targetId) || targetUser.username || targetId;
-  }
-  const bd = getBattle(targetId);
-  if (!bd) return context.reply({ content: 'Not registered.' });
-  const b = bd.b;
-  if (!b.charClass) return context.reply({ embeds: [infoEmbed(displayName, 'No character yet.')] });
-  const stats = computeStats(b.charLevel, b.charClass, b.equipment, b.uniqueItems || {});
-  const cls = CLASSES[b.charClass];
+// Character page order: ACTIVE char first, then remaining owned chars in CLASSES key order.
+function charPageOrder(b) {
+  if (!b.activeClass) return [];
+  const rest = Object.keys(CLASSES).filter((k) => k !== b.activeClass && b.characters && b.characters[k]);
+  return [b.activeClass, ...rest];
+}
+// `ky char 2` / `ky char mage` — resolve a page hint (number or class name) to a 1-based index.
+function parseCharPage(hint, order) {
+  if (hint == null || hint === '') return 1;
+  const s = String(hint).trim().toLowerCase();
+  if (/^\d+$/.test(s)) return Math.min(Math.max(1, parseInt(s, 10)), order.length);
+  const idx = order.indexOf(s);
+  return idx >= 0 ? idx + 1 : 1;
+}
+function charRow(targetId, page, total) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`battle_charpage_${targetId}_${page - 1}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`battle_charpage_${targetId}_${page + 1}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
+  );
+}
+// Per-character sheet. Reads ONLY per-char fields via `c` + shared root via `b`.
+function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
+  const c = b.characters[cls];
+  const clsDef = CLASSES[cls];
+  const isActive = cls === b.activeClass;
+  const stats = computeStats(c.charLevel, cls, c.equipment, b.uniqueItems || {});
   const totalStat = stats.hp + stats.atk + stats.matk + stats.def + stats.mdef + stats.spd;
   const equipLines = ['weapon', 'head', 'armor', 'boots', 'accessory']
     .map((slot) => {
-      const id = b.equipment[slot];
+      const id = c.equipment[slot];
       if (!id) return `**${slot}:** —`;
       let rarity, name, stats, passives;
       if (id.startsWith('ky') && b.uniqueItems && b.uniqueItems[id]) {
@@ -327,27 +337,73 @@ function handleCharacter(context, userId, targetArg) {
     }).join('\n');
   // Passive summary from equipped unique items
   const { getPassives } = require('./battleEngine');
-  const passSum = getPassives(b.equipment, b.uniqueItems || {});
+  const passSum = getPassives(c.equipment, b.uniqueItems || {});
   const passLines = Object.entries(passSum)
     .filter(([id, v]) => v > 0 && PASSIVES[id])
     .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}`)
     .join('\n');
   const passSection = passLines ? `\n\n**✨ Active Passives:**\n${passLines}` : '';
-  const embed = new EmbedBuilder()
+  const banner = isActive
+    ? `🟢 ACTIVE — ${clsDef.emoji} ${clsDef.name} · Lv.${c.charLevel}`
+    : `⚪ INACTIVE — ${clsDef.emoji} ${clsDef.name} · Lv.${c.charLevel}`;
+  const footer = isActive
+    ? `Page ${pageIdx}/${totalPages} • ky equip <code> · ky unequip <slot>`
+    : `Page ${pageIdx}/${totalPages} • ky switchclass ${cls} to play this character`;
+  return new EmbedBuilder()
     .setAuthor({ name: `${displayName}'s character` })
     .setColor(COLOR)
-    .setTitle(`${cls.emoji} ${cls.name} — Level ${b.charLevel}`)
+    .setTitle(`${clsDef.emoji} ${clsDef.name} — Level ${c.charLevel}`)
     .setDescription(
-      `🏷️ Name: ${b.charName || `_(unset — \`ky char name <nama>\`)`}\n` +
-      `**Char EXP:** ${b.charExp}/${b.charExpNeeded}\n` +
-      `🧪 Kryptonite: **${b.kryptonite.toLocaleString()}** · 🏰 Best depth: **${b.bestDepth}**\n` +
+      `${banner}\n\n` +
+      `🏷️ Name: ${c.charName || `_(unset — \`ky char name <nama>\`)`}\n` +
+      `**Char EXP:** ${c.charExp}/${c.charExpNeeded}\n` +
+      `🧪 Kryptonite: **${b.kryptonite.toLocaleString()}** · 🏰 Best depth: **${c.bestDepth}**\n` +
       `⚔️ PvP: **${b.pvpWins || 0}W/${b.pvpLosses || 0}L**${((b.pvpWins || 0) + (b.pvpLosses || 0)) > 0 ? ` (${Math.round((b.pvpWins || 0) / ((b.pvpWins || 0) + (b.pvpLosses || 0)) * 100)}% win rate)` : ''}\n\n` +
       `❤️ HP **${stats.hp}** · ⚔️ ATK **${stats.atk}** · 🔮 MATK **${stats.matk}**\n` +
       `🛡️ DEF **${stats.def}** · ✨ MDEF **${stats.mdef}** · 💨 SPD **${stats.spd}**\n` +
       `**Combat Score: ${totalStat}**\n\n${equipLines}${passSection}`
     )
-    .setFooter({ text: 'ky equip <code> · ky unequip <slot>' });
-  return context.reply({ embeds: [embed] });
+    .setFooter({ text: footer });
+}
+// Build one page of the character sheet (re-read fresh data on every call — buttons reuse this).
+function renderCharPage(b, targetId, page) {
+  const order = charPageOrder(b);
+  page = Math.min(Math.max(1, page || 1), Math.max(1, order.length));
+  const cls = order[page - 1] || b.activeClass;
+  const targetUser = economy.getUser(targetId);
+  const displayName = battle.getCharName(targetId) || (targetUser && targetUser.username) || targetId;
+  return {
+    embed: buildCharEmbed(b, cls, displayName, page, order.length),
+    components: order.length > 1 ? [charRow(targetId, page, order.length)] : [],
+    totalPages: order.length,
+  };
+}
+function handleCharacter(context, userId, targetArg, pageArg) {
+  // Superadmin can view others (@mention or user ID). Small numbers / class names = page hint (self).
+  let targetId = userId;
+  let pageHint = pageArg || null;
+  const argStr = String(targetArg == null ? '' : targetArg).trim();
+  if (argStr) {
+    const mentionMatch = argStr.match(/^<@!?(\d+)>$/) || (/^\d{17,20}$/.test(argStr) ? [, argStr] : null);
+    if (mentionMatch) {
+      if (!economy.isAdmin(userId)) return context.reply({ content: 'Only admins can view other players\' characters.' });
+      targetId = mentionMatch[1];
+      const targetUser = economy.getUser(targetId);
+      if (!targetUser) return context.reply({ content: 'User not found.' });
+    } else {
+      pageHint = argStr; // `ky char 2` / `ky char mage`
+    }
+  }
+  const bd = getBattle(targetId);
+  if (!bd) return context.reply({ content: 'Not registered.' });
+  const b = bd.b;
+  if (!battle.getActiveChar(b)) {
+    const noCharName = targetId === userId ? uname(context, userId) : ((economy.getUser(targetId) || {}).username || targetId);
+    return context.reply({ embeds: [infoEmbed(noCharName, 'No character yet.')] });
+  }
+  const order = charPageOrder(b);
+  const { embed, components } = renderCharPage(b, targetId, parseCharPage(pageHint, order));
+  return context.reply({ embeds: [embed], components });
 }
 
 function handleBag(context, userId, page) {
@@ -448,7 +504,7 @@ function renderGearList(userId, username, page) {
   if (!bd) return { embed: infoEmbed(username, 'Not registered.'), components: [] };
   const b = bd.b;
   const uniqIds = Object.keys(b.uniqueItems || {})
-    .filter((id) => !Object.values(b.equipment).includes(id))
+    .filter((id) => !battle.isEquippedOnAnyChar(b, id)) // G5/G6: an item equips on ONE char — hide equipped copies
     .filter((id) => b.uniqueItems[id].rarity !== 'immortal') // hide IMMORTAL items from gear list (hidden until equipped)
     .sort((a, c) => (b.uniqueItems[c].boughtAt || '').localeCompare(b.uniqueItems[a].boughtAt || ''));
   const tmplIds = Object.keys(b.bag).filter((id) => GEAR[id] && b.bag[id] > 0)
@@ -535,7 +591,13 @@ function handleEquip(context, userId, code) {
 }
 function handleUnequip(context, userId, slot) {
   if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
-  const res = battle.unequip(userId, (slot || '').trim().toLowerCase());
+  slot = (slot || '').trim().toLowerCase();
+  if (slot === 'all') {
+    const res = battle.unequipAll(userId);
+    if (!res.ok) return context.reply({ content: res.reason });
+    return context.reply({ embeds: [resultEmbed(uname(context, userId), `⚙️ Unequipped **${res.count}** item(s) — gear moved to bag/collection.`)] });
+  }
+  const res = battle.unequip(userId, slot);
   if (!res.ok) return context.reply({ content: res.reason });
   const bd = getBattle(userId);
   const id = res.itemId;
@@ -545,6 +607,66 @@ function handleUnequip(context, userId, slot) {
   else if (id && GEAR[id]) name = GEAR[id].name;
   const dest = isKy ? 'returned to collection' : 'moved to bag';
   return context.reply({ embeds: [resultEmbed(uname(context, userId), `⚙️ Unequipped **${name}** (${res.slot}) — ${dest}.`)] });
+}
+
+// G3: a player with an open duel challenge may not change/switch class (challenge would build on stale data).
+function hasPendingChallenge(userId) {
+  for (const key of challengeTimers.keys()) {
+    const [aId, bId] = key.split('_');
+    if (aId === userId || bId === userId) return true;
+  }
+  return false;
+}
+function ownedCharsLine(b) {
+  const owned = Object.keys((b && b.characters) || {});
+  if (!owned.length) return 'none yet';
+  return owned.map((k) => `${CLASSES[k] ? `${CLASSES[k].emoji} ${CLASSES[k].name}` : k} — Lv.${b.characters[k].charLevel}${k === b.activeClass ? ' **(active)**' : ''}`).join('\n');
+}
+// `ky changeclass <class>` — buy a NEW character (🧪 CHAR_CHANGE_COST), activates at Lv.1.
+function handleChangeClass(context, userId, args) {
+  args = args || [];
+  const cls = String(args[0] || '').toLowerCase();
+  if (!cls) {
+    const bd = getBattle(userId);
+    return context.reply({ embeds: [infoEmbed(uname(context, userId),
+      `🎭 **Change Class** — create a NEW character (starts at **Lv.1**).\n\n` +
+      `Usage: \`ky changeclass <warrior|mage>\`\n` +
+      `Price: **🧪 ${battle.CHAR_CHANGE_COST.toLocaleString()}** Kryptonite per new character.\n\n` +
+      `Your characters:\n${ownedCharsLine(bd && bd.b)}\n\n` +
+      `Already own the other class? Swap for free: \`ky switchclass <class>\`.`)] });
+  }
+  if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
+  if (hasPendingChallenge(userId)) return context.reply({ content: 'You have a pending duel challenge — settle it first.' });
+  const res = battle.changeClass(userId, cls);
+  if (!res.ok) return context.reply({ content: res.reason });
+  const cd = CLASSES[cls];
+  return context.reply({ embeds: [resultEmbed(uname(context, userId),
+    `🎭 New character created: **${cd.emoji} ${cd.name}** — **Lv.1** activated!\n` +
+    `Paid 🧪 ${battle.CHAR_CHANGE_COST.toLocaleString()} · 🧪 left: **${res.kryptonite.toLocaleString()}**\n\n` +
+    `Gear is per-character — equip it with \`ky equip <code>\`. Swap anytime: \`ky switchclass ${cls}\`.`)] });
+}
+// `ky switchclass [class]` — free swap between owned characters.
+function handleSwitchClass(context, userId, args) {
+  args = args || [];
+  const cls = String(args[0] || '').toLowerCase();
+  if (!cls) {
+    const bd = getBattle(userId);
+    if (!bd || !battle.getActiveChar(bd.b)) return context.reply({ content: 'You have no character yet. Create one with `ky battle`.' });
+    return context.reply({ embeds: [infoEmbed(uname(context, userId),
+      `🔄 **Switch Character** — free, swaps your active character.\n\n` +
+      `Your characters:\n${ownedCharsLine(bd.b)}\n\n` +
+      `Usage: \`ky switchclass <class>\``)] });
+  }
+  if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
+  if (hasPendingChallenge(userId)) return context.reply({ content: 'You have a pending duel challenge — settle it first.' });
+  const res = battle.switchClass(userId, cls);
+  if (!res.ok) return context.reply({ content: res.reason });
+  const bd = getBattle(userId);
+  const c = bd ? battle.getActiveChar(bd.b) : null;
+  const cd = CLASSES[res.switchedTo];
+  return context.reply({ embeds: [resultEmbed(uname(context, userId),
+    `🔄 Switched to **${cd.emoji} ${cd.name}** — Lv.${c ? c.charLevel : '?'} · 🏰 Best depth **${c ? c.bestDepth : 0}**.\n\n` +
+    `Gear is per-character — check \`ky char\` and re-equip.`)] });
 }
 function handleBuyGear(context, userId, code) {
   if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
@@ -773,8 +895,9 @@ async function handlePvp(context, userId, targetId) {
     return context.reply({ content: 'That player is busy right now.' });
   const data = economy.readEconomy();
   const me = data[userId], foe = data[targetId];
-  if (!me || !me.battle || !me.battle.charClass) return context.reply({ content: 'Create a character first: `ky battle`.' });
-  if (!foe || !foe.battle || !foe.battle.charClass) return context.reply({ content: 'That player has no character.' });
+  const hasChar = (u) => u && u.battle && battle.getActiveChar(battle.ensureBattleData(u));
+  if (!hasChar(me)) return context.reply({ content: 'Create a character first: `ky battle`.' });
+  if (!hasChar(foe)) return context.reply({ content: 'That player has no character.' });
   const embed = new EmbedBuilder().setColor(PVP_COLOR)
     .setTitle('⚔️ Duel Challenge')
     .setDescription(`<@${userId}> challenges <@${targetId}> to a duel!\nAccept within **60s** or it expires. Turn-based, 1-min turn timer.`);
@@ -803,13 +926,15 @@ async function handlePvpButton(interaction) {
       return interaction.update({ embeds: [infoEmbed('', 'Duel cancelled — a player is now busy.')], components: [] });
     const data = economy.readEconomy();
     const aU = data[aId], bU = data[bId];
-    if (!aU || !aU.battle || !aU.battle.charClass || !bU || !bU.battle || !bU.battle.charClass)
+    const hasChar = (u) => u && u.battle && battle.getActiveChar(battle.ensureBattleData(u));
+    if (!hasChar(aU) || !hasChar(bU))
       return interaction.update({ embeds: [infoEmbed('', 'Duel cancelled — a player no longer has a character.')], components: [] });
     const makePlayer = (uid) => {
       const u = data[uid]; const b = u.battle;
-      const stats = computeStats(pvp.pvpEffLevel(b.charLevel), b.charClass, b.equipment, b.uniqueItems || {}); // PvP: dampened level (gear full)
-      return { id: uid, username: u.username || 'Player', charName: b.charName, charLevel: b.charLevel, charClass: b.charClass,
-        stats, skills: CLASSES[b.charClass].skills, equipment: b.equipment, uniqueItems: b.uniqueItems || {}, cosmetics: u.cosmetics || {} };
+      const c = battle.getActiveChar(b); const cls = battle.getCharClass(b);
+      const stats = computeStats(pvp.pvpEffLevel(c.charLevel), cls, c.equipment, b.uniqueItems || {}); // PvP: dampened level (gear full)
+      return { id: uid, username: u.username || 'Player', charName: c.charName, charLevel: c.charLevel, charClass: cls,
+        stats, skills: CLASSES[cls].skills, equipment: c.equipment, uniqueItems: b.uniqueItems || {}, cosmetics: u.cosmetics || {} };
     };
     const fightId = `pvp_${Date.now().toString(36)}_${aId}`;
     const fight = pvp.startFight(fightId, makePlayer(aId), makePlayer(bId));
@@ -884,6 +1009,19 @@ async function handleButton(interaction) {
   const customId = interaction.customId;
   if (customId.startsWith('pvp_')) return handlePvpButton(interaction);
   if (!customId.startsWith('battle_')) return null;
+  // battle_charpage_<targetId>_<page> — handled BEFORE the generic owner check (last segment = page, not userId).
+  if (customId.startsWith('battle_charpage_')) {
+    const parts = customId.split('_'); // battle, charpage, targetId, page
+    const targetId = parts[2];
+    const page = parseInt(parts[3], 10) || 1;
+    if (interaction.user.id !== targetId && !economy.isAdmin(interaction.user.id))
+      return interaction.reply({ content: "This isn't your character panel — use `ky char`.", ephemeral: true });
+    const bd = getBattle(targetId);
+    if (!bd) return interaction.reply({ content: 'Not registered.', ephemeral: true });
+    if (!battle.getActiveChar(bd.b)) return interaction.update({ embeds: [infoEmbed('', 'No character yet.')], components: [] });
+    const { embed, components } = renderCharPage(bd.b, targetId, page);
+    return interaction.update({ embeds: [embed], components });
+  }
   const userId = customId.slice(customId.lastIndexOf('_') + 1); // owner is always last segment
   if (interaction.user.id !== userId) {
     return interaction.reply({ content: '⛔ This is not yours.', ephemeral: true });
@@ -976,7 +1114,13 @@ async function handleButton(interaction) {
 }
 
 async function handleBattleLb(context, subArgs) {
-  const isAll = subArgs && subArgs[0] && subArgs[0].toLowerCase() === 'all';
+  const arg0 = subArgs && subArgs[0] ? subArgs[0].toLowerCase() : null;
+  const isAll = arg0 === 'all';
+  let classFilter = null;
+  if (!isAll && arg0) {
+    if (Object.keys(CLASSES).includes(arg0)) classFilter = arg0;
+    else return context.reply({ content: 'Usage: `ky lb battle [all|warrior|mage]` — `all` = global, class name = per-class board.' });
+  }
   let memberIds = null;
   let scopeLabel = 'Global';
   if (!isAll && context.guild) {
@@ -986,7 +1130,7 @@ async function handleBattleLb(context, subArgs) {
       scopeLabel = 'Server';
     } catch { /* fallback to global */ }
   }
-  const board = battle.getBattleLeaderboard(10, memberIds);
+  const board = battle.getBattleLeaderboard(10, memberIds, classFilter);
   if (!board.length) return context.reply({ content: 'No characters yet. Be the first — `ky battle`!' });
   const lines = board.map((p, i) => {
     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `**${i + 1}.**`;
@@ -1003,9 +1147,9 @@ async function handleBattleLb(context, subArgs) {
   });
   const embed = new EmbedBuilder()
     .setColor(COLOR)
-    .setTitle(`🏆 Battle Leaderboard — ${scopeLabel}`)
+    .setTitle(`🏆 Battle Leaderboard — ${scopeLabel}${classFilter ? ` · ${CLASSES[classFilter].emoji} ${CLASSES[classFilter].name}` : ''}`)
     .setDescription(lines.join('\n'))
-    .setFooter({ text: `🏰 = best floor depth · ky lb battle${isAll ? ' all' : ' (use "all" for global)'}` })
+    .setFooter({ text: `🏰 = best floor depth · ky lb battle${isAll ? ' all' : ' (use "all" for global)'}${classFilter ? ' [warrior|mage]' : ''}` })
     .setTimestamp();
   return context.reply({ embeds: [embed] });
 }
@@ -1013,6 +1157,6 @@ async function handleBattleLb(context, subArgs) {
 module.exports = {
   attachSubcommands, handleButton,
   handleBattle, handleBattleHelp, handleBattleLb, handleEnd, handleName, handleCharacter, handleBag, handleGear, handleSell, handleSellGear, handleBuyGear, handleEquip, handleUnequip, handleShopEquipment,
-  handlePvp,
+  handlePvp, handleChangeClass, handleSwitchClass,
   getKryptonite,
 };
