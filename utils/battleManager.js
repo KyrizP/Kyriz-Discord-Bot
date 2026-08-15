@@ -99,7 +99,7 @@ function ensureUser(data, userId) {
 // ---------- pure apply-functions (mutate the passed data object; no IO) ----------
 function applyCreateCharacter(data, userId, classId) {
   const b = ensureBattleData(data[userId]);
-  if (!CLASSES[classId]) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
+  if (!Object.hasOwn(CLASSES, classId)) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
   // First-time registration only. Anyone who already owns a character must use the
   // paid changeclass path — a free second class here would bypass the 🧪 5,000 sink.
   if (b.characters && Object.keys(b.characters).length > 0) return { ok: false, reason: 'You already have a character. Create another with `ky changeclass <class>` (🧪 5,000).' };
@@ -116,7 +116,7 @@ function applyChangeClass(data, userId, classId) {
   const u = data[userId];
   if (!u) return { ok: false, reason: 'You are not registered.' };
   const b = ensureBattleData(u);
-  if (!CLASSES[classId]) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
+  if (!Object.hasOwn(CLASSES, classId)) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
   if (b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switchclass ' + classId + '` (free).' };
   if (!getActiveChar(b)) return { ok: false, reason: 'Create a character first (`ky battle`).' };
   if ((b.kryptonite || 0) < CHAR_CHANGE_COST) return { ok: false, reason: 'Creating a new character costs 🧪 ' + CHAR_CHANGE_COST.toLocaleString() + ' Kryptonite.' };
@@ -131,7 +131,7 @@ function applySwitchClass(data, userId, classId) {
   if (!data[userId]) return { ok: false, reason: 'You are not registered.' };
   const b = ensureBattleData(data[userId]);
   if (!classId) return { ok: false, reason: 'Which character? `ky switchclass <class>`. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
-  if (!b.characters[classId]) return { ok: false, reason: 'You do not have that character yet. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
+  if (!b.characters || !b.characters[classId]) return { ok: false, reason: 'You do not have that character yet. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
   if (b.activeClass === classId) return { ok: false, reason: 'That character is already active.' };
   b.activeClass = classId;
   return { ok: true, switchedTo: classId };

@@ -148,8 +148,26 @@ ok(BM.applyChangeClass(data9, 'A1', 'warrior').ok === false, 'class sudah dimili
 ok(BM.applySwitchClass(data9, 'A1', 'warrior').ok, 'switch ke warrior ok');
 ok(BM.ensureBattleData(data9.A1).activeClass === 'warrior', 'aktif = warrior');
 ok(BM.ensureBattleData(data9.A1).characters.warrior.charLevel === 1, 'data warrior utuh');
-ok(BM.applySwitchClass(data9, 'A1', 'mage').ok === false || true, 'switch ke class dimilik: boleh');
+const rSw = BM.applySwitchClass(data9, 'A1', 'mage'); // aktif=warrior, mage dimiliki tapi tidak aktif
+ok(rSw.ok === true, 'switch ke class dimiliki (tidak aktif): boleh');
+ok(BM.ensureBattleData(data9.A1).activeClass === 'mage', 'aktif kembali = mage');
 ok(BM.applySwitchClass(data9, 'A1', 'rogue').ok === false, 'G12: class tak dimiliki -> tolak');
+
+// ---- B1: switchclass pemain tanpa karakter (characters belum ada) tidak crash ----
+const dC = mkData('CB');
+BM.ensureBattleData(dC.CB);
+let threw = false; let rC = null;
+try { rC = BM.applySwitchClass(dC, 'CB', 'warrior'); } catch { threw = true; }
+ok(!threw && rC !== null && rC.ok === false, 'switchclass classless: no throw, not ok');
+
+// ---- B3: inherited key ('constructor') ditolak sebagai class invalid ----
+const dI = mkData('UX');
+BM.ensureBattleData(dI.UX); BM.applyCreateCharacter(dI, 'UX', 'warrior');
+BM.ensureBattleData(dI.UX).kryptonite = 6000;
+const rI = BM.applyChangeClass(dI, 'UX', 'constructor');
+ok(rI.ok === false && /Invalid class/.test(rI.reason), "inherited key 'constructor': Invalid class");
+const bI = BM.ensureBattleData(dI.UX);
+ok(Object.keys(bI.characters).length === 1 && bI.kryptonite === 6000, 'inherited key: no state change (kry utuh, char tidak terbuat)');
 
 // G-free-2nd-char: pemain dgn karakter tak bisa buat class lain gratis via register path
 const dG = mkData('GA');
