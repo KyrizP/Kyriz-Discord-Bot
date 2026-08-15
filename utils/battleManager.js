@@ -357,7 +357,7 @@ function getCharName(userId) {
   const data = economy.readEconomy();
   const u = data[userId];
   if (!u || !u.battle) return null;
-  const c = getActiveChar(u.battle);
+  const c = getActiveChar(ensureBattleData(u)); // OLD-DATA COMPAT: flat shape migrates in-memory (no write) so charName resolves
   return (c && c.charName) || null;
 }
 
@@ -565,8 +565,9 @@ function buildBattleLeaderboard(data, memberIds = null, classFilter = null) {
   const players = [];
   for (const [uid, user] of Object.entries(data)) {
     if (memberIds && !memberIds.has(uid)) continue;
-    const b = user.battle;
-    if (!b || !b.characters || !Object.keys(b.characters).length) continue;
+    if (!user.battle) continue;
+    const b = ensureBattleData(user); // OLD-DATA COMPAT: flat shape migrates in-memory (no write) — LB must list everyone, always
+    if (!b.characters || !Object.keys(b.characters).length) continue;
     const entries = Object.entries(b.characters)
       .filter(([cls]) => !classFilter || cls === classFilter)
       .map(([cls, ch]) => {
