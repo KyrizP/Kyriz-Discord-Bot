@@ -641,7 +641,7 @@ function hasPendingChallenge(userId) {
 //   owned class  -> instant free swap
 //   unowned      -> confirmation embed+button (🧪 CHAR_CHANGE_COST) — money NEVER moves without the click
 //   no arg       -> list characters + which is active
-function handleSwitchClass(context, userId, args) {
+async function handleSwitchClass(context, userId, args) {
   args = args || [];
   const cls = String(args[0] || '').toLowerCase();
   if (!cls) {
@@ -665,10 +665,12 @@ function handleSwitchClass(context, userId, args) {
       new ButtonBuilder().setCustomId(`battle_buyclass_${userId}_${cls}`).setLabel(`Create — 🧪 ${price.toLocaleString()}`).setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`battle_buyclass_${userId}_cancel`).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
     );
-    return context.reply({ embeds: [infoEmbed(uname(context, userId),
+    const sent = await context.reply({ embeds: [infoEmbed(uname(context),
       `🎭 You don't own a **${CLASSES[cls].emoji} ${CLASSES[cls].name}** character yet.\n\n` +
       `Create one for **🧪 ${price.toLocaleString()} Kryptonite**? It starts at **Lv.1** with no gear.\n` +
-      `Your current character is kept safe — swap back free anytime.`)], components: [row] });
+      `Your current character is kept safe — swap back free anytime.\n\n_Auto-cancels in 60s._`)], components: [row], fetchReply: true });
+    armBuyclassTimer(userId, sent); // 60s no-click expiry; any manual action clears it
+    return sent;
   }
   const res = battle.switchClass(userId, cls);
   if (!res.ok) return context.reply({ content: res.reason });
@@ -680,7 +682,7 @@ function handleSwitchClass(context, userId, args) {
     `Gear is per-character — check \`ky char\` and re-equip.`)] });
 }
 // Legacy alias (pre-deploy naming; hidden from help): identical behavior.
-function handleChangeClass(context, userId, args) { return handleSwitchClass(context, userId, args); }
+async function handleChangeClass(context, userId, args) { return handleSwitchClass(context, userId, args); }
 function handleBuyGear(context, userId, code) {
   if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
   const args = String(code || '').toLowerCase().split(/\s+/).filter(Boolean);
