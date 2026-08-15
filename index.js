@@ -175,21 +175,68 @@ client.on('interactionCreate', async (interaction) => {
 // ============================================================
 process.on('unhandledRejection', (error) => {
   console.error('Unhandled promise rejection:', error);
+  logDiagnostic('unhandledRejection: ' + (error && error.stack || error));
 });
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);
+  logDiagnostic('uncaughtException: ' + (error && error.stack || error));
 });
 
 client.on('error', (error) => {
   console.error('Client error:', error);
+  logDiagnostic('clientError: ' + (error && error.message || error));
 });
 
+// Post-mortem log — the Wispbyte console clears on restart; this file survives,
+// so "why did it die" is answerable after the fact. Rare writes, tiny file.
+// Size guard: error storms (reconnect bursts) must not grow this unbounded on a
+// 1GB-storage free tier — past 1MB, rotate to .old and start fresh.
+const fs = require('fs');
+const path = require('path');
+const DIAG_LOG = path.join(__dirname, 'data', 'diagnostic.log');
+const DIAG_MAX_BYTES = 1024 * 1024;
+function logDiagnostic(msg) {
+  try {
+    try {
+      const st = fs.statSync(DIAG_LOG);
+      if (st.size > DIAG_MAX_BYTES) {
+        try { fs.rmSync(DIAG_LOG + '.old', { force: true }); } catch {}
+        fs.renameSync(DIAG_LOG, DIAG_LOG + '.old');
+      }
+    } catch { /* file doesn't exist yet — fine */ }
+    fs.appendFileSync(DIAG_LOG, `[${new Date().toISOString()}] ${msg}\n`);
+  } catch { /* data dir missing — console only */ }
+}
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    logDiagnostic(sig + ' received (panel stop/restart or manual kill)');
+    process.exit(0);
+  });
+}
+
 // ============================================================
-// Login
+// Login (with retry — a single network blip at boot must not
+// strand the app offline until a manual start)
 // ============================================================
-client.login(process.env.DISCORD_TOKEN).catch((error) => {
-  console.error('Failed to login! Make sure DISCORD_TOKEN in .env is correct.');
-  console.error(error.message);
+const MAX_LOGIN_ATTEMPTS = 5;
+if (!process.env.DISCORD_TOKEN) {
+  // Fail fast — retrying a missing token for 75s is pointless
+  console.error('DISCORD_TOKEN is missing! Make sure .env is uploaded/complete.');
   process.exit(1);
-});
+}
+async function loginWithRetry(attempt = 1) {
+  try {
+    await client.login(process.env.DISCORD_TOKEN);
+  } catch (error) {
+    logDiagnostic(`login attempt ${attempt}/${MAX_LOGIN_ATTEMPTS} failed: ${error.message}`);
+    console.error(`Login attempt ${attempt}/${MAX_LOGIN_ATTEMPTS} failed: ${error.message}`);
+    if (attempt >= MAX_LOGIN_ATTEMPTS) {
+      console.error('Failed to login! Make sure DISCORD_TOKEN in .env is correct.');
+      process.exit(1);
+    }
+    await new Promise((r) => setTimeout(r, 15000));
+    return loginWithRetry(attempt + 1);
+  }
+}
+loginWithRetry();
