@@ -186,6 +186,29 @@ ok(!rg.ok && /changeclass/.test(rg.reason), 'register path: second char rejected
 BM.ensureBattleData(dG.GA).kryptonite = 6000;
 ok(BM.applyChangeClass(dG, 'GA', 'mage').ok, 'changeclass path tetap jalan (bayar 5000)');
 
+// ---- LB: entri terbaik per pemain + filter class ----
+const dataL = {
+  P1: { username: 'p1', registeredAt: '2026-01-01T00:00:00Z', battle: null, cosmetics: {} },
+  P2: { username: 'p2', registeredAt: '2026-01-02T00:00:00Z', battle: null, cosmetics: {} },
+};
+for (const [uid, u] of Object.entries(dataL)) {
+  const b = BM.ensureBattleData(u);
+  // brief assumes characters map pre-exists; ensureBattleData keeps it lazy (see test line ~32) — init it here
+  b.characters = { warrior: BM.createCharacterRecord(), mage: BM.createCharacterRecord() };
+}
+dataL.P1.battle.activeClass = 'warrior';
+dataL.P1.battle.characters.warrior.bestDepth = 80; dataL.P1.battle.characters.mage.bestDepth = 40;
+dataL.P2.battle.activeClass = 'mage';
+dataL.P2.battle.characters.mage.bestDepth = 90; dataL.P2.battle.characters.warrior.bestDepth = 10;
+// (inject data via applyExtract terlalu berat — set langsung field record utk LB test)
+const lbAll = BM.getBattleLeaderboardFor(dataL, 10, null);
+ok(lbAll[0].userId === 'P2' && lbAll[0].bestDepth === 90 && lbAll[0].charClass === 'mage', 'LB utama: char terbaik P2 (mage 90)');
+ok(lbAll[1].userId === 'P1' && lbAll[1].charClass === 'warrior', 'LB utama: char terbaik P1 (warrior 80)');
+const lbW = BM.getBattleLeaderboardFor(dataL, 10, 'warrior');
+ok(lbW.length === 2 && lbW[0].userId === 'P1' && lbW[0].bestDepth === 80, 'LB warrior: P1 top');
+const lbM = BM.getBattleLeaderboardFor(dataL, 10, 'mage');
+ok(lbM[0].userId === 'P2' && lbM[0].bestDepth === 90, 'LB mage: P2 top');
+
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail === 0 ? 0 : 1);

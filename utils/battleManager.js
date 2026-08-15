@@ -547,34 +547,43 @@ function switchClass(userId, classId) {
 // Battle leaderboard: rank by FLOOR DEPTH (bestDepth) first, then Combat Score, then scoreAchievedAt.
 // Admin & superadmin INCLUDED (unlike the regular balance leaderboard).
 // Depth = gameplay achievement (decoupled from raw stats); CS is the tiebreak.
-function getBattleLeaderboard(limit = 10, memberIds = null) {
-  const data = economy.readEconomy();
+// Pure core (testable tanpa IO): best character per player (main LB) or per-class entries.
+function buildBattleLeaderboard(data, memberIds = null, classFilter = null) {
   const players = [];
   for (const [uid, user] of Object.entries(data)) {
-    if (memberIds && !memberIds.has(uid)) continue; // server scope filter
-    if (user.battle && user.battle.charClass) {
-      const stats = computeStats(user.battle.charLevel, user.battle.charClass, user.battle.equipment, user.battle.uniqueItems || {});
-      const score = stats.hp + stats.atk + stats.matk + stats.def + stats.mdef + stats.spd;
-      players.push({
-        userId: uid,
-        username: user.username || 'Unknown',
-        charName: user.battle.charName || null,
-        score,
-        charLevel: user.battle.charLevel,
-        charClass: user.battle.charClass,
-        bestDepth: user.battle.bestDepth || 0,
-        registeredAt: user.registeredAt || '9999',
-        scoreAchievedAt: user.battle.scoreAchievedAt || user.registeredAt || '9999',
-        cosmetics: user.cosmetics || null,
+    if (memberIds && !memberIds.has(uid)) continue;
+    const b = user.battle;
+    if (!b || !b.characters || !Object.keys(b.characters).length) continue;
+    const entries = Object.entries(b.characters)
+      .filter(([cls]) => !classFilter || cls === classFilter)
+      .map(([cls, ch]) => {
+        const stats = computeStats(ch.charLevel, cls, ch.equipment, b.uniqueItems || {});
+        return { cls, ch, score: stats.hp + stats.atk + stats.matk + stats.def + stats.mdef + stats.spd };
       });
-    }
+    if (!entries.length) continue;
+    const best = entries.slice().sort((a, z) => (z.ch.bestDepth || 0) - (a.ch.bestDepth || 0) || z.score - a.score)[0];
+    players.push({
+      userId: uid, username: user.username || 'Unknown',
+      charName: best.ch.charName || null, score: best.score,
+      charLevel: best.ch.charLevel, charClass: best.cls, bestDepth: best.ch.bestDepth || 0,
+      registeredAt: user.registeredAt || '9999',
+      scoreAchievedAt: best.ch.scoreAchievedAt || user.registeredAt || '9999',
+      cosmetics: user.cosmetics || null,
+    });
   }
-  players.sort((a, b) => {
-  if (b.bestDepth !== a.bestDepth) return b.bestDepth - a.bestDepth;    // FLOOR DEPTH first (gameplay achievement)
-    if (b.score !== a.score) return b.score - a.score;                  // CS tiebreak
-    return (a.scoreAchievedAt || '9999').localeCompare(b.scoreAchievedAt || '9999'); // reached it first
+  players.sort((a, b2) => {
+    if (b2.bestDepth !== a.bestDepth) return b2.bestDepth - a.bestDepth;
+    if (b2.score !== a.score) return b2.score - a.score;
+    return (a.scoreAchievedAt || '9999').localeCompare(b2.scoreAchievedAt || '9999'); // reached it first
   });
-  return players.slice(0, limit);
+  return players;
+}
+// NOTE: brief's own tests call this as (data, limit, classFilter) — filter 3rd, memberIds 4th.
+function getBattleLeaderboardFor(data, limit = 10, classFilter = null, memberIds = null) {
+  return buildBattleLeaderboard(data, memberIds, classFilter).slice(0, limit);
+}
+function getBattleLeaderboard(limit = 10, memberIds = null, classFilter = null) {
+  return getBattleLeaderboardFor(economy.readEconomy(), limit, classFilter, memberIds);
 }
 
 // Record a PvP outcome atomically: W/L for both combatants (no ELO — dropped).
@@ -598,7 +607,7 @@ module.exports = {
   applySell, applySellGear, applyEquip, applyUnequip, applyUnequipAll, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
   applyChangeClass, applySwitchClass,
   createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
-  sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, changeClass, switchClass, setCharName, getCharName, getBattleLeaderboard, recordPvp,
+  sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, changeClass, switchClass, setCharName, getCharName, getBattleLeaderboard, getBattleLeaderboardFor, recordPvp,
   createCharacterRecord, getActiveChar, getCharClass, isEquippedOnAnyChar, EQUIP_SLOTS,
   ENTRY_FEE, GEAR_SELLBACK, CHAR_CHANGE_COST,
 };
