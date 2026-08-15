@@ -351,6 +351,51 @@ function applyPresetDelete(data, userId, n) {
   return { ok: true, slot: num };
 }
 
+// Load a preset: validate EVERY entry first (any failure -> nothing touched), then swap in one pass.
+// Swap returns every equipped g-item to the bag (clearing the slot) and re-takes each preset
+// g-item from it — so an item that stays equipped nets zero and cannot dupe (G4). ky items just
+// re-reference uniqueItems (staying spare when off). Empty slots restore to empty (P6).
+function applyPresetLoad(data, userId, n) {
+  const b = ensureBattleData(data[userId]);
+  const c = getActiveChar(b);
+  if (!c) return { ok: false, reason: 'Create a character first (`ky battle`).' };
+  const num = presetSlotNum(n);
+  if (!presetSlotValid(b, num)) return { ok: false, reason: 'You only have ' + b.presetSlots + ' preset slot' + (b.presetSlots > 1 ? 's' : '') + '.' };
+  const p = b.presets[num - 1];
+  if (!p) return { ok: false, reason: 'Slot ' + num + ' is empty. Save it first: `ky preset save ' + num + '`.' }; // P5
+  // validate ALL non-null entries — atomic (Q4/Q5)
+  const active = b.activeClass;
+  for (const [slot, id] of Object.entries(p.slots)) {
+    if (!id) continue;
+    if (id.startsWith('ky')) {
+      if (!b.uniqueItems[id]) return { ok: false, reason: `Preset item '${id}' is no longer in your collection — save the preset again.` };
+    } else {
+      const owned = (b.bag[id] || 0) > 0 || c.equipment[slot] === id;
+      if (!GEAR[id] || !owned) return { ok: false, reason: `Preset item '${id}' (${slot}) is not owned anymore — save the preset again.` };
+    }
+    for (const [cls2, ch2] of Object.entries(b.characters)) { // Q5: on ANOTHER char
+      if (cls2 === active) continue;
+      if (ch2.equipment && Object.values(ch2.equipment).includes(id)) {
+        return { ok: false, reason: `'${id}' is equipped on your ${CLASSES[cls2].name} — unequip it there first.` };
+      }
+    }
+  }
+  // swap: return old gear (and clear the slot), then apply preset
+  for (const slot of Object.keys(c.equipment)) {
+    const prev = c.equipment[slot];
+    c.equipment[slot] = null;
+    if (prev && prev.startsWith('g')) b.bag[prev] = (b.bag[prev] || 0) + 1; // ky stays spare in uniqueItems
+  }
+  for (const [slot, id] of Object.entries(p.slots)) {
+    if (id && !id.startsWith('ky')) {
+      b.bag[id] -= 1; if (b.bag[id] <= 0) delete b.bag[id];
+    }
+    c.equipment[slot] = id || null;
+  }
+  c.scoreAchievedAt = new Date().toISOString();
+  return { ok: true, loaded: num };
+}
+
 // Set character display name (shown in ky char/battle/gear/bag). Validated.
 // Anti-impersonation: reserved authority words + no copying ANY player's Discord username.
 const RESERVED_CHAR_NAMES = ['admin', 'superadmin', 'super admin', 'owner', 'mod', 'moderator', 'staff', 'support', 'dev', 'developer', 'kyriz', 'system', 'bot'];
@@ -580,6 +625,13 @@ function presetDelete(userId, n) {
   if (r.ok) economy.writeEconomy(data);
   return r;
 }
+function presetLoad(userId, n) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
+  const data = economy.readEconomy(); ensureUser(data, userId);
+  const r = applyPresetLoad(data, userId, n);
+  if (r.ok) economy.writeEconomy(data); // atomic: full swap persisted or nothing
+  return r;
+}
 function changeClass(userId, classId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' }; // G1
   const data = economy.readEconomy();
@@ -676,8 +728,8 @@ function recordPvp(winnerId, loserId) {
 module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
   applySell, applySellGear, applyEquip, applyUnequip, applyUnequipAll, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
-  applyChangeClass, applySwitchClass, applyPresetSave, applyPresetDelete,
-  presetSave, presetDelete, PRESET_SLOTS_FREE, PRESET_SLOTS_CAP, PRESET_SLOT_PRICE,
+  applyChangeClass, applySwitchClass, applyPresetSave, applyPresetDelete, applyPresetLoad,
+  presetSave, presetDelete, presetLoad, PRESET_SLOTS_FREE, PRESET_SLOTS_CAP, PRESET_SLOT_PRICE,
   migrateAllBattleData, createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
   sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, changeClass, switchClass, setCharName, getCharName, getBattleLeaderboard, getBattleLeaderboardFor, recordPvp,
   createCharacterRecord, getActiveChar, getCharClass, isEquippedOnAnyChar, EQUIP_SLOTS,

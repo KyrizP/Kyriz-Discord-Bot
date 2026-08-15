@@ -22,5 +22,59 @@ ok(b1.presets[0].slots.weapon === null, 'P4: isi baru menggantikan lama');
 // delete + kapasitas tidak berubah (slot tetap milik user, isinya saja kosong)
 ok(BM.applyPresetDelete(d1, 'U1', 2).ok && b1.presets[1] === null, 'delete slot 2 -> null');
 ok(!BM.applyPresetDelete(d1, 'U1', 5).ok, 'delete slot di luar kapasitas ditolak');
+
+// ---------- T2: load — atomic validate-all-then-swap ----------
+const d2 = mkData('U2'); BM.ensureBattleData(d2.U2); BM.applyCreateCharacter(d2, 'U2', 'warrior');
+const b2 = BM.ensureBattleData(d2.U2);
+b2.uniqueItems.kyw1 = { id: 'kyw1', rarity: 'divine', slot: 'weapon', stats: { atk: 48 }, passives: [] };
+b2.bag.g21 = 1; b2.bag.g13 = 1;
+BM.getActiveChar(b2).equipment.weapon = 'kyw1';
+BM.applyPresetSave(d2, 'U2', 1);
+BM.getActiveChar(b2).equipment.weapon = null;
+BM.getActiveChar(b2).equipment.head = 'g21'; b2.bag.g21 -= 1;
+ok(BM.applyPresetLoad(d2, 'U2', 1).ok, 'load slot 1 ok');
+const c2 = BM.getActiveChar(b2);
+ok(c2.equipment.weapon === 'kyw1', 'weapon terpasang');
+ok(c2.equipment.head === null, 'P6: head kosong di snapshot = kosong setelah load');
+ok(b2.bag.g21 === 1, 'gear lama kembali ke bag');
+BM.getActiveChar(b2).equipment.boots = 'g13'; b2.bag.g13 -= 1;
+BM.applyPresetSave(d2, 'U2', 2);
+BM.getActiveChar(b2).equipment.boots = null; b2.bag.g13 += 1; // unequip returns g-item to bag (T2 fix: brief omitted this, leaving g13 unowned -> its own ownership rule would reject)
+ok(BM.applyPresetLoad(d2, 'U2', 2).ok && BM.getActiveChar(b2).equipment.boots === 'g13', 'load g-item dari bag');
+ok(!b2.bag.g13, 'g-item habis dari bag saat dipasang');
+// P5: slot kosong -> info, tak tersentuh
+BM.applyPresetDelete(d2, 'U2', 1);
+const before = JSON.stringify(BM.getActiveChar(b2).equipment);
+const e1 = BM.applyPresetLoad(d2, 'U2', 1);
+ok(!e1.ok && /Slot 1 is empty/.test(e1.reason), 'P5: slot kosong -> info');
+ok(JSON.stringify(BM.getActiveChar(b2).equipment) === before, 'P5: equipment tak tersentuh');
+const e2 = BM.applyPresetLoad(d2, 'U2', 7);
+ok(!e2.ok && /only have 2/.test(e2.reason), 'P3: slot 7 -> info jumlah slot');
+
+// T2 regression: same g-item still equipped when its preset loads — swap must return it
+// THEN take it back (no free bag copy). Brief's code skipped the decrement -> dupe.
+const d3 = mkData('U3'); BM.ensureBattleData(d3.U3); BM.applyCreateCharacter(d3, 'U3', 'warrior');
+const b3 = BM.ensureBattleData(d3.U3);
+b3.bag.g13 = 1;
+const c3 = BM.getActiveChar(b3);
+c3.equipment.boots = 'g13'; b3.bag.g13 -= 1;
+BM.applyPresetSave(d3, 'U3', 1);
+ok(BM.applyPresetLoad(d3, 'U3', 1).ok, 'G4: load ok saat item preset masih terpasang');
+ok(c3.equipment.boots === 'g13' && !b3.bag.g13, 'G4: re-equip item sama tidak duplikat ke bag');
+
+// T2: Q5 — preset item equipped on ANOTHER character -> reject, name the class, touch nothing
+const d4 = mkData('U4'); BM.ensureBattleData(d4.U4); BM.applyCreateCharacter(d4, 'U4', 'warrior');
+const b4 = BM.ensureBattleData(d4.U4);
+b4.uniqueItems.kyw2 = { id: 'kyw2', rarity: 'legend', slot: 'weapon', stats: { atk: 20 }, passives: [] };
+BM.getActiveChar(b4).equipment.weapon = 'kyw2';
+BM.applyPresetSave(d4, 'U4', 1);
+BM.getActiveChar(b4).equipment.weapon = null; // move it to the mage by hand
+b4.characters.mage = { charLevel: 1, charExp: 0, charExpNeeded: 100, charName: null, bestDepth: 0,
+  equipment: { weapon: 'kyw2', head: null, armor: null, boots: null, accessory: null }, scoreAchievedAt: null };
+const before4 = JSON.stringify(BM.getActiveChar(b4).equipment);
+const e4 = BM.applyPresetLoad(d4, 'U4', 1);
+ok(!e4.ok && /Mage/.test(e4.reason), 'Q5: item di char lain -> reject sebut kelas');
+ok(JSON.stringify(BM.getActiveChar(b4).equipment) === before4, 'Q5: equipment tak tersentuh');
+
 console.log('\n' + (fail === 0 ? '✅ OK' : '❌ FAIL') + ' — Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail ? 1 : 0);
