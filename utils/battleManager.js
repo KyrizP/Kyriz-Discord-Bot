@@ -69,6 +69,7 @@ function ensureBattleData(user) {
   const b = user.battle;
   if (!b.uniqueItems) b.uniqueItems = {};
   if (!b.bag) b.bag = {};
+  if (b.kryptonite == null) b.kryptonite = 0; // defensive: hand-corrupted battle objects must not go NaN on first sell
   if (b.pvpWins == null) b.pvpWins = 0;
   if (b.pvpLosses == null) b.pvpLosses = 0;
   // v1.6 lazy migration: flat single-char -> characters map (idempotent, proven v1.1 pattern)
@@ -249,8 +250,8 @@ function applySellGear(data, userId, itemId, qty) {
   }
   const item = GEAR[itemId];
   if (!item) return { ok: false, reason: 'Not equipment.' };
-  // Equipped gear lives in b.equipment (separate from b.bag spares). Selling from bag
-  // (spares) never touches the equipped copy -> no unequip needed to sell spares.
+  // Equipped copies live per-character (characters.<class>.equipment). Selling from bag
+  // (spares) never touches an equipped copy -> no unequip needed to sell spares.
   const have = b.bag[itemId] || 0;
   if (have <= 0) return { ok: false, reason: 'Not in your bag. (To sell the equipped copy, `ky unequip` it first.)' };
   const n = qty === 'all' ? have : Math.min(have, Math.max(1, Math.floor(qty || 1))); // default 1, each at sellback
@@ -270,7 +271,7 @@ function applyEquip(data, userId, itemId) {
   if (itemId.startsWith('ky')) {
     const uq = b.uniqueItems[itemId];
     if (!uq) return { ok: false, reason: 'Not in your collection.' };
-    if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Equipped on another character. `ky unequip` it there first (or switch).' };
+    if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Already equipped. `ky unequip` it first (or switch).' };
     const slot = uq.slot;
     const prev = eq[slot];
     eq[slot] = itemId;
@@ -281,7 +282,7 @@ function applyEquip(data, userId, itemId) {
   const item = GEAR[itemId];
   if (!item) return { ok: false, reason: 'Not equipment.' };
   if (!b.bag[itemId]) return { ok: false, reason: 'Not in your bag.' };
-  if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Equipped on another character. `ky unequip` it there first (or switch).' };
+  if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Already equipped. `ky unequip` it first (or switch).' };
   const slot = item.slot;
   const prev = eq[slot];
   eq[slot] = itemId;
