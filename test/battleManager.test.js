@@ -72,14 +72,15 @@ ok(bad.sold === 0 && bad.reason, 'gear rejected by sell (use sellgear)');
 // ---- equip + swap + unequip ----
 let dE = { u1: { balance: 0 } };
 M.applyCreateCharacter(dE, 'u1', 'warrior');
+const eqE = () => M.getActiveChar(dE.u1.battle).equipment; // v1.6: equipment lives on the char record
 dE.u1.battle.bag = { g1: 1 };
 let eq = M.applyEquip(dE, 'u1', 'g1');
-ok(eq.ok && eq.slot === 'weapon' && dE.u1.battle.equipment.weapon === 'g1' && !dE.u1.battle.bag.g1, 'equip moves bag->slot');
+ok(eq.ok && eq.slot === 'weapon' && eqE().weapon === 'g1' && !dE.u1.battle.bag.g1, 'equip moves bag->slot');
 dE.u1.battle.bag.g2 = 1;
 let eq2 = M.applyEquip(dE, 'u1', 'g2');
-ok(dE.u1.battle.equipment.weapon === 'g2' && dE.u1.battle.bag.g1 === 1, 'equip swaps old to bag');
+ok(eqE().weapon === 'g2' && dE.u1.battle.bag.g1 === 1, 'equip swaps old to bag');
 let ueq = M.applyUnequip(dE, 'u1', 'weapon');
-ok(ueq.ok && dE.u1.battle.equipment.weapon === null && dE.u1.battle.bag.g2 === 1, 'unequip moves slot->bag');
+ok(ueq.ok && eqE().weapon === null && dE.u1.battle.bag.g2 === 1, 'unequip moves slot->bag');
 
 // ---- sellgear 35% (unequipped only) ----
 let dF = { u1: { balance: 0 } };
@@ -87,11 +88,11 @@ M.applyCreateCharacter(dF, 'u1', 'warrior');
 dF.u1.battle.bag = { g1: 1 };
 let sg = M.applySellGear(dF, 'u1', 'g1');
 ok(sg.ok && sg.kryptonite === 35 && !dF.u1.battle.bag.g1, 'sellgear g1 (price 100) = 35 kry');
-dF.u1.battle.equipment.armor = 'g3';
+M.getActiveChar(dF.u1.battle).equipment.armor = 'g3';
 dF.u1.battle.bag = { g3: 2 }; // 2 spares + 1 equipped
 let sgEq = M.applySellGear(dF, 'u1', 'g3', 1); // sell 1 SPARE — should work (no unequip needed)
 ok(sgEq.ok && sgEq.sold === 1 && sgEq.kryptonite === 42 && dF.u1.battle.bag.g3 === 1, 'sell spare g3 while one is equipped (no unequip needed)');
-ok(dF.u1.battle.equipment.armor === 'g3', 'equipped g3 copy untouched when selling spares');
+ok(M.getActiveChar(dF.u1.battle).equipment.armor === 'g3', 'equipped g3 copy untouched when selling spares');
 
 // ---- buygear ----
 let dG = { u1: { balance: 0 } };
@@ -135,10 +136,11 @@ ok(!buBad.ok && Object.keys(dU2.u1.battle.uniqueItems).length === 0 && dU2.u1.ba
 // equip unique -> slot set; equip same unique in 2nd slot -> rejected
 let dE2 = { u1: { balance: 0 } };
 M.ensureBattleData(dE2.u1);
+M.applyCreateCharacter(dE2, 'u1', 'warrior'); // v1.6: equip needs an active character
 dE2.u1.battle.kryptonite = 20000;
 let mk = M.applyBuyUnique(dE2, 'u1', 'legendary', 'weapon', 'atk');
 let eqU = M.applyEquip(dE2, 'u1', mk.unique.id);
-ok(eqU.ok && eqU.slot === 'weapon' && dE2.u1.battle.equipment.weapon === mk.unique.id, 'equip unique weapon');
+ok(eqU.ok && eqU.slot === 'weapon' && M.getActiveChar(dE2.u1.battle).equipment.weapon === mk.unique.id, 'equip unique weapon');
 let eqDup = M.applyEquip(dE2, 'u1', mk.unique.id); // try equip same id again
 ok(!eqDup.ok, 'cannot equip same unique id in two slots');
 
@@ -157,10 +159,11 @@ ok(!sgU2.ok, 'cannot sell deleted unique twice (no double refund)');
 // exploit: equip mismatched slot (weapon unique auto-fits weapon slot only)
 let dS = { u1: { balance: 0 } };
 M.ensureBattleData(dS.u1);
+M.applyCreateCharacter(dS, 'u1', 'warrior');
 dS.u1.battle.kryptonite = 5000;
 let mkw = M.applyBuyUnique(dS, 'u1', 'legendary', 'weapon', 'atk');
 M.applyEquip(dS, 'u1', mkw.unique.id);
-ok(dS.u1.battle.equipment.weapon === mkw.unique.id && dS.u1.battle.equipment.boots === null, 'weapon unique only fits weapon slot');
+ok(M.getActiveChar(dS.u1.battle).equipment.weapon === mkw.unique.id && M.getActiveChar(dS.u1.battle).equipment.boots === null, 'weapon unique only fits weapon slot');
 
 // backfill: existing user without uniqueItems/pvp fields gets them
 let dOld = { u1: { battle: { kryptonite: 5, charLevel: 1, charClass: 'warrior', equipment: { weapon: null }, bag: {}, charExp: 0, charExpNeeded: 100, bestDepth: 0 } } };
@@ -183,8 +186,9 @@ ok(dP2.A.battle.pvpWins === 0 && dP2.A.battle.pvpLosses === 0, 'W/L backfilled t
 // ---- Greed passive boosts drop sell value (regression: was silently lost) ----
 let dGr = { u1: { balance: 0 } };
 M.ensureBattleData(dGr.u1);
+M.applyCreateCharacter(dGr, 'u1', 'warrior'); // v1.6: Greed reads the ACTIVE char's equipment
 dGr.u1.battle.uniqueItems = { kyG: { id: 'kyG', rarity: 'divine', slot: 'accessory', stats: { atk: 30 }, passives: [{ id: 'greed', value: 20 }] } };
-dGr.u1.battle.equipment.accessory = 'kyG';
+M.getActiveChar(dGr.u1.battle).equipment.accessory = 'kyG';
 dGr.u1.battle.bag = { d4: 1 }; // d4 Crystal Shard, value 30
 let gsl = M.applySell(dGr, 'u1', 'd4', 1);
 ok(gsl.kryptonite === 36 && dGr.u1.battle.kryptonite === 36, 'Greed boosts sell: d4 (30) × 1.20 = 36');

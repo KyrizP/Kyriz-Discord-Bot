@@ -82,6 +82,50 @@ ok(BM.ensureBattleData(data7.U7).characters.mage.charName === null, 'char kedua 
 ok(BM.applySetCharName(data7, 'U7', 'DarkMage').ok, 'set name char kedua ok');
 ok(BM.ensureBattleData(data7.U7).characters.warrior.charName === 'IronKnight', 'nama char pertama tidak berubah');
 
+// ---- G5: equip item yang terpasang di char lain -> tolak ----
+const data8 = mkData('U8');
+BM.ensureBattleData(data8.U8); BM.applyCreateCharacter(data8, 'U8', 'warrior');
+const bb = BM.ensureBattleData(data8.U8);
+bb.uniqueItems.kyw1 = { id: 'kyw1', rarity: 'divine', slot: 'weapon', stats: { atk: 48 }, passives: [] };
+bb.uniqueItems.kyw2 = { id: 'kyw2', rarity: 'divine', slot: 'head', stats: { def: 10 }, passives: [] }; // spare divine (setup fix: bulk butuh 1 item sellable agar ok:true — brief asli hanya punya kyw1 yg equipped)
+bb.characters.warrior.equipment.weapon = 'kyw1'; // terpasang di warrior (aktif)
+BM.applyCreateCharacter(data8, 'U8', 'mage');     // aktif = mage
+ok(BM.applyEquip(data8, 'U8', 'kyw1').ok === false, 'G5: equip item milik-equipment-warrior ditolak di mage');
+ok(BM.isEquippedOnAnyChar(bb, 'kyw1') === true, 'isEquippedOnAnyChar deteksi lintas char');
+
+// ---- G6: jual unique terpasang di char manapun -> tolak/single, bulk -> skip ----
+ok(BM.applySellGear(data8, 'U8', 'kyw1', 1).ok === false, 'G6: jual item terpasang di char non-aktif ditolak');
+const bulk = BM.applySellGear(data8, 'U8', 'divine', 'all');
+ok(bulk.ok === true && bb.uniqueItems.kyw1, 'G6 bulk: item terpasang di-skip, tidak terjual');
+ok(!bb.uniqueItems.kyw2, 'G6 bulk: spare divine justru terjual (hanya equipped yang di-skip)');
+ok(bulk.ok && bulk.sold === 1, 'G6 bulk: sold=1 (kyw2), equipped kyw1 tidak dihitung');
+
+// ---- pindah gear jalur sah: unequip (warrior) -> switch -> equip (mage) ----
+BM.applySwitchClass ? null : null; // belum ada — tes pindah via manipulasi aktif:
+bb.activeClass = 'warrior';
+ok(BM.applyUnequip(data8, 'U8', 'weapon').ok, 'unequip dari warrior ok');
+bb.activeClass = 'mage';
+ok(BM.applyEquip(data8, 'U8', 'kyw1').ok, 'equip ke mage setelah dilepas — jalur sah berhasil');
+
+// ---- unequip all: mixed g+ky, stacking count, empty, tanpa duplikasi ----
+const dU = mkData('U10');
+BM.ensureBattleData(dU.U10); BM.applyCreateCharacter(dU, 'U10', 'warrior');
+const bU = BM.ensureBattleData(dU.U10);
+bU.uniqueItems.kyw1 = { id: 'kyw1', rarity: 'divine', slot: 'weapon', stats: { atk: 48 }, passives: [] };
+bU.bag.g10 = 1; // satu spare g10 di bag (dua sword sama total)
+const cU = BM.getActiveChar(bU);
+cU.equipment.weapon = 'kyw1'; cU.equipment.head = 'g21';
+cU.equipment.armor = 'g3'; // setup fix: g10 slot-nya weapon (bentrok dgn kyw1) — item ke-3 di slot lain agar count=3 sesuai asersi brief
+BM.applyEquip(dU, 'U10', 'g10'); // ambil spare -> equipped (bag.g10 habis)
+const rU = BM.applyUnequipAll(dU, 'U10');
+ok(rU.ok && rU.count === 3, 'unequip all: 3 item lepas');
+ok(bU.bag.g10 === 1 && bU.bag.g21 === 1, 'g-item kembali ke bag dengan count benar (tidak jadi 1 semua)');
+ok(bU.uniqueItems.kyw1, 'ky-item tetap di koleksi');
+ok(Object.values(cU.equipment).every(v => v === null), 'semua slot kosong');
+ok(!BM.applyUnequipAll(dU, 'U10').ok, 'second call: nothing equipped -> info');
+// duplikasi check: total kepemilikan tidak berubah
+ok(bU.bag.g10 === 1, 'tidak ada duplikasi (bag.g10 tetap 1)');
+
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail === 0 ? 0 : 1);

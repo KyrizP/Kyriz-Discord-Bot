@@ -35,6 +35,30 @@ function createCharacterRecord() {
 function getActiveChar(b) { return (b.characters && b.characters[b.activeClass]) || null; }
 function getCharClass(b) { return b.activeClass || null; }
 
+// G5/G6: an item may only be equipped on ONE character at a time (shared collection).
+function isEquippedOnAnyChar(b, itemId) {
+  for (const ch of Object.values(b.characters || {})) {
+    if (!ch.equipment) continue;
+    for (const slot of Object.values(ch.equipment)) if (slot === itemId) return true;
+  }
+  return false;
+}
+
+// Shared char-exp leveling loop (applyGainCharExp + applyExtract) — one path so the
+// linear curve + scoreAchievedAt bump can never drift between the two callers.
+function grantCharExp(c, exp) {
+  c.charExp += exp;
+  let leveledUp = false;
+  while (c.charExp >= c.charExpNeeded) {
+    c.charExp -= c.charExpNeeded;
+    c.charLevel += 1;
+    c.charExpNeeded = CHAR_EXP_BASE + 50 * (c.charLevel - 1); // LINEAR — leveling feasible at any level (no stall -> farm window keeps shifting up)
+    c.scoreAchievedAt = new Date().toISOString(); // track when current stats were achieved (lb tiebreaker)
+    leveledUp = true;
+  }
+  return leveledUp;
+}
+
 function ensureBattleData(user) {
   if (!user.battle) {
     // Root `equipment` = pre-class skeleton (legacy v1.1 shape, consumed by migration).
@@ -86,15 +110,7 @@ function applyGainCharExp(data, userId, exp) {
   const b = ensureBattleData(data[userId]);
   const c = getActiveChar(b);
   if (!c) return { leveledUp: false, newLevel: 1 };
-  c.charExp += Math.max(0, Math.floor(exp));
-  let leveledUp = false;
-  while (c.charExp >= c.charExpNeeded) {
-    c.charExp -= c.charExpNeeded;
-    c.charLevel += 1;
-    c.charExpNeeded = CHAR_EXP_BASE + 50 * (c.charLevel - 1); // LINEAR — leveling feasible at any level (no stall -> farm window keeps shifting up)
-    c.scoreAchievedAt = new Date().toISOString(); // track when current stats were achieved (lb tiebreaker)
-    leveledUp = true;
-  }
+  const leveledUp = grantCharExp(c, Math.max(0, Math.floor(exp)));
   return { leveledUp, newLevel: c.charLevel };
 }
 
@@ -123,15 +139,9 @@ function applyExtract(data, userId, runState) {
   if (reached > runChar.bestDepth) runChar.bestDepth = reached;
   let expRes = { leveledUp: false, newLevel: runChar.charLevel };
   if (runState.expAccum) {
-    // exp juga milik karakter run — tulis langsung, bukan via active:
-    runChar.charExp += runState.expAccum;
-    while (runChar.charExp >= runChar.charExpNeeded) {
-      runChar.charExp -= runChar.charExpNeeded;
-      runChar.charLevel += 1;
-      runChar.charExpNeeded = CHAR_EXP_BASE + 50 * (runChar.charLevel - 1);
-      runChar.scoreAchievedAt = new Date().toISOString();
-      expRes = { leveledUp: true, newLevel: runChar.charLevel };
-    }
+    // exp juga milik karakter run — tulis langsung, bukan via active (G7):
+    expRes.leveledUp = grantCharExp(runChar, runState.expAccum);
+    expRes.newLevel = runChar.charLevel;
   }
   return { banked, exp: runState.expAccum || 0, leveledUp: expRes.leveledUp, newLevel: expRes.newLevel };
 }
@@ -147,7 +157,8 @@ function applyDie(data, userId, runState) {
 
 function applySell(data, userId, itemId, qty) {
   const b = ensureBattleData(data[userId]);
-  const greedMult = 1 + (getPassives(b.equipment, b.uniqueItems).greed || 0) / 100; // Greed passive boosts sell value
+  const c = getActiveChar(b); // Greed lives on the ACTIVE char's gear (G5/G6 isolation)
+  const greedMult = 1 + (getPassives(c ? c.equipment : {}, b.uniqueItems).greed || 0) / 100; // Greed passive boosts sell value
   if (itemId === 'all') {
     let kry = 0, sold = 0;
     for (const id of Object.keys(b.bag)) {
@@ -173,7 +184,7 @@ function applySellGear(data, userId, itemId, qty) {
   if (itemId && itemId.startsWith('ky')) {
     const uq = b.uniqueItems[itemId];
     if (!uq) return { ok: false, reason: 'Not in your collection.' };
-    for (const sl of Object.keys(b.equipment)) if (b.equipment[sl] === itemId) return { ok: false, reason: 'Unequip it first.' };
+    if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Unequip it first.' };
     const kry = unique.sellValue(uq);
     delete b.uniqueItems[itemId];
     b.kryptonite += kry;
@@ -188,9 +199,7 @@ function applySellGear(data, userId, itemId, qty) {
     let kry = 0, sold = 0;
     // unique items
     for (const id of Object.keys(b.uniqueItems)) {
-      let equipped = false;
-      for (const sl of Object.keys(b.equipment)) if (b.equipment[sl] === id) { equipped = true; break; }
-      if (equipped) continue;
+      if (isEquippedOnAnyChar(b, id)) continue;
       if (b.uniqueItems[id].rarity === tier) { kry += unique.sellValue(b.uniqueItems[id]); delete b.uniqueItems[id]; sold++; }
     }
     // template g-items
@@ -222,38 +231,63 @@ function applySellGear(data, userId, itemId, qty) {
 function applyEquip(data, userId, itemId) {
   const b = ensureBattleData(data[userId]);
   if (!itemId) return { ok: false, reason: 'Equip what? Usage: `ky equip <g-code|ky-id>`' };
+  const c = getActiveChar(b);
+  if (!c) return { ok: false, reason: 'Create a character first (`ky battle`).' };
+  const eq = c.equipment;
   if (itemId.startsWith('ky')) {
     const uq = b.uniqueItems[itemId];
     if (!uq) return { ok: false, reason: 'Not in your collection.' };
-    for (const sl of Object.keys(b.equipment)) if (b.equipment[sl] === itemId) return { ok: false, reason: 'Already equipped.' };
+    if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Equipped on another character. `ky unequip` it there first (or switch).' };
     const slot = uq.slot;
-    const prev = b.equipment[slot];
-    b.equipment[slot] = itemId;
+    const prev = eq[slot];
+    eq[slot] = itemId;
     if (prev && prev.startsWith('g')) b.bag[prev] = (b.bag[prev] || 0) + 1; // ky prev stays spare in uniqueItems
-    b.scoreAchievedAt = new Date().toISOString();
+    c.scoreAchievedAt = new Date().toISOString();
     return { ok: true, slot, swapped: prev };
   }
   const item = GEAR[itemId];
   if (!item) return { ok: false, reason: 'Not equipment.' };
   if (!b.bag[itemId]) return { ok: false, reason: 'Not in your bag.' };
+  if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Equipped on another character. `ky unequip` it there first (or switch).' };
   const slot = item.slot;
-  const prev = b.equipment[slot];
-  b.equipment[slot] = itemId;
+  const prev = eq[slot];
+  eq[slot] = itemId;
   delete b.bag[itemId];
   if (prev) { if (prev.startsWith('g')) b.bag[prev] = (b.bag[prev] || 0) + 1; }
-  b.scoreAchievedAt = new Date().toISOString(); // stats changed → lb tiebreaker
+  c.scoreAchievedAt = new Date().toISOString(); // stats changed → lb tiebreaker
   return { ok: true, slot, swapped: prev };
 }
 
 function applyUnequip(data, userId, slot) {
   const b = ensureBattleData(data[userId]);
-  if (!(slot in (b.equipment || {}))) return { ok: false, reason: 'Invalid slot.' };
-  const itemId = b.equipment[slot];
+  const c = getActiveChar(b);
+  if (!c) return { ok: false, reason: 'Create a character first (`ky battle`).' };
+  if (!(slot in (c.equipment || {}))) return { ok: false, reason: 'Invalid slot.' };
+  const itemId = c.equipment[slot];
   if (!itemId) return { ok: false, reason: 'Nothing equipped there.' };
-  b.equipment[slot] = null;
+  c.equipment[slot] = null;
   if (itemId.startsWith('g')) b.bag[itemId] = (b.bag[itemId] || 0) + 1; // ky stays in uniqueItems as spare
-  b.scoreAchievedAt = new Date().toISOString(); // stats changed → lb tiebreaker
+  c.scoreAchievedAt = new Date().toISOString(); // stats changed → lb tiebreaker
   return { ok: true, slot, itemId };
+}
+
+// `ky unequip all`: batch-unequip every slot of the ACTIVE character. Same guard &
+// semantics as single unequip (g-item -> bag count +1 per slot; ky stays in collection).
+function applyUnequipAll(data, userId) {
+  const b = ensureBattleData(data[userId]);
+  const c = getActiveChar(b);
+  if (!c) return { ok: false, reason: 'Create a character first (`ky battle`).' };
+  const removed = [];
+  for (const slot of Object.keys(c.equipment)) {
+    const itemId = c.equipment[slot];
+    if (!itemId) continue;
+    c.equipment[slot] = null;
+    if (itemId.startsWith('g')) b.bag[itemId] = (b.bag[itemId] || 0) + 1; // ky stays in uniqueItems
+    removed.push(itemId);
+  }
+  if (!removed.length) return { ok: false, reason: 'Nothing equipped.' };
+  c.scoreAchievedAt = new Date().toISOString();
+  return { ok: true, count: removed.length, items: removed };
 }
 
 // Set character display name (shown in ky char/battle/gear/bag). Validated.
@@ -439,6 +473,13 @@ function unequip(userId, slot) {
   economy.writeEconomy(data);
   return r;
 }
+function unequipAll(userId) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
+  const data = economy.readEconomy(); ensureUser(data, userId);
+  const r = applyUnequipAll(data, userId);
+  if (r.ok) economy.writeEconomy(data);
+  return r;
+}
 function buyGear(userId, itemId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
   const data = economy.readEconomy();
@@ -507,9 +548,9 @@ function recordPvp(winnerId, loserId) {
 
 module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
-  applySell, applySellGear, applyEquip, applyUnequip, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
+  applySell, applySellGear, applyEquip, applyUnequip, applyUnequipAll, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
   createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
-  sell, sellGear, equip, unequip, buyGear, buyUnique, setCharName, getCharName, getBattleLeaderboard, recordPvp,
-  createCharacterRecord, getActiveChar, getCharClass, EQUIP_SLOTS,
+  sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, setCharName, getCharName, getBattleLeaderboard, recordPvp,
+  createCharacterRecord, getActiveChar, getCharClass, isEquippedOnAnyChar, EQUIP_SLOTS,
   ENTRY_FEE, GEAR_SELLBACK,
 };
