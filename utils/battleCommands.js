@@ -368,8 +368,9 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
   return new EmbedBuilder()
     .setAuthor({ name: `${displayName}'s character` })
     .setColor(COLOR)
-    .setTitle(banner) // status+class+level as the bold top line — no duplicates anywhere
     .setDescription(
+      // first line: status plain, class+level BOLD (embed titles can't do partial bold)
+      `${banner.split(' · ')[0]} · **${banner.split(' · ')[1]}**\n\n` +
       `🏷️ Name: ${c.charName || `_(unset — \`ky char name <nama>\`)`}\n` +
       `**Char EXP:** ${c.charExp}/${c.charExpNeeded}\n` +
       `🧪 Kryptonite: **${b.kryptonite.toLocaleString()}** · 🏰 Best depth: **${c.bestDepth}**\n` +
