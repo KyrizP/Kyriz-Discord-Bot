@@ -609,7 +609,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'switch', 'switchclass', 'changeclass', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'patch', 'end'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'switch', 'switchclass', 'changeclass', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'patch', 'preset', 'end'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -693,6 +693,8 @@ async function handlePrefixCommand(message, command, args) {
     case 'switchclass': // legacy alias (hidden from help)
     case 'changeclass': // legacy alias (hidden from help)
       return battleCmd.handleSwitchClass(message, userId, args);
+    case 'preset':
+      return battleCmd.handlePreset(message, userId, args);
     case 'char':
     case 'character':
       if (args[0] && args[0].toLowerCase() === 'name') return battleCmd.handleName(message, userId, args.slice(1).join(' '));
@@ -4438,7 +4440,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'patch', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'switch', 'switchclass', 'changeclass', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'end'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'patch', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'switch', 'switchclass', 'changeclass', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'preset', 'end'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());
@@ -4457,7 +4459,7 @@ function createHelpEmbed() {
       '🃏 **Games**\n' +
       '`bj [bet]` · `cf [bet] [h/t]` · `slots [bet]` · `dice [bet] [1-6/e/o]` · `crash [bet]` · `rl [bet] [red/black/0-36]` · `mines [bet]` · `hl [bet]` · `tw [bet]`\n\n' +
       '⚔️ **Battle** _— Kryptonite RPG_\n' +
-      '`battle [@user]` · `battle help` · `char [name <nama>|page]` · `switch <class>` · `bag` · `gear [id]` · `sell [all|code n]` · `buygear <code>` · `equip <id>` · `unequip <slot>` · `sellgear <id> | <rarity> all` · `shop gear [tier|rates]` · `lb battle [all]`\n\n' +
+      '`battle [@user]` · `battle help` · `char [name <nama>|page]` · `switch <class>` · `bag` · `gear [id]` · `sell [all|code n]` · `buygear <code>` · `equip <id>` · `unequip <slot>` · `sellgear <id> | <rarity> all` · `preset [n|save n|delete n|buy slot]` · `shop gear [tier|rates]` · `lb battle [all]`\n\n' +
       '💰 **Economy**\n' +
       '`wallet` · `daily` · `tf @user <amt>` · `lb [all]`\n\n' +
       '🛍️ **Shop**\n' +
