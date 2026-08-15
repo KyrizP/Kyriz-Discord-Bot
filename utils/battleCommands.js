@@ -11,7 +11,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelect
 const battle = require('./battleManager');
 const economy = require('./economyManager');
 const { CLASSES, GEAR, DROPS, TIER_INFO, PASSIVES, LEGEND_GEAR_RANGES, MYSTERY_BOXES, CRIT } = require('./battleConfig');
-const { computeStats } = require('./battleEngine');
+const { computeStats, getPassives } = require('./battleEngine');
 const unique = require('./uniqueItems');
 const pvp = require('./pvpManager');
 const { getItem } = require('../utils/shopItems');
@@ -242,9 +242,14 @@ function handleBattleHelp(context) {
       '`ky battle` — enter dungeon (**5,000 💎** entry). First time: pick a class.\n' +
       '`ky char` — view stats, gear, 🧪, best depth · `ky char name <nama>` — set name\n' +
       '`ky switch <class>` — swap character (free) · unowned class? offers creation (**🧪 5,000**)\n' +
+      '`ky preset [n]` — gear loadouts: `preset save|delete <n>` · `preset buy slot`\n' +
       '`ky bag` — your drops (sellable) · `ky gear` — your equipment\n\n' +
       '🎭 **MULTIPLE CHARACTERS**\n' +
       '`ky switch <class>` is your one command: owned classes swap instantly **free**; a class you do not own yet offers creation at **🧪 5,000** (starts **Lv.1**, confirm button — no accidental spend). Gear is **per-character** (each keeps its own equipment, level and best depth), but your 🧪 Kryptonite, drops bag and unique collection are **shared**. `ky char` pages through all your characters — click ◀ ▶ or `ky char <class>`. An item can only be equipped on ONE character at a time.\n\n' +
+      '🎒 **GEAR PRESETS** (loadouts):\n' +
+      '`ky preset save <n>` snapshots all 5 equipped items into slot n · `ky preset <n>` loads it back — swaps **all 5 slots instantly** (old gear returns to bag/collection). `ky preset` opens the panel, `ky preset delete <n>` clears a slot.\n' +
+      'First **2 slots are free**; unlock slots 3/4/5 for 🧪 **2,000 / 5,000 / 10,000** (`ky preset buy slot`, confirm button).\n' +
+      'Gear is shared across your characters, but one item can be equipped on **ONE character at a time** — loading checks that and asks you to unequip it there first.\n\n' +
       '⚔️ **IN BATTLE (buttons)**\n' +
       '⏩ **Push** — fight **1 floor** (animated clash). Can die.\n' +
       '⚡ **Fast Sweep** — auto-fight **5 floors** at once (fast, blind — riskier).\n' +
@@ -326,6 +331,24 @@ function charRow(targetId, page, total, viewerId) {
     new ButtonBuilder().setCustomId(`battle_charpage_${targetId}_${page + 1}_${viewerId}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
   );
 }
+// Compact gear line: tier badge + name + inline stats + compact passives (null → '—').
+// Shared by the `ky char` sheet and the preset panel (char visuals unchanged).
+function formatGearLine(id, b) {
+  if (!id) return '—';
+  let rarity, name, stats, passives;
+  if (id.startsWith('ky') && b.uniqueItems && b.uniqueItems[id]) {
+    rarity = b.uniqueItems[id].rarity; name = b.uniqueItems[id].name;
+    stats = b.uniqueItems[id].stats; passives = b.uniqueItems[id].passives || [];
+  } else if (GEAR[id]) {
+    rarity = GEAR[id].rarity; name = GEAR[id].name; stats = GEAR[id].stats; passives = [];
+  } else return `\`${id}\``;
+  const statStr = Object.entries(stats || {}).map(([k, v]) => `${STAT_EMOJI[k] || k}+${v}`).join(' · ');
+  const passStr = passives.map((p) => {
+    if (!PASSIVES[p.id]) return '';
+    return PASSIVES[p.id].unit ? `${PASSIVES[p.id].emoji}${p.value}${PASSIVES[p.id].unit}` : `${PASSIVES[p.id].emoji}+${p.value}`; // %: 🩸20% · flat: 💨+16
+  }).filter(Boolean).join(' · '); // compact: emoji+value only (full desc stays on `ky gear <id>`)
+  return `${tierBadge(rarity)} ${name} \`${id}\` — ${statStr}${passStr ? ' · ' + passStr : ''}`;
+}
 // Per-character sheet. Reads ONLY per-char fields via `c` + shared root via `b`.
 function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
   const c = b.characters[cls];
@@ -334,24 +357,8 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
   const stats = computeStats(c.charLevel, cls, c.equipment, b.uniqueItems || {});
   const totalStat = stats.hp + stats.atk + stats.matk + stats.def + stats.mdef + stats.spd;
   const equipLines = ['weapon', 'head', 'armor', 'boots', 'accessory']
-    .map((slot) => {
-      const id = c.equipment[slot];
-      if (!id) return `**${slot}:** —`;
-      let rarity, name, stats, passives;
-      if (id.startsWith('ky') && b.uniqueItems && b.uniqueItems[id]) {
-        rarity = b.uniqueItems[id].rarity; name = b.uniqueItems[id].name;
-        stats = b.uniqueItems[id].stats; passives = b.uniqueItems[id].passives || [];
-      } else if (GEAR[id]) {
-        rarity = GEAR[id].rarity; name = GEAR[id].name; stats = GEAR[id].stats; passives = [];
-      } else return `**${slot}:** \`${id}\``;
-      // inline stats + per-item passives — no more checking items one by one
-      const statStr = Object.entries(stats || {}).map(([k, v]) => `${STAT_EMOJI[k] || k}+${v}`).join(' · ');
-      const passStr = passives.map((p) => {
-        if (!PASSIVES[p.id]) return '';
-        return PASSIVES[p.id].unit ? `${PASSIVES[p.id].emoji}${p.value}${PASSIVES[p.id].unit}` : `${PASSIVES[p.id].emoji}+${p.value}`; // %: 🩸20% · flat: 💨+16
-      }).filter(Boolean).join(' · '); // compact: emoji+value only (full desc stays on `ky gear <id>`)
-      return `**${slot}:** ${tierBadge(rarity)} ${name} \`${id}\` — ${statStr}${passStr ? ' · ' + passStr : ''}`;
-    }).join('\n');
+    .map((slot) => `**${slot}:** ${formatGearLine(c.equipment[slot], b)}`)
+    .join('\n');
   // Passive summary from equipped unique items
   const { getPassives, getPassivesRaw } = require('./battleEngine');
   const CAPS = require('./battleConfig').PASSIVE_CAPS;
@@ -737,6 +744,107 @@ function handleBuyGear(context, userId, code) {
   }
   return context.reply({ content: 'Unknown gear code. See `ky shop gear` for the list of codes.' });
 }
+
+// ---------- gear presets: `ky preset` — snapshots of all 5 equipment slots ----------
+// One preset slot per page (page k = slot k); ◀/▶ re-renders fresh from disk.
+// customId battle_presetpage_<page>_<userId> — page BEFORE userId so the generic
+// owner check (last segment = executor) locks paging to whoever ran the command.
+function presetRow(viewerId, page, total) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`battle_presetpage_${page - 1}_${viewerId}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`battle_presetpage_${page + 1}_${viewerId}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
+  );
+}
+function buildPresetPanel(b, userId, page, viewerId) {
+  const total = Math.max(1, b.presetSlots || 1);
+  page = Math.min(Math.max(1, page || 1), total);
+  const preset = b.presets && b.presets[page - 1];
+  let desc;
+  if (!preset) {
+    desc = `_(empty — \`ky preset save ${page}\`)_`;
+  } else {
+    const gearLines = GEAR_SLOTS.map((slot) => `**${slot}:** ${formatGearLine(preset.slots && preset.slots[slot], b)}`).join('\n');
+    const passSum = getPassives(preset.slots, b.uniqueItems || {});
+    const passLine = Object.entries(passSum)
+      .filter(([id, v]) => v > 0 && PASSIVES[id])
+      .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}`)
+      .join(' · ');
+    desc = `${gearLines}\n\n**✨ Active Passives:** ${passLine || '—'}`;
+  }
+  const nextPrice = battle.PRESET_SLOT_PRICES[b.presetSlots + 1];
+  const footerTail = b.presetSlots >= battle.PRESET_SLOTS_CAP || !nextPrice
+    ? 'Max slots reached'
+    : `Next slot: 🧪 ${nextPrice.toLocaleString()} · ky preset buy slot`;
+  const displayName = (economy.getUser(userId) || {}).username || userId;
+  return {
+    embed: new EmbedBuilder()
+      .setAuthor({ name: `${displayName}'s presets` })
+      .setColor(COLOR)
+      .setTitle(`🎒 Gear Presets — Slot ${page}/${total}`)
+      .setDescription(desc)
+      .setFooter({ text: `Slot ${page}/${total} • ${footerTail} • ky preset save|delete|<n>` }),
+    components: total > 1 ? [presetRow(viewerId || userId, page, total)] : [],
+  };
+}
+// preset-buy confirm expiry: 60s no click -> auto-cancel (buttons die, no charge).
+// Mirrors buyclassTimers: one timer per user; any manual click or a NEW confirm clears the old one.
+const PRESETBUY_MS = 60_000;
+const presetBuyTimers = new Map(); // userId -> setTimeout handle
+function clearPresetBuyTimer(userId) {
+  if (presetBuyTimers.has(userId)) { clearTimeout(presetBuyTimers.get(userId)); presetBuyTimers.delete(userId); }
+}
+function armPresetBuyTimer(userId, message) {
+  clearPresetBuyTimer(userId); // a fresh confirm supersedes any pending one
+  presetBuyTimers.set(userId, setTimeout(async () => {
+    presetBuyTimers.delete(userId);
+    try { await message.edit({ embeds: [infoEmbed('', '⌛ Preset slot purchase expired — no Kryptonite spent.')], components: [] }); } catch { /* message deleted — nothing to do */ }
+  }, PRESETBUY_MS));
+}
+// `ky preset buy [slot]` — pre-checks here (cap / kryptonite → direct reason, no buttons);
+// money only moves on the Confirm click (manager re-checks again).
+async function handlePresetBuy(context, userId, bd) {
+  const b = bd.b;
+  const cap = battle.PRESET_SLOTS_CAP;
+  const price = battle.PRESET_SLOT_PRICES[b.presetSlots + 1];
+  if (b.presetSlots >= cap || !price) return context.reply({ content: `Preset slots maxed out (${cap}/${cap}).` });
+  const kry = b.kryptonite || 0;
+  if (kry < price) return context.reply({ content: `The next preset slot costs 🧪 ${price.toLocaleString()} Kryptonite — you have 🧪 ${kry.toLocaleString()}.` });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`battle_presetbuy_${userId}`).setLabel(`Unlock — 🧪 ${price.toLocaleString()}`).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`battle_presetcancel_${userId}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+  );
+  const sent = await context.reply({ embeds: [infoEmbed(uname(context),
+    `🎒 Unlock preset slot **${b.presetSlots + 1}/${cap}**?\n\n` +
+    `Slots: **${b.presetSlots}/${cap} → ${b.presetSlots + 1}/${cap}** · Price: **🧪 ${price.toLocaleString()}** · Kryptonite after: **${(kry - price).toLocaleString()}**\n\n` +
+    `_Auto-cancels in 60s._`)], components: [row], fetchReply: true });
+  armPresetBuyTimer(userId, sent); // 60s no-click expiry; any manual action clears it
+  return sent;
+}
+// `ky preset` panel · `save <n>` · `delete|del <n>` · `buy [slot]` · bare `<n>` = load
+async function handlePreset(context, userId, args) {
+  args = args || [];
+  if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
+  if (hasPendingChallenge(userId)) return context.reply({ content: 'You have a pending duel challenge — settle it first.' });
+  const bd = getBattle(userId);
+  if (!bd) return context.reply({ content: 'You are not registered.' });
+  const sub = String(args[0] || '').toLowerCase();
+  if (!sub) {
+    const { embed, components } = buildPresetPanel(bd.b, userId, 1, userId);
+    return context.reply({ embeds: [embed], components });
+  }
+  const username = uname(context, userId);
+  if (sub === 'save') {
+    const r = battle.presetSave(userId, args[1]);
+    return context.reply(r.ok ? { embeds: [resultEmbed(username, `💾 Preset **${r.slot}** saved — snapshot of all 5 equipment slots.`)] } : { content: r.reason });
+  }
+  if (sub === 'delete' || sub === 'del') {
+    const r = battle.presetDelete(userId, args[1]);
+    return context.reply(r.ok ? { embeds: [resultEmbed(username, `🗑️ Preset **${r.slot}** cleared.`)] } : { content: r.reason });
+  }
+  if (sub === 'buy') return handlePresetBuy(context, userId, bd); // 'slot' arg optional
+  const r = battle.presetLoad(userId, args[0]);
+  return context.reply(r.ok ? { embeds: [resultEmbed(username, `✅ Preset **${r.loaded}** loaded — all 5 equipment slots swapped instantly.`)] } : { content: r.reason });
+}
 const RARITY_RANK = { divine: 6, legendary: 5, epic: 4, rare: 3, uncommon: 2, common: 1 };
 const SHOP_PAGE_SIZE = 8;
 function shopGearRow(userId, page, total) {
@@ -1085,6 +1193,26 @@ async function handleButton(interaction) {
       `Gear is per-character — equip it with \`ky equip <code>\`.`)], components: [] });
   }
 
+  // battle_presetbuy_<userId> / battle_presetcancel_<userId> — paid preset-slot unlock confirm.
+  // BEFORE the generic owner check (mirrors battle_buyclass_): explicit executor check + 60s timer stale-guard.
+  if (customId.startsWith('battle_presetbuy_') || customId.startsWith('battle_presetcancel_')) {
+    const ownerId = customId.split('_')[2];
+    if (interaction.user.id !== ownerId) return interaction.reply({ content: "This isn't your purchase.", ephemeral: true });
+    if (!presetBuyTimers.has(ownerId)) return interaction.deferUpdate(); // panel expired (auto-cancelled) — ignore stale click
+    clearPresetBuyTimer(ownerId); // manual action reached first — stop the timer
+    if (customId.startsWith('battle_presetcancel_'))
+      return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'Cancelled — no Kryptonite spent.')], components: [] });
+    // Re-run guards at click time (state may have changed since the embed was posted)
+    if (pvp.isInFight(ownerId)) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'Finish your duel first (`ky end`).')], components: [] });
+    if (hasPendingChallenge(ownerId)) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'You have a pending duel challenge — settle it first.')], components: [] });
+    const res = battle.buyPresetSlot(ownerId); // manager re-checks: cap, kryptonite, run-lock
+    if (!res.ok) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), res.reason)], components: [] });
+    return interaction.update({ embeds: [resultEmbed(uname(interaction, ownerId),
+      `🎒 Preset slot unlocked — **${res.presetSlots}/${battle.PRESET_SLOTS_CAP}** slots now.\n` +
+      `Paid 🧪 ${res.price.toLocaleString()} · 🧪 left: **${res.kryptonite.toLocaleString()}**\n\n` +
+      `Save a build into it: \`ky preset save ${res.presetSlots}\`.`)], components: [] });
+  }
+
   // battle_charpage_<targetId>_<page> — handled BEFORE the generic owner check (last segment = page, not userId).
   if (customId.startsWith('battle_charpage_')) {
     const parts = customId.split('_'); // battle, charpage, targetId, page, viewerId
@@ -1194,6 +1322,15 @@ async function handleButton(interaction) {
     return interaction.update({ embeds: [embed], components });
   }
 
+  const presetPageMatch = customId.match(/^battle_presetpage_(\d+)_(\d+)$/);
+  if (presetPageMatch) {
+    // battle_presetpage_<page>_<userId> — the generic owner check above already locked the executor
+    const bd = getBattle(userId);
+    if (!bd) return interaction.reply({ content: 'Not registered.', ephemeral: true });
+    const { embed, components } = buildPresetPanel(bd.b, userId, parseInt(presetPageMatch[1], 10) || 1, userId);
+    return interaction.update({ embeds: [embed], components });
+  }
+
   return interaction.deferUpdate();
 }
 
@@ -1262,6 +1399,6 @@ async function handleSelectMenu(interaction) {
 module.exports = {
   attachSubcommands, handleButton, handleSelectMenu,
   handleBattle, handleBattleHelp, handleBattleLb, handleEnd, handleName, handleCharacter, handleBag, handleGear, handleSell, handleSellGear, handleBuyGear, handleEquip, handleUnequip, handleShopEquipment,
-  handlePvp, handleChangeClass, handleSwitchClass,
+  handlePvp, handleChangeClass, handleSwitchClass, handlePreset,
   getKryptonite,
 };
