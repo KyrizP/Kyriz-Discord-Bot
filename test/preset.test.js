@@ -122,5 +122,18 @@ b4.presetSlots = 4; b4.kryptonite = 100;
 ok(!BM.applyBuyPresetSlot(d4, 'U4').ok && b4.kryptonite === 100, 'saldo kurang: tolak tanpa potong');
 }
 
+
+// ---- bulk TEMPLATE purge (path 4 — closes final-review coverage gap) ----
+{
+  const dT = mkData('UT');
+  BM.ensureBattleData(dT.UT); BM.applyCreateCharacter(dT, 'UT', 'warrior');
+  const bT = BM.ensureBattleData(dT.UT);
+  bT.bag.g12 = 2; bT.bag.g13 = 1; // epic armor + epic boots spares
+  bT.presets[0] = { slots: { weapon: null, head: null, armor: 'g12', boots: 'g13', accessory: null } };
+  const rT = BM.applySellGear(dT, 'UT', 'epic', 'all');
+  ok(rT.ok && bT.presets[0].slots.armor === null && bT.presets[0].slots.boots === null, 'bulk template: preset refs purged');
+  ok(!bT.bag.g12 && !bT.bag.g13, 'bulk template: bag habis');
+}
+
 console.log('\n' + (fail === 0 ? '✅ OK' : '❌ FAIL') + ' — Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail ? 1 : 0);
