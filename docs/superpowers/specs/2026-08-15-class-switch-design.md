@@ -34,7 +34,7 @@ battle: {
 
 | Command | Efek | Biaya |
 |---|---|---|
-| `ky switch [class]` | **Satu command, auto-detect**: punya → tukar instan; belum punya → embed konfirmasi + tombol (🧪 5,000, bayar hanya setelah klik). Tanpa argumen → daftar karakter. *(rev 2026-08-15: menggantikan pasangan changeclass/switchclass — keduanya jadi alias tersembunyi)* | Gratis / 5,000 🧪 saat create |
+| `ky switch [class]` | **Satu command, auto-detect**: punya → tukar instan; belum punya → embed konfirmasi + tombol (🧪 5,000, bayar hanya setelah klik). Tanpa argumen → usage hint saja (daftar karakter ada di `ky char`). *(rev 2026-08-15: menggantikan pasangan changeclass/switchclass — keduanya jadi alias tersembunyi)* | Gratis / 5,000 🧪 saat create |
 | `ky unequip all` | Lepas 5 slot karakter aktif sekaligus (g-item → bag dengan count benar, ky-item tetap di koleksi; guard & lock sama dengan unequip single) | Gratis |
 | `ky char [page\|class]` | Panel karakter, **default = karakter aktif** | — |
 
@@ -68,6 +68,12 @@ Registrasi pertama (`ky battle` → pilih class) tetap pakai flow lama → juga 
 | G12 | Argumen ngawur (`ky switchclass mage` padahal cuma punya warrior) | Tolak dengan daftar karakter yang dimiliki |
 
 ---
+
+
+### charName safety (rev 2026-08-15)
+- Rename hanya menyentuh karakter AKTIF.
+- Charset ketat `/^[\w\s\-']{1,20}$/` (koma/titik/tilde/backtick/emoji/markdown semua ditolak).
+- **Denylist impersonasi**: kata reserved (admin/superadmin/owner/mod/staff/kyriz/system/bot dll., case-insensitive) + tidak boleh sama dengan username Discord pemain mana pun.
 
 ## 4. Data Migration (lazy, backwards compatible)
 

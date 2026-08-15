@@ -627,7 +627,7 @@ function handleSwitchClass(context, userId, args) {
   if (!cls) {
     return context.reply({ content: 'Usage: `ky switch <warrior|mage>` — free swap to a character you own (a class you don\'t own yet offers creation, 🧪 5,000). See `ky char` for your characters.' });
   }
-  if (!CLASSES[cls]) {
+  if (!Object.hasOwn(CLASSES, cls)) { // hasOwn: inherited keys ('constructor') must not pass
     const bd = getBattle(userId);
     return context.reply({ content: 'Invalid class. You own: ' + (bd && bd.b.characters ? Object.keys(bd.b.characters).join(', ') : 'none') + '.' });
   }
@@ -651,7 +651,8 @@ function handleSwitchClass(context, userId, args) {
   }
   const res = battle.switchClass(userId, cls);
   if (!res.ok) return context.reply({ content: res.reason });
-  const c = battle.getActiveChar(bd.b);
+  const bAfter = getBattle(userId); // RE-READ: bd is a pre-switch snapshot — displaying from it would show the OLD char
+  const c = bAfter ? battle.getActiveChar(bAfter.b) : null;
   const cd = CLASSES[res.switchedTo];
   return context.reply({ embeds: [resultEmbed(uname(context, userId),
     `🔄 Switched to **${cd.emoji} ${cd.name}** — Lv.${c ? c.charLevel : '?'} · 🏰 Best depth **${c ? c.bestDepth : 0}**.\n\n` +
