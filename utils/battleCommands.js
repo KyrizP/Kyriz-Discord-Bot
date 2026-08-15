@@ -20,10 +20,10 @@ const BAG_PAGE_SIZE = 8;
 const COLOR = 0x9b59b6;
 const PVP_COLOR = 0x5865F2;
 const PVP_TURN_CAP = pvp.TURN_CAP;
-const uname = (ctx, userId) => {
-  const dn = ctx.user?.username || ctx.author?.username || 'Player';
-  if (userId) { const cn = battle.getCharName(userId); if (cn) return cn; } // charName overrides discord username
-  return dn;
+const uname = (ctx) => {
+  // Panel headers ("X's battle/gear/bag…") always show the DISCORD username —
+  // charName lives in PvP panels + the ky char sheet only (owner preference).
+  return ctx?.user?.username || ctx?.author?.username || 'Player';
 };
 const BATTLE_IDLE_MS = 120000; // auto-extract after this many ms idle (tunable)
 
