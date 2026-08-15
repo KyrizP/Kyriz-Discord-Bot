@@ -131,7 +131,9 @@ function applySwitchClass(data, userId, classId) {
   if (!data[userId]) return { ok: false, reason: 'You are not registered.' };
   const b = ensureBattleData(data[userId]);
   if (!classId) return { ok: false, reason: 'Which character? `ky switchclass <class>`. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
-  if (!b.characters || !b.characters[classId]) return { ok: false, reason: 'You do not have that character yet. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
+  // hasOwn x2: inherited keys ('constructor'/'__proto__') must NOT count as owned —
+  // truthy lookup would pass the guard and point activeClass at Object.prototype (proto pollution).
+  if (!Object.hasOwn(CLASSES, classId) || !b.characters || !Object.hasOwn(b.characters, classId)) return { ok: false, reason: 'You do not have that character yet. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
   if (b.activeClass === classId) return { ok: false, reason: 'That character is already active.' };
   b.activeClass = classId;
   return { ok: true, switchedTo: classId };
