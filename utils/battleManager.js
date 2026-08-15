@@ -17,6 +17,7 @@ const { isSuperAdmin } = economy;
 const unique = require('./uniqueItems');
 
 const ENTRY_FEE = 5000;
+const PRESET_SLOTS_FREE = 2, PRESET_SLOTS_CAP = 5, PRESET_SLOT_PRICE = 2000; // preset gear slots (P3)
 const CHAR_CHANGE_COST = 5000; // 🧪 per NEW character (D1)
 const SWEEP_BUFFER = 5;          // sweep resolves floors 1..(bestDepth - SWEEP_BUFFER) instantly
 const GEAR_SELLBACK = 0.35;      // sell-back gear at 35% (all tiers, v1.1)
@@ -72,6 +73,8 @@ function ensureBattleData(user) {
   if (b.kryptonite == null) b.kryptonite = 0; // defensive: hand-corrupted battle objects must not go NaN on first sell
   if (b.pvpWins == null) b.pvpWins = 0;
   if (b.pvpLosses == null) b.pvpLosses = 0;
+  if (!Array.isArray(b.presets)) b.presets = [];
+  if (b.presetSlots == null) b.presetSlots = PRESET_SLOTS_FREE;
   // v1.6 lazy migration: flat single-char -> characters map (idempotent, proven v1.1 pattern)
   if (b.charClass && !b.characters) {
     b.characters = {};
@@ -325,6 +328,29 @@ function applyUnequipAll(data, userId) {
   return { ok: true, count: removed.length, items: removed };
 }
 
+// ---------- preset gear slots (P3/P4/P6): save/delete snapshots of equipment BY SLOT NUMBER ----------
+function presetSlotNum(n) { const v = parseInt(n, 10); return Number.isInteger(v) ? v : NaN; }
+function presetSlotValid(b, n) { return Number.isInteger(n) && n >= 1 && n <= b.presetSlots; }
+
+function applyPresetSave(data, userId, n) {
+  const b = ensureBattleData(data[userId]);
+  const c = getActiveChar(b);
+  if (!c) return { ok: false, reason: 'Create a character first (`ky battle`).' };
+  const num = presetSlotNum(n);
+  if (!presetSlotValid(b, num)) return { ok: false, reason: 'You only have ' + b.presetSlots + ' preset slot' + (b.presetSlots > 1 ? 's' : '') + '.' };
+  b.presets[num - 1] = { slots: { ...c.equipment } }; // P4: overwrite by design
+  return { ok: true, slot: num };
+}
+
+function applyPresetDelete(data, userId, n) {
+  const b = ensureBattleData(data[userId]);
+  const num = presetSlotNum(n);
+  if (!presetSlotValid(b, num)) return { ok: false, reason: 'You only have ' + b.presetSlots + ' preset slot' + (b.presetSlots > 1 ? 's' : '') + '.' };
+  if (!b.presets[num - 1]) return { ok: false, reason: 'Slot ' + num + ' is already empty.' };
+  b.presets[num - 1] = null;
+  return { ok: true, slot: num };
+}
+
 // Set character display name (shown in ky char/battle/gear/bag). Validated.
 // Anti-impersonation: reserved authority words + no copying ANY player's Discord username.
 const RESERVED_CHAR_NAMES = ['admin', 'superadmin', 'super admin', 'owner', 'mod', 'moderator', 'staff', 'support', 'dev', 'developer', 'kyriz', 'system', 'bot'];
@@ -540,6 +566,20 @@ function buyUnique(userId, tier, slot, variant) {
   if (r.ok) economy.writeEconomy(data);
   return r;
 }
+function presetSave(userId, n) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
+  const data = economy.readEconomy(); ensureUser(data, userId);
+  const r = applyPresetSave(data, userId, n);
+  if (r.ok) economy.writeEconomy(data);
+  return r;
+}
+function presetDelete(userId, n) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
+  const data = economy.readEconomy(); ensureUser(data, userId);
+  const r = applyPresetDelete(data, userId, n);
+  if (r.ok) economy.writeEconomy(data);
+  return r;
+}
 function changeClass(userId, classId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' }; // G1
   const data = economy.readEconomy();
@@ -636,7 +676,8 @@ function recordPvp(winnerId, loserId) {
 module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
   applySell, applySellGear, applyEquip, applyUnequip, applyUnequipAll, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
-  applyChangeClass, applySwitchClass,
+  applyChangeClass, applySwitchClass, applyPresetSave, applyPresetDelete,
+  presetSave, presetDelete, PRESET_SLOTS_FREE, PRESET_SLOTS_CAP, PRESET_SLOT_PRICE,
   migrateAllBattleData, createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
   sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, changeClass, switchClass, setCharName, getCharName, getBattleLeaderboard, getBattleLeaderboardFor, recordPvp,
   createCharacterRecord, getActiveChar, getCharClass, isEquippedOnAnyChar, EQUIP_SLOTS,
