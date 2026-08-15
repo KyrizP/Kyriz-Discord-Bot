@@ -132,8 +132,11 @@ function registerUser(userId, username) {
  */
 function getUser(userId) {
   if (isSuperAdmin(userId)) {
+    // Bypass perks stay hardcoded (Infinity etc.), but the NAME must come from the
+    // real entry — a hardcoded 'Superadmin' leaked into every admin-inspect panel.
+    const entry = readJSON(ECONOMY_PATH)[userId];
     return {
-      username: 'Superadmin',
+      username: (entry && entry.username) || 'Superadmin',
       balance: Infinity,
       level: '?',
       xp: '?',
@@ -143,6 +146,7 @@ function getUser(userId) {
       totalEarned: 0,
       totalLost: 0,
       lastDaily: null,
+      registeredAt: (entry && entry.registeredAt) || null,
       isSuperAdmin: true,
     };
   }
@@ -156,10 +160,19 @@ function getUser(userId) {
  */
 function updateUsername(userId, username) {
   const data = readJSON(ECONOMY_PATH);
-  if (data[userId]) {
-    data[userId].username = username;
+  if (!data[userId]) {
+    // Superadmin bypasses T&C registration, so their entry may only exist via the
+    // battle auto-create placeholder ('Superadmin'). Create it here with the REAL
+    // username instead — kills the placeholder at its source. Regular users are
+    // created by registerUser; never here.
+    if (!isSuperAdmin(userId)) return;
+    data[userId] = { username, balance: 0, level: 1, xp: 0, xpNeeded: 400, totalWins: 0, totalLosses: 0,
+      totalEarned: 0, totalLost: 0, lastDaily: null, registeredAt: new Date().toISOString() };
     writeJSON(ECONOMY_PATH, data);
+    return;
   }
+  data[userId].username = username;
+  writeJSON(ECONOMY_PATH, data);
 }
 
 // ============================================================

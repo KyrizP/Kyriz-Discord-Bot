@@ -222,6 +222,16 @@ ok(BM.applySetCharName(dN, 'UN', 'Valid Name-1').ok, 'nama wajar lolos');
 BM.applyChangeClass(dN, 'UN', 'mage');
 ok(dN.UN.battle.characters.warrior.charName === 'Valid Name-1' && dN.UN.battle.characters.mage.charName === null, 'nama per-karakter terisolasi');
 
+
+// ---- superadmin display name: getUser pakai nama entry asli (bukan placeholder) ----
+{
+  process.env.SUPERADMIN_ID = '999888777666555444';
+  const eco = require('../utils/economyManager');
+  const dSA = mkData('999888777666555444'); dSA['999888777666555444'].username = 'rizdevs';
+  ok(eco.getUser('999888777666555444') && true, 'getUser superadmin: jalan');
+  delete process.env.SUPERADMIN_ID;
+}
+
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail === 0 ? 0 : 1);
