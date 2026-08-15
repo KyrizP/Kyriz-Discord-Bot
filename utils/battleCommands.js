@@ -524,8 +524,8 @@ const SLOT_EMOJI = { weapon: '⚔️', head: '🪖', armor: '🛡️', boots: '�
 function gearRow(targetId, page, total, viewerId, slotFilter) {
   // customId: battle_gear_(next|prev)_<page>_<targetId>_<viewerId>_<slot> — viewer = executor, slot = active filter
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`battle_gear_prev_${page}_${targetId}_${viewerId}_${slotFilter || 'all'}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
-    new ButtonBuilder().setCustomId(`battle_gear_next_${page}_${targetId}_${viewerId}_${slotFilter || 'all'}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
+    new ButtonBuilder().setCustomId(`battle_gear_prev_${page}_${targetId}_${slotFilter || 'all'}_${viewerId}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`battle_gear_next_${page}_${targetId}_${slotFilter || 'all'}_${viewerId}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
   );
 }
 // Slot filter dropdown — executor-locked (viewerId = whoever ran `ky gear`)
@@ -1314,12 +1314,12 @@ async function handleButton(interaction) {
     return interaction.update({ embeds: [embed], components });
   }
 
-  const gearMatch = customId.match(/^battle_gear_(next|prev)_(\d+)_(\d+)_(\d+)_(all|weapon|head|armor|boots|accessory)$/);
+  const gearMatch = customId.match(/^battle_gear_(next|prev)_(\d+)_(\d+)_(all|weapon|head|armor|boots|accessory)_(\d+)$/);
   if (gearMatch) {
     let page = parseInt(gearMatch[2], 10);
     page = gearMatch[1] === 'next' ? page + 1 : page - 1;
-    const targetId = gearMatch[3]; // viewer == userId from the generic owner check above
-    const slotFilter = gearMatch[5];
+    const targetId = gearMatch[3];
+    const slotFilter = gearMatch[4];
     const targetName = (economy.getUser(targetId) || {}).username || targetId;
     const { embed, components } = renderGearList(targetId, targetName, page, userId, slotFilter);
     return interaction.update({ embeds: [embed], components });
