@@ -227,7 +227,7 @@ function handleBattleHelp(context) {
       '🎮 **COMMANDS**\n' +
       '`ky battle` — enter dungeon (**5,000 💎** entry). First time: pick a class.\n' +
       '`ky char` — view stats, gear, 🧪, best depth · `ky char name <nama>` — set name\n' +
-      '`ky switch [class]` — swap character (free) · unowned class? offers creation (**🧪 5,000**)\n' +
+      '`ky switch <class>` — swap character (free) · unowned class? offers creation (**🧪 5,000**)\n' +
       '`ky bag` — your drops (sellable) · `ky gear` — your equipment\n\n' +
       '🎭 **MULTIPLE CHARACTERS**\n' +
       '`ky switch <class>` is your one command: owned classes swap instantly **free**; a class you do not own yet offers creation at **🧪 5,000** (starts **Lv.1**, confirm button — no accidental spend). Gear is **per-character** (each keeps its own equipment, level and best depth), but your 🧪 Kryptonite, drops bag and unique collection are **shared**. `ky char` pages through all your characters — click ◀ ▶ or `ky char <class>`. An item can only be equipped on ONE character at a time.\n\n' +
@@ -617,12 +617,7 @@ function hasPendingChallenge(userId) {
   }
   return false;
 }
-function ownedCharsLine(b) {
-  const owned = Object.keys((b && b.characters) || {});
-  if (!owned.length) return 'none yet';
-  return owned.map((k) => `${CLASSES[k] ? `${CLASSES[k].emoji} ${CLASSES[k].name}` : k} — Lv.${b.characters[k].charLevel}${k === b.activeClass ? ' **(active)**' : ''}`).join('\n');
-}
-// `ky switch [class]` — ONE command, auto-detect:
+// `ky switch <class>` — ONE command, auto-detect:
 //   owned class  -> instant free swap
 //   unowned      -> confirmation embed+button (🧪 CHAR_CHANGE_COST) — money NEVER moves without the click
 //   no arg       -> list characters + which is active
@@ -630,12 +625,7 @@ function handleSwitchClass(context, userId, args) {
   args = args || [];
   const cls = String(args[0] || '').toLowerCase();
   if (!cls) {
-    const bd = getBattle(userId);
-    if (!bd || !battle.getActiveChar(bd.b)) return context.reply({ content: 'You have no character yet. Create one with `ky battle`.' });
-    return context.reply({ embeds: [infoEmbed(uname(context, userId),
-      `🔄 **Switch Character** — swap your active character (free).\n\n` +
-      `Your characters:\n${ownedCharsLine(bd.b)}\n\n` +
-      `Usage: \`ky switch <class>\` — a class you don't own yet offers creation (🧪 ${battle.CHAR_CHANGE_COST.toLocaleString()}).`)] });
+    return context.reply({ content: 'Usage: `ky switch <warrior|mage>` — free swap to a character you own (a class you don\'t own yet offers creation, 🧪 5,000). See `ky char` for your characters.' });
   }
   if (!CLASSES[cls]) {
     const bd = getBattle(userId);

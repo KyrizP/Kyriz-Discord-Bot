@@ -325,6 +325,8 @@ function applyUnequipAll(data, userId) {
 }
 
 // Set character display name (shown in ky char/battle/gear/bag). Validated.
+// Anti-impersonation: reserved authority words + no copying ANY player's Discord username.
+const RESERVED_CHAR_NAMES = ['admin', 'superadmin', 'super admin', 'owner', 'mod', 'moderator', 'staff', 'support', 'dev', 'developer', 'kyriz', 'system', 'bot'];
 function applySetCharName(data, userId, name) {
   const u = ensureUser(data, userId);
   if (!u) return { ok: false, reason: 'Not registered.' };
@@ -335,6 +337,11 @@ function applySetCharName(data, userId, name) {
   if (!name) return { ok: false, reason: 'Name cannot be empty. Usage: `ky name <name>`' };
   if (name.length > 20) return { ok: false, reason: 'Name too long (max 20 chars).' };
   if (!/^[\w\s\-']{1,20}$/.test(name)) return { ok: false, reason: 'Invalid characters. Use letters, numbers, spaces, -, _.' };
+  const lower = name.toLowerCase();
+  if (RESERVED_CHAR_NAMES.includes(lower)) return { ok: false, reason: 'That name is reserved.' };
+  for (const other of Object.values(data)) {
+    if (other && other.username && other.username.toLowerCase() === lower) return { ok: false, reason: 'That name is taken by an existing player.' };
+  }
   c.charName = name;
   return { ok: true, name };
 }

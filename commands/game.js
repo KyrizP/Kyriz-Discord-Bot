@@ -4456,7 +4456,7 @@ function createHelpEmbed() {
       '🃏 **Games**\n' +
       '`bj [bet]` · `cf [bet] [h/t]` · `slots [bet]` · `dice [bet] [1-6/e/o]` · `crash [bet]` · `rl [bet] [red/black/0-36]` · `mines [bet]` · `hl [bet]` · `tw [bet]`\n\n' +
       '⚔️ **Battle** _— Kryptonite RPG_\n' +
-      '`battle [@user]` · `battle help` · `char [name <nama>|page]` · `switch [class]` · `bag` · `gear [id]` · `sell [all|code n]` · `buygear <code>` · `equip <id>` · `unequip <slot>` · `sellgear <id> | <rarity> all` · `shop gear [tier|rates]` · `lb battle [all]`\n\n' +
+      '`battle [@user]` · `battle help` · `char [name <nama>|page]` · `switch <class>` · `bag` · `gear [id]` · `sell [all|code n]` · `buygear <code>` · `equip <id>` · `unequip <slot>` · `sellgear <id> | <rarity> all` · `shop gear [tier|rates]` · `lb battle [all]`\n\n' +
       '💰 **Economy**\n' +
       '`wallet` · `daily` · `tf @user <amt>` · `lb [all]`\n\n' +
       '🛍️ **Shop**\n' +

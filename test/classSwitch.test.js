@@ -209,6 +209,19 @@ ok(lbW.length === 2 && lbW[0].userId === 'P1' && lbW[0].bestDepth === 80, 'LB wa
 const lbM = BM.getBattleLeaderboardFor(dataL, 10, 'mage');
 ok(lbM[0].userId === 'P2' && lbM[0].bestDepth === 90, 'LB mage: P2 top');
 
+
+// ---- charName safety: reserved words, username collision, per-char rename ----
+const dN = mkData('UN'); dN.UN.username = 'rizdevs';
+BM.ensureBattleData(dN.UN); BM.applyCreateCharacter(dN, 'UN', 'warrior');
+dN.UN.battle.kryptonite = 6000;
+ok(!BM.applySetCharName(dN, 'UN', 'super admin').ok, 'nama reserved: super admin ditolak');
+ok(!BM.applySetCharName(dN, 'UN', 'ADMIN').ok, 'nama reserved: case-insensitive ditolak');
+ok(!BM.applySetCharName(dN, 'UN', 'RizDevs').ok, 'nama collision: username pemain lain ditolak');
+ok(!BM.applySetCharName(dN, 'UN', 'dot.name').ok && !BM.applySetCharName(dN, 'UN', 'tilde~').ok, 'simbol berbahaya ditolak');
+ok(BM.applySetCharName(dN, 'UN', 'Valid Name-1').ok, 'nama wajar lolos');
+BM.applyChangeClass(dN, 'UN', 'mage');
+ok(dN.UN.battle.characters.warrior.charName === 'Valid Name-1' && dN.UN.battle.characters.mage.charName === null, 'nama per-karakter terisolasi');
+
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail === 0 ? 0 : 1);
