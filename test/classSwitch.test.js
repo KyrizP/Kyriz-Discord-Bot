@@ -246,6 +246,20 @@ ok(dN.UN.battle.characters.warrior.charName === 'Valid Name-1' && dN.UN.battle.c
   ok(BM.applySellGear(dI, 'UI', 'i', 'all').ok === false, 'bulk "i all": tidak dikenali (aman)');
 }
 
+
+// ---- OLD-DATA COMPAT: pemain flat terlihat di LB & getCharName TANPA migrasi tersimpan ----
+{
+  const mkFlat = (uid, cls, depth, name) => [uid, { username: 'p' + uid[0], balance: 0, xp: 0, xpNeeded: 400, level: 1, totalWins: 0, totalLosses: 0, totalEarned: 0, totalLost: 0, lastDaily: null, registeredAt: '2026-01-01',
+    battle: { kryptonite: 10, charClass: cls, charLevel: 100, charExp: 0, charExpNeeded: 100, charName: name, bestDepth: depth, scoreAchievedAt: null,
+      equipment: { weapon: null, head: null, armor: null, boots: null, accessory: null }, bag: {}, uniqueItems: {}, pvpWins: 0, pvpLosses: 0 } }];
+  const dOld = Object.fromEntries([mkFlat('909090909090909090', 'mage', 50, 'OldMage'), mkFlat('909090909090909091', 'warrior', 70, 'OldWar')]);
+  const lbOld = BM.getBattleLeaderboardFor(dOld, 10, null);
+  ok(lbOld.length === 2 && lbOld[0].charName === 'OldWar' && lbOld[0].bestDepth === 70 && lbOld[0].charClass === 'warrior', 'OLD-DATA: LB menampilkan pemain flat utuh (nama/depth/class)');
+  const lbOldC = BM.getBattleLeaderboardFor(dOld, 10, 'mage');
+  ok(lbOldC.length === 1 && lbOldC[0].bestDepth === 50, 'OLD-DATA: filter per-class jalan');
+  ok(dOld['909090909090909090'].battle.charClass === 'mage', 'OLD-DATA: read path tidak menulis (file/data tak tersentuh)');
+}
+
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
 process.exit(fail === 0 ? 0 : 1);
