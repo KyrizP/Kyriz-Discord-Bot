@@ -10,7 +10,7 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const battle = require('./battleManager');
 const economy = require('./economyManager');
-const { CLASSES, GEAR, DROPS, TIER_INFO, PASSIVES, LEGEND_GEAR_RANGES, MYSTERY_BOXES } = require('./battleConfig');
+const { CLASSES, GEAR, DROPS, TIER_INFO, PASSIVES, LEGEND_GEAR_RANGES, MYSTERY_BOXES, CRIT } = require('./battleConfig');
 const { computeStats } = require('./battleEngine');
 const unique = require('./uniqueItems');
 const pvp = require('./pvpManager');
@@ -794,7 +794,7 @@ function renderGearRates(username) {
   }
   desc += '```\n';
   desc += `Legend: 1 passive · Mythic: 1 passive · Divine: **2 passives** (different types)\n`;
-  desc += `Stacking caps: Berserker 100% · Lifesteal 80% · Fortify 80% · Evasion 40% · Crit 50%\n`;
+  desc += `Stacking caps: Berserker 100% · Precision (crit) ${Math.round(CRIT.cap * 100)}% · Lifesteal 65% · Fortify 45% · Evasion 40%\n`;
   desc += `_Sell back at 35% + rebuy to reroll!_`;
   return new EmbedBuilder().setAuthor({ name: `${username}` }).setColor(COLOR)
     .setTitle('🎰 Mystery Box Rates & Ranges').setDescription(desc)

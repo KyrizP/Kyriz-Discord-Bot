@@ -176,7 +176,7 @@ const CRIT = { mult: 1.75, cap: 0.50, enemyFloor: 45, enemyChance: 0.20 };
 // (5× Lifesteal = 100% invulnerability, 5× Fortify = 110% → negative dmg, etc.).
 // Swift/Greed/Wisdom uncapped (flat/utility, diminishing returns naturally).
 // v1.2 nerfs: Fortify 80→45 (was 100-0 PvP), Lifesteal 80→65. Evasion stays 40 (ult pierce is enough counter).
-const PASSIVE_CAPS = { berserker: 100, lifesteal: 65, fortify: 45, evasion: 40 };
+const PASSIVE_CAPS = { berserker: 100, precision: Math.round(CRIT.cap * 100), lifesteal: 65, fortify: 45, evasion: 40 }; // precision capped here TOO so the panel can show (MAX) — combat already capped it via getCritChance (keep in sync with CRIT.cap)
 
 module.exports = { CLASSES, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, GEAR, MERCHANT_FLAT,
   TIER_INFO, LEGEND_GEAR_RANGES, MYSTERY_BOXES, PASSIVES, PASSIVE_CAPS, CRIT };
