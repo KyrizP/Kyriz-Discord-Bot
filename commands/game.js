@@ -776,24 +776,47 @@ async function handleBansos(message, userId, args) {
 // (replaces it) instead of spamming a new one each patch.
 // ============================================================
 
-function buildPatchEmbed() {
+// Patch view: ONE version per page, NEWEST on page 1, ◀▶ pagination (executor-locked).
+// Long entries still split across consecutive fields (Discord field value cap 1024).
+function buildPatchPage(page, userId) {
   const versions = botState.state.patch.versions || [];
+  const total = versions.length;
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('📜 Kyriz | Patch Notes')
     .setTimestamp();
-  if (!versions.length) {
+  if (!total) {
     embed.setDescription('No patch notes yet. Stay tuned!');
-    return embed;
+    return { embeds: [embed], components: [] };
   }
-  for (const v of versions.slice(-5).reverse()) { // latest first, max 5 entries
-    embed.addFields({ name: `${v.title || 'v' + v.version} — ${v.date}`, value: v.lines.join('\n') });
+  page = Math.min(Math.max(1, page || 1), total); // clamp defensively (stale buttons)
+  const v = versions.slice().reverse()[page - 1]; // newest first
+  const name = `${v.title || 'v' + v.version} — ${v.date}`;
+  const FIELD_MAX = 1024, EMBED_BUDGET = 5800; // headroom for title + footer + overhead
+  let used = 300;
+  const chunks = [];
+  let cur = '';
+  for (const line of v.lines) {
+    const l = line.length > FIELD_MAX ? line.slice(0, FIELD_MAX - 1) + '…' : line; // monster-line guard
+    if ((cur ? cur + '\n' + l : l).length > FIELD_MAX) { chunks.push(cur); cur = l; }
+    else cur = cur ? cur + '\n' + l : l;
   }
-  return embed;
+  if (cur) chunks.push(cur);
+  chunks.forEach((c, i) => {
+    if (used + name.length + c.length > EMBED_BUDGET) return; // never exceed the embed total
+    used += name.length + c.length;
+    embed.addFields({ name: i === 0 ? name : '⠀', value: c }); // U+2800 = blank continuation header
+  });
+  embed.setFooter({ text: `Page ${page}/${total} • ky patch` });
+  const components = total > 1 ? [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`patch:page:${userId}:${page - 1}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`patch:page:${userId}:${page + 1}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
+  )] : [];
+  return { embeds: [embed], components };
 }
 
 async function handlePatch(message) {
-  return message.reply({ embeds: [buildPatchEmbed()] });
+  return message.reply(buildPatchPage(1, message.author.id));
 }
 
 async function handlePatchAdmin(message, args) {
@@ -3594,6 +3617,17 @@ async function handleButton(interaction) {
   // rounds can still finish).
   if ((customId.startsWith('shop:page:') || customId.startsWith('shop:buy:')) && maintenanceMode.active && !isSuperAdmin(interaction.user.id) && !isAdmin(interaction.user.id)) {
     return interaction.reply({ content: `🛠️ ${maintenanceMode.message}`, ephemeral: true });
+  }
+
+  // --- Patch notes pagination (invoker-only; page 1 = newest version) ---
+  if (customId.startsWith('patch:page:')) {
+    const parts = customId.split(':'); // ['patch','page',userId,pageNum]
+    if (interaction.user.id !== parts[2]) {
+      return interaction.reply({ content: "This isn't your patch view — use `ky patch` to open your own.", ephemeral: true });
+    }
+    let page = Number(parts[3]);
+    if (!Number.isInteger(page)) page = 1;
+    return interaction.update(buildPatchPage(page, parts[2]));
   }
 
   // --- Shop pagination (invoker-only) ---
