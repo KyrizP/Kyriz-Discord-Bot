@@ -765,7 +765,9 @@ function buildPresetPanel(b, userId, page, viewerId) {
   } else {
     const gearLines = GEAR_SLOTS.map((slot) => `**${slot}:** ${formatGearLine(preset.slots && preset.slots[slot], b)}`).join('\n');
     const passSum = getPassives(preset.slots, b.uniqueItems || {});
-    const passRaw = getPassivesRaw(preset.slots, b.uniqueItems || {});
+    const { getPassivesRaw: gpr } = require('./battleEngine');
+    const CAPS = require('./battleConfig').PASSIVE_CAPS;
+    const passRaw = gpr(preset.slots, b.uniqueItems || {});
     const passLine = Object.entries(passSum)
       .filter(([id, v]) => v > 0 && PASSIVES[id])
       .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(MAX)*' : ''}`)
