@@ -160,6 +160,14 @@ let threw = false; let rC = null;
 try { rC = BM.applySwitchClass(dC, 'CB', 'warrior'); } catch { threw = true; }
 ok(!threw && rC !== null && rC.ok === false, 'switchclass classless: no throw, not ok');
 
+// ---- B1 twin: changeclass pemain tanpa karakter (characters belum ada) tidak crash ----
+const dCc = mkData('CD');
+BM.ensureBattleData(dCc.CD);
+let threwC = false; let rCc = null;
+try { rCc = BM.applyChangeClass(dCc, 'CD', 'mage'); } catch { threwC = true; }
+ok(!threwC && rCc !== null && rCc.ok === false, 'changeclass classless: no throw, not ok');
+ok(rCc && /Create a character first/.test(rCc.reason), "changeclass classless: reason 'Create a character first'");
+
 // ---- B3: inherited key ('constructor') ditolak sebagai class invalid ----
 const dI = mkData('UX');
 BM.ensureBattleData(dI.UX); BM.applyCreateCharacter(dI, 'UX', 'warrior');

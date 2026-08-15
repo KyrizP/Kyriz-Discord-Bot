@@ -117,7 +117,7 @@ function applyChangeClass(data, userId, classId) {
   if (!u) return { ok: false, reason: 'You are not registered.' };
   const b = ensureBattleData(u);
   if (!Object.hasOwn(CLASSES, classId)) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
-  if (b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switchclass ' + classId + '` (free).' };
+  if (b.characters && b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switchclass ' + classId + '` (free).' };
   if (!getActiveChar(b)) return { ok: false, reason: 'Create a character first (`ky battle`).' };
   if ((b.kryptonite || 0) < CHAR_CHANGE_COST) return { ok: false, reason: 'Creating a new character costs 🧪 ' + CHAR_CHANGE_COST.toLocaleString() + ' Kryptonite.' };
   b.kryptonite -= CHAR_CHANGE_COST;                 // G9: check-then-deduct in ONE apply (single write in wrapper)
