@@ -650,7 +650,8 @@ function handleSwitchClass(context, userId, args) {
   if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
   if (hasPendingChallenge(userId)) return context.reply({ content: 'You have a pending duel challenge — settle it first.' });
   const bd = getBattle(userId);
-  const owned = bd && bd.b.characters && bd.b.characters[cls];
+  if (!bd || !battle.getActiveChar(bd.b)) return context.reply({ content: 'Create a character first (`ky battle`).' }); // switch needs >=1 char — don't offer creation to a classless player
+  const owned = bd.b.characters && bd.b.characters[cls];
   if (!owned) {
     // Unowned -> paid creation, gated behind an explicit confirm button.
     const price = battle.CHAR_CHANGE_COST;
