@@ -19,32 +19,45 @@ const unique = require('./uniqueItems');
 const ENTRY_FEE = 5000;
 const SWEEP_BUFFER = 5;          // sweep resolves floors 1..(bestDepth - SWEEP_BUFFER) instantly
 const GEAR_SELLBACK = 0.35;      // sell-back gear at 35% (all tiers, v1.1)
-const CHAR_EXP_BASE = 100;
+const CHAR_EXP_BASE = 200;
 const charExpFor = (f) => 8 + Math.floor(f * 1.5);   // char exp per floor cleared (tunable)
 const PROFILE_XP_EXTRACT = 50; // fixed profile XP on successful extract
 const PROFILE_XP_DIE = 20; // fixed profile XP on death (consolation)
 
 // ---------- ensure battle data (nested under user.battle — max isolation) ----------
+const EQUIP_SLOTS = () => ({ weapon: null, head: null, armor: null, boots: null, accessory: null });
+// Single constructor for EVERY new character (first registration AND changeclass).
+// One code path = a fresh char can never inherit level/depth from anywhere (spec D3/G10).
+function createCharacterRecord() {
+  return { charLevel: 1, charExp: 0, charExpNeeded: CHAR_EXP_BASE, charName: null,
+           bestDepth: 0, equipment: EQUIP_SLOTS(), scoreAchievedAt: null };
+}
+function getActiveChar(b) { return (b.characters && b.characters[b.activeClass]) || null; }
+function getCharClass(b) { return b.activeClass || null; }
+
 function ensureBattleData(user) {
   if (!user.battle) {
-    user.battle = {
-      kryptonite: 0,
-      charLevel: 1, charExp: 0, charExpNeeded: CHAR_EXP_BASE,
-      charClass: null,
-      charName: null,
-      scoreAchievedAt: null,
-      equipment: { weapon: null, head: null, armor: null, boots: null, accessory: null },
-      bag: {}, uniqueItems: {},
-      bestDepth: 0, pvpWins: 0, pvpLosses: 0,
-    };
+    // Root `equipment` = pre-class skeleton (legacy v1.1 shape, consumed by migration).
+    // `characters` stays LAZY — created only when a character exists (classless players carry none).
+    user.battle = { kryptonite: 0, activeClass: null, equipment: EQUIP_SLOTS(), bag: {}, uniqueItems: {}, pvpWins: 0, pvpLosses: 0 };
   }
-  // backfill v1.1 fields for existing users (lazy migration)
   const b = user.battle;
   if (!b.uniqueItems) b.uniqueItems = {};
-  if (!b.equipment || !b.equipment.accessory) b.equipment = Object.assign({ weapon: null, head: null, armor: null, boots: null, accessory: null }, b.equipment || {});
-  if (b.bestDepth == null) b.bestDepth = 0;
+  if (!b.bag) b.bag = {};
   if (b.pvpWins == null) b.pvpWins = 0;
   if (b.pvpLosses == null) b.pvpLosses = 0;
+  // v1.6 lazy migration: flat single-char -> characters map (idempotent, proven v1.1 pattern)
+  if (b.charClass && !b.characters) {
+    b.characters = {};
+    b.characters[b.charClass] = {
+      charLevel: b.charLevel || 1, charExp: b.charExp || 0, charExpNeeded: b.charExpNeeded || CHAR_EXP_BASE,
+      charName: b.charName || null, bestDepth: b.bestDepth || 0,
+      equipment: Object.assign(EQUIP_SLOTS(), b.equipment || {}), scoreAchievedAt: b.scoreAchievedAt || null,
+    };
+    b.activeClass = b.charClass;
+    delete b.charClass; delete b.charLevel; delete b.charExp; delete b.charExpNeeded;
+    delete b.charName; delete b.bestDepth; delete b.equipment; delete b.scoreAchievedAt;
+  }
   return b;
 }
 
@@ -62,24 +75,27 @@ function ensureUser(data, userId) {
 function applyCreateCharacter(data, userId, classId) {
   const b = ensureBattleData(data[userId]);
   if (!CLASSES[classId]) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
-  if (b.charClass) return { ok: false, reason: 'You already have a character.' };
-  b.charClass = classId;
-  return { ok: true };
+  if (!b.characters) b.characters = {};
+  if (b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switchclass ' + classId + '`.' };
+  b.characters[classId] = createCharacterRecord();
+  b.activeClass = classId;
+  return { ok: true, reason: '' }; // reason always a string; UI only renders it when !ok
 }
 
 function applyGainCharExp(data, userId, exp) {
   const b = ensureBattleData(data[userId]);
-  if (!b.charClass) return { leveledUp: false, newLevel: b.charLevel };
-  b.charExp += Math.max(0, Math.floor(exp));
+  const c = getActiveChar(b);
+  if (!c) return { leveledUp: false, newLevel: 1 };
+  c.charExp += Math.max(0, Math.floor(exp));
   let leveledUp = false;
-  while (b.charExp >= b.charExpNeeded) {
-    b.charExp -= b.charExpNeeded;
-    b.charLevel += 1;
-    b.charExpNeeded = CHAR_EXP_BASE + 50 * (b.charLevel - 1); // LINEAR — leveling feasible at any level (no stall -> farm window keeps shifting up)
-    b.scoreAchievedAt = new Date().toISOString(); // track when current stats were achieved (lb tiebreaker)
+  while (c.charExp >= c.charExpNeeded) {
+    c.charExp -= c.charExpNeeded;
+    c.charLevel += 1;
+    c.charExpNeeded = CHAR_EXP_BASE + 50 * (c.charLevel - 1); // LINEAR — leveling feasible at any level (no stall -> farm window keeps shifting up)
+    c.scoreAchievedAt = new Date().toISOString(); // track when current stats were achieved (lb tiebreaker)
     leveledUp = true;
   }
-  return { leveledUp, newLevel: b.charLevel };
+  return { leveledUp, newLevel: c.charLevel };
 }
 
 function applyDelveStart(data, userId) {
@@ -479,5 +495,6 @@ module.exports = {
   applySell, applySellGear, applyEquip, applyUnequip, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
   createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
   sell, sellGear, equip, unequip, buyGear, buyUnique, setCharName, getCharName, getBattleLeaderboard, recordPvp,
+  createCharacterRecord, getActiveChar, getCharClass, EQUIP_SLOTS,
   ENTRY_FEE, GEAR_SELLBACK,
 };
