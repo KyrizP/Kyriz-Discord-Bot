@@ -69,10 +69,11 @@ function actionRow(userId, run, disableAll = false) {
     new ButtonBuilder().setCustomId(`battle_extract_${userId}`).setLabel('🧪 Extract').setStyle(ButtonStyle.Secondary).setDisabled(noProgress),
   );
 }
-function bagRow(userId, page, total) {
+function bagRow(targetId, page, total, viewerId) {
+  // customId: battle_bag_(next|prev)_<page>_<targetId>_<viewerId> — LAST segment = executor (clicker must be the one who ran the command)
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`battle_bag_prev_${page}_${userId}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
-    new ButtonBuilder().setCustomId(`battle_bag_next_${page}_${userId}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
+    new ButtonBuilder().setCustomId(`battle_bag_prev_${page}_${targetId}_${viewerId}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`battle_bag_next_${page}_${targetId}_${viewerId}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
   );
 }
 function hpBar(hp, maxHp) {
@@ -317,10 +318,12 @@ function parseCharPage(hint, order) {
   const idx = order.indexOf(s);
   return idx >= 0 ? idx + 1 : 1;
 }
-function charRow(targetId, page, total) {
+function charRow(targetId, page, total, viewerId) {
+  // customId: ..._<targetId>_<page>_<viewerId> — the LAST segment is the EXECUTOR (uniform rule:
+  // only whoever ran the command may click; admins paging an inspect target included).
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`battle_charpage_${targetId}_${page - 1}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
-    new ButtonBuilder().setCustomId(`battle_charpage_${targetId}_${page + 1}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
+    new ButtonBuilder().setCustomId(`battle_charpage_${targetId}_${page - 1}_${viewerId}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`battle_charpage_${targetId}_${page + 1}_${viewerId}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
   );
 }
 // Per-character sheet. Reads ONLY per-char fields via `c` + shared root via `b`.
@@ -382,7 +385,7 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
     .setFooter({ text: footer });
 }
 // Build one page of the character sheet (re-read fresh data on every call — buttons reuse this).
-function renderCharPage(b, targetId, page) {
+function renderCharPage(b, targetId, page, viewerId) {
   const order = charPageOrder(b);
   page = Math.min(Math.max(1, page || 1), Math.max(1, order.length));
   const cls = order[page - 1] || b.activeClass;
@@ -390,7 +393,7 @@ function renderCharPage(b, targetId, page) {
   const displayName = battle.getCharName(targetId) || (targetUser && targetUser.username) || targetId;
   return {
     embed: buildCharEmbed(b, cls, displayName, page, order.length),
-    components: order.length > 1 ? [charRow(targetId, page, order.length)] : [],
+    components: order.length > 1 ? [charRow(targetId, page, order.length, viewerId)] : [],
     totalPages: order.length,
   };
 }
@@ -418,7 +421,7 @@ function handleCharacter(context, userId, targetArg, pageArg) {
     return context.reply({ embeds: [infoEmbed(noCharName, 'No character yet.')] });
   }
   const order = charPageOrder(b);
-  const { embed, components } = renderCharPage(b, targetId, parseCharPage(pageHint, order));
+  const { embed, components } = renderCharPage(b, targetId, parseCharPage(pageHint, order), userId); // userId here = the EXECUTOR
   return context.reply({ embeds: [embed], components });
 }
 
@@ -431,7 +434,7 @@ function handleBag(context, userId, page) {
     const targetId = mentionMatch[1];
     const targetUser = economy.getUser(targetId);
     if (!targetUser) return context.reply({ content: 'User not found.' });
-    const { embed } = renderBag(targetId, targetUser.username || targetId, 1);
+    const { embed } = renderBag(targetId, targetUser.username || targetId, 1, userId);
     return context.reply({ embeds: [embed] });
   }
   const username = uname(context, userId);
@@ -448,7 +451,7 @@ function handleGear(context, userId, itemId) {
     const targetId = mentionMatch[1];
     const targetUser = economy.getUser(targetId);
     if (!targetUser) return context.reply({ content: 'User not found.' });
-    const { embed, components } = renderGearList(targetId, targetUser.username || targetId, 1);
+    const { embed, components } = renderGearList(targetId, targetUser.username || targetId, 1, userId);
     return context.reply({ embeds: [embed], components });
   }
   const username = uname(context, userId);
@@ -509,13 +512,14 @@ function handleGear(context, userId, itemId) {
 }
 
 const GEAR_PAGE_SIZE = 8;
-function gearRow(userId, page, total) {
+function gearRow(targetId, page, total, viewerId) {
+  // customId: battle_gear_(next|prev)_<page>_<targetId>_<viewerId> — LAST segment = executor
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`battle_gear_prev_${page}_${userId}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
-    new ButtonBuilder().setCustomId(`battle_gear_next_${page}_${userId}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
+    new ButtonBuilder().setCustomId(`battle_gear_prev_${page}_${targetId}_${viewerId}`).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`battle_gear_next_${page}_${targetId}_${viewerId}`).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= total),
   );
 }
-function renderGearList(userId, username, page) {
+function renderGearList(userId, username, page, viewerId) {
   const bd = getBattle(userId);
   if (!bd) return { embed: infoEmbed(username, 'Not registered.'), components: [] };
   const b = bd.b;
@@ -549,10 +553,10 @@ function renderGearList(userId, username, page) {
     .setAuthor({ name: `${username}'s gear` }).setColor(COLOR).setTitle('⚔️ Gear — Spares')
     .setDescription(slice.join('\n'))
     .setFooter({ text: `Page ${page}/${total} • ky gear <id> · ky equip <id> · ky sellgear <id>` });
-  return { embed, components: total > 1 ? [gearRow(userId, page, total)] : [] };
+  return { embed, components: total > 1 ? [gearRow(userId, page, total, viewerId || userId)] : [] };
 }
 
-function renderBag(userId, username, page) {
+function renderBag(userId, username, page, viewerId) {
   const bd = getBattle(userId);
   if (!bd) return { embed: infoEmbed(username, 'Not registered.'), components: [], totalPages: 1 };
   const drops = Object.entries(bd.b.bag).filter(([id, c]) => DROPS[id] && c > 0); // drops only — gear is in `ky gear`
@@ -572,7 +576,7 @@ function renderBag(userId, username, page) {
     .setTitle('🎒 Battle Bag (drops)')
     .setDescription(desc + (totalValue ? `\n**Drop value:** 🧪 ${totalValue.toLocaleString()} (\`ky sell all\`)` : '') + `\n_Gear? \`ky gear\`_`)
     .setFooter({ text: `Page ${page}/${total} • ky sell all | ky sell <code> [n]` });
-  return { embed, components: total > 1 ? [bagRow(userId, page, total)] : [], totalPages: total };
+  return { embed, components: total > 1 ? [bagRow(userId, page, total, viewerId || userId)] : [], totalPages: total };
 }
 
 async function handleSell(context, userId, what) {
@@ -1040,15 +1044,17 @@ async function handleButton(interaction) {
 
   // battle_charpage_<targetId>_<page> — handled BEFORE the generic owner check (last segment = page, not userId).
   if (customId.startsWith('battle_charpage_')) {
-    const parts = customId.split('_'); // battle, charpage, targetId, page
+    const parts = customId.split('_'); // battle, charpage, targetId, page, viewerId
+    if (parts.length < 5) return interaction.deferUpdate(); // stale pre-fix panel
     const targetId = parts[2];
     const page = parseInt(parts[3], 10) || 1;
-    if (interaction.user.id !== targetId && !economy.isAdmin(interaction.user.id))
-      return interaction.reply({ content: "This isn't your character panel — use `ky char`.", ephemeral: true });
+    const viewerId = parts[4];
+    if (interaction.user.id !== viewerId)
+      return interaction.reply({ content: "This isn't your panel — run the command yourself.", ephemeral: true });
     const bd = getBattle(targetId);
     if (!bd) return interaction.reply({ content: 'Not registered.', ephemeral: true });
     if (!battle.getActiveChar(bd.b)) return interaction.update({ embeds: [infoEmbed('', 'No character yet.')], components: [] });
-    const { embed, components } = renderCharPage(bd.b, targetId, page);
+    const { embed, components } = renderCharPage(bd.b, targetId, page, viewerId);
     return interaction.update({ embeds: [embed], components });
   }
   const userId = customId.slice(customId.lastIndexOf('_') + 1); // owner is always last segment
@@ -1116,11 +1122,13 @@ async function handleButton(interaction) {
     return interaction.update({ embeds: [extractEmbed(username, res)], components: [] });
   }
 
-  const bagMatch = customId.match(/^battle_bag_(next|prev)_(\d+)_/);
+  const bagMatch = customId.match(/^battle_bag_(next|prev)_(\d+)_(\d+)_(\d+)$/);
   if (bagMatch) {
     let page = parseInt(bagMatch[2], 10);
     page = bagMatch[1] === 'next' ? page + 1 : page - 1;
-    const { embed, components } = renderBag(userId, username, page);
+    const targetId = bagMatch[3]; // viewer == userId from the generic owner check above
+    const targetName = (economy.getUser(targetId) || {}).username || targetId;
+    const { embed, components } = renderBag(targetId, targetName, page, userId);
     return interaction.update({ embeds: [embed], components });
   }
 
@@ -1132,11 +1140,13 @@ async function handleButton(interaction) {
     return interaction.update({ embeds: [embed], components });
   }
 
-  const gearMatch = customId.match(/^battle_gear_(next|prev)_(\d+)_/);
+  const gearMatch = customId.match(/^battle_gear_(next|prev)_(\d+)_(\d+)_(\d+)$/);
   if (gearMatch) {
     let page = parseInt(gearMatch[2], 10);
     page = gearMatch[1] === 'next' ? page + 1 : page - 1;
-    const { embed, components } = renderGearList(userId, username, page);
+    const targetId = gearMatch[3]; // viewer == userId from the generic owner check above
+    const targetName = (economy.getUser(targetId) || {}).username || targetId;
+    const { embed, components } = renderGearList(targetId, targetName, page, userId);
     return interaction.update({ embeds: [embed], components });
   }
 
