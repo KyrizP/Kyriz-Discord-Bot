@@ -356,7 +356,7 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
   const passRaw = getPassivesRaw(c.equipment, b.uniqueItems || {});
   const passLines = Object.entries(passSum)
     .filter(([id, v]) => v > 0 && PASSIVES[id])
-    .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(capped)*' : ''}`)
+    .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(MAX)*' : ''}`)
     .join('\n');
   const passSection = passLines ? `\n\n**✨ Active Passives:**\n${passLines}` : '';
   const banner = isActive
