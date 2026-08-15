@@ -17,6 +17,7 @@ const { isSuperAdmin } = economy;
 const unique = require('./uniqueItems');
 
 const ENTRY_FEE = 5000;
+const CHAR_CHANGE_COST = 5000; // 🧪 per NEW character (D1)
 const SWEEP_BUFFER = 5;          // sweep resolves floors 1..(bestDepth - SWEEP_BUFFER) instantly
 const GEAR_SELLBACK = 0.35;      // sell-back gear at 35% (all tiers, v1.1)
 const CHAR_EXP_BASE = 100;
@@ -99,11 +100,41 @@ function ensureUser(data, userId) {
 function applyCreateCharacter(data, userId, classId) {
   const b = ensureBattleData(data[userId]);
   if (!CLASSES[classId]) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
+  // First-time registration only. Anyone who already owns a character must use the
+  // paid changeclass path — a free second class here would bypass the 🧪 5,000 sink.
+  if (b.characters && Object.keys(b.characters).length > 0) return { ok: false, reason: 'You already have a character. Create another with `ky changeclass <class>` (🧪 5,000).' };
   if (!b.characters) b.characters = {};
   if (b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switchclass ' + classId + '`.' };
   b.characters[classId] = createCharacterRecord();
   b.activeClass = classId;
   return { ok: true, reason: '' }; // reason always a string; UI only renders it when !ok
+}
+
+// `ky changeclass <class>`: buy a NEW character (fresh lv1 record) with Kryptonite.
+// Check-then-deduct lives in ONE apply fn; wrapper does a single read->apply->write (atomic).
+function applyChangeClass(data, userId, classId) {
+  const u = data[userId];
+  if (!u) return { ok: false, reason: 'You are not registered.' };
+  const b = ensureBattleData(u);
+  if (!CLASSES[classId]) return { ok: false, reason: 'Invalid class. Pick warrior or mage.' };
+  if (b.characters[classId]) return { ok: false, reason: 'You already have a ' + CLASSES[classId].name + ' character. Use `ky switchclass ' + classId + '` (free).' };
+  if (!getActiveChar(b)) return { ok: false, reason: 'Create a character first (`ky battle`).' };
+  if ((b.kryptonite || 0) < CHAR_CHANGE_COST) return { ok: false, reason: 'Creating a new character costs 🧪 ' + CHAR_CHANGE_COST.toLocaleString() + ' Kryptonite.' };
+  b.kryptonite -= CHAR_CHANGE_COST;                 // G9: check-then-deduct in ONE apply (single write in wrapper)
+  b.characters[classId] = createCharacterRecord();
+  b.activeClass = classId;                          // D2: activate immediately
+  return { ok: true, kryptonite: b.kryptonite };
+}
+
+// `ky switchclass [class]`: swap the active character (free, existing chars only).
+function applySwitchClass(data, userId, classId) {
+  if (!data[userId]) return { ok: false, reason: 'You are not registered.' };
+  const b = ensureBattleData(data[userId]);
+  if (!classId) return { ok: false, reason: 'Which character? `ky switchclass <class>`. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
+  if (!b.characters[classId]) return { ok: false, reason: 'You do not have that character yet. You own: ' + (Object.keys(b.characters || {}).join(', ') || 'none') };
+  if (b.activeClass === classId) return { ok: false, reason: 'That character is already active.' };
+  b.activeClass = classId;
+  return { ok: true, switchedTo: classId };
 }
 
 function applyGainCharExp(data, userId, exp) {
@@ -496,6 +527,22 @@ function buyUnique(userId, tier, slot, variant) {
   if (r.ok) economy.writeEconomy(data);
   return r;
 }
+function changeClass(userId, classId) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' }; // G1
+  const data = economy.readEconomy();
+  ensureUser(data, userId);
+  const r = applyChangeClass(data, userId, classId);
+  if (r.ok) economy.writeEconomy(data);
+  return r;
+}
+function switchClass(userId, classId) {
+  if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' }; // G1
+  const data = economy.readEconomy();
+  ensureUser(data, userId);
+  const r = applySwitchClass(data, userId, classId);
+  if (r.ok) economy.writeEconomy(data);
+  return r;
+}
 
 // Battle leaderboard: rank by FLOOR DEPTH (bestDepth) first, then Combat Score, then scoreAchievedAt.
 // Admin & superadmin INCLUDED (unlike the regular balance leaderboard).
@@ -549,8 +596,9 @@ function recordPvp(winnerId, loserId) {
 module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
   applySell, applySellGear, applyEquip, applyUnequip, applyUnequipAll, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
+  applyChangeClass, applySwitchClass,
   createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
-  sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, setCharName, getCharName, getBattleLeaderboard, recordPvp,
+  sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, changeClass, switchClass, setCharName, getCharName, getBattleLeaderboard, recordPvp,
   createCharacterRecord, getActiveChar, getCharClass, isEquippedOnAnyChar, EQUIP_SLOTS,
-  ENTRY_FEE, GEAR_SELLBACK,
+  ENTRY_FEE, GEAR_SELLBACK, CHAR_CHANGE_COST,
 };

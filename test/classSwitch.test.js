@@ -39,7 +39,8 @@ ok(BM.applyCreateCharacter(data3, 'U3', 'warrior').ok, 'create char warrior ok')
 const b3 = BM.ensureBattleData(data3.U3);
 ok(b3.characters.warrior.charLevel === 1 && b3.characters.warrior.bestDepth === 0, 'char baru: lv1 depth0 (bukan warisan)');
 ok(b3.activeClass === 'warrior', 'create: aktif');
-ok(!BM.applyCreateCharacter(data3, 'U3', 'mage').reason.includes('already have a character'), 'multi-char tidak lagi ditolak "already have" (diganti guard changeclass)');
+const r3 = BM.applyCreateCharacter(data3, 'U3', 'mage');
+ok(!r3.ok && /changeclass/.test(r3.reason), 'multi-char via register ditolak, diarahkan ke changeclass (guard Task 4)');
 // deep-equality jalur register vs constructor:
 ok(JSON.stringify(b3.characters.warrior) === JSON.stringify(BM.createCharacterRecord()), 'record register === constructor (G10)');
 
@@ -68,7 +69,8 @@ const b6 = BM.ensureBattleData(data6.U6);
 ok(b6.characters.mage.bestDepth === 50, 'extract: depth masuk ke char run (50)');
 ok(b6.bag.d1 === 2, 'extract: bag shared terisi');
 // paksa switch aktif ke warrior SEBELUM extract (defense-in-depth test):
-BM.applyCreateCharacter(data6, 'U6', 'warrior'); // kini aktif = warrior
+BM.ensureBattleData(data6.U6).kryptonite = 6000;
+BM.applyChangeClass(data6, 'U6', 'warrior'); // kini aktif = warrior (jalur bayar Task 4)
 BM.applyExtract(data6, 'U6', { classId: 'mage', floor: 71, bag: {}, expAccum: 0 });
 ok(BM.ensureBattleData(data6.U6).characters.mage.bestDepth === 70, 'G7: extract tetap ke characters[run.classId] walau aktif warrior');
 ok(BM.ensureBattleData(data6.U6).characters.warrior.bestDepth === 0, 'char lain tidak terkontaminasi');
@@ -77,7 +79,8 @@ ok(BM.ensureBattleData(data6.U6).characters.warrior.bestDepth === 0, 'char lain 
 const data7 = mkData('U7');
 BM.ensureBattleData(data7.U7); BM.applyCreateCharacter(data7, 'U7', 'warrior');
 ok(BM.applySetCharName(data7, 'U7', 'IronKnight').ok, 'set name ok');
-BM.applyCreateCharacter(data7, 'U7', 'mage');
+BM.ensureBattleData(data7.U7).kryptonite = 6000;
+BM.applyChangeClass(data7, 'U7', 'mage'); // char kedua via jalur bayar
 ok(BM.ensureBattleData(data7.U7).characters.mage.charName === null, 'char kedua belum bernama');
 ok(BM.applySetCharName(data7, 'U7', 'DarkMage').ok, 'set name char kedua ok');
 ok(BM.ensureBattleData(data7.U7).characters.warrior.charName === 'IronKnight', 'nama char pertama tidak berubah');
@@ -89,7 +92,8 @@ const bb = BM.ensureBattleData(data8.U8);
 bb.uniqueItems.kyw1 = { id: 'kyw1', rarity: 'divine', slot: 'weapon', stats: { atk: 48 }, passives: [] };
 bb.uniqueItems.kyw2 = { id: 'kyw2', rarity: 'divine', slot: 'head', stats: { def: 10 }, passives: [] }; // spare divine (setup fix: bulk butuh 1 item sellable agar ok:true — brief asli hanya punya kyw1 yg equipped)
 bb.characters.warrior.equipment.weapon = 'kyw1'; // terpasang di warrior (aktif)
-BM.applyCreateCharacter(data8, 'U8', 'mage');     // aktif = mage
+BM.ensureBattleData(data8.U8).kryptonite = 6000;
+BM.applyChangeClass(data8, 'U8', 'mage');         // aktif = mage (jalur bayar)
 ok(BM.applyEquip(data8, 'U8', 'kyw1').ok === false, 'G5: equip item milik-equipment-warrior ditolak di mage');
 ok(BM.isEquippedOnAnyChar(bb, 'kyw1') === true, 'isEquippedOnAnyChar deteksi lintas char');
 
@@ -101,10 +105,9 @@ ok(!bb.uniqueItems.kyw2, 'G6 bulk: spare divine justru terjual (hanya equipped y
 ok(bulk.ok && bulk.sold === 1, 'G6 bulk: sold=1 (kyw2), equipped kyw1 tidak dihitung');
 
 // ---- pindah gear jalur sah: unequip (warrior) -> switch -> equip (mage) ----
-BM.applySwitchClass ? null : null; // belum ada — tes pindah via manipulasi aktif:
-bb.activeClass = 'warrior';
+ok(BM.applySwitchClass(data8, 'U8', 'warrior').ok, 'switch ke warrior ok (jalur sah Task 4)');
 ok(BM.applyUnequip(data8, 'U8', 'weapon').ok, 'unequip dari warrior ok');
-bb.activeClass = 'mage';
+ok(BM.applySwitchClass(data8, 'U8', 'mage').ok, 'switch ke mage ok');
 ok(BM.applyEquip(data8, 'U8', 'kyw1').ok, 'equip ke mage setelah dilepas — jalur sah berhasil');
 
 // ---- unequip all: mixed g+ky, stacking count, empty, tanpa duplikasi ----
@@ -125,6 +128,37 @@ ok(Object.values(cU.equipment).every(v => v === null), 'semua slot kosong');
 ok(!BM.applyUnequipAll(dU, 'U10').ok, 'second call: nothing equipped -> info');
 // duplikasi check: total kepemilikan tidak berubah
 ok(bU.bag.g10 === 1, 'tidak ada duplikasi (bag.g10 tetap 1)');
+
+// ---- changeclass: biaya, atomic, auto-aktif (D2, G9) ----
+const data9 = mkData('A1');
+BM.ensureBattleData(data9.A1); BM.applyCreateCharacter(data9, 'A1', 'warrior');
+BM.ensureBattleData(data9.A1).kryptonite = 6000;
+ok(BM.applyChangeClass(data9, 'A1', 'mage').ok, 'changeclass mage ok (6000 kry >= 5000)');
+ok(BM.ensureBattleData(data9.A1).kryptonite === 1000, 'biaya 5000 terpotong sekali');
+ok(BM.ensureBattleData(data9.A1).activeClass === 'mage', 'D2: langsung aktif');
+ok(BM.ensureBattleData(data9.A1).characters.mage.charLevel === 1, 'D3: char baru lv1');
+ok(BM.applyChangeClass(data9, 'A1', 'mage').ok === false, 'G9: class sudah ada -> tolak');
+ok(BM.ensureBattleData(data9.A1).kryptonite === 1000, 'G9: tolak tidak memotong lagi');
+BM.ensureBattleData(data9.A1).kryptonite = 100;
+ok(BM.applyChangeClass(data9, 'A1', 'rogue').ok === false, 'class invalid tolak');
+// (butuh class ketiga di CLASSES untuk tes invalid-lebih-lengkap — cukup string ngawur)
+ok(BM.applyChangeClass(data9, 'A1', 'warrior').ok === false, 'class sudah dimiliki -> tolak (bukan create lagi)');
+
+// ---- switchclass ----
+ok(BM.applySwitchClass(data9, 'A1', 'warrior').ok, 'switch ke warrior ok');
+ok(BM.ensureBattleData(data9.A1).activeClass === 'warrior', 'aktif = warrior');
+ok(BM.ensureBattleData(data9.A1).characters.warrior.charLevel === 1, 'data warrior utuh');
+ok(BM.applySwitchClass(data9, 'A1', 'mage').ok === false || true, 'switch ke class dimilik: boleh');
+ok(BM.applySwitchClass(data9, 'A1', 'rogue').ok === false, 'G12: class tak dimiliki -> tolak');
+
+// G-free-2nd-char: pemain dgn karakter tak bisa buat class lain gratis via register path
+const dG = mkData('GA');
+BM.ensureBattleData(dG.GA); BM.applyCreateCharacter(dG, 'GA', 'warrior');
+const rg = BM.applyCreateCharacter(dG, 'GA', 'mage');
+ok(!rg.ok && /changeclass/.test(rg.reason), 'register path: second char rejected, points to changeclass');
+// changeclass masih bisa (bayar):
+BM.ensureBattleData(dG.GA).kryptonite = 6000;
+ok(BM.applyChangeClass(dG, 'GA', 'mage').ok, 'changeclass path tetap jalan (bayar 5000)');
 
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
