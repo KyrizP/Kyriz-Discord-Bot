@@ -7,21 +7,65 @@ const ECONOMY_PATH = path.join(__dirname, '..', 'data', 'economy.json');
 // Helper: Read & write JSON
 // ============================================================
 
+// A corrupt/partial file must NEVER be treated as an empty database. The old
+// `catch { return {} }` made the bot run "empty" after a bad panel edit, and the
+// next command write buried the recoverable bytes under {} permanently (2026-08-17).
+// Now: corrupt bytes are PRESERVED as <file>.corrupt-<timestamp> and the read THROWS —
+// commands fail loudly instead of silently resurrecting an empty economy.
 function readJSON(filePath) {
+  let raw;
   try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
+    raw = fs.readFileSync(filePath, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return {}; // genuinely no file yet — fresh install, fine
+    throw err; // real IO error — do not guess
+  }
+  try {
     return JSON.parse(raw);
-  } catch {
-    return {};
+  } catch (err) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const savedAs = filePath + '.corrupt-' + stamp;
+    try { fs.renameSync(filePath, savedAs); } catch { /* read-only fs etc. — still throw below */ }
+    console.error(`[DATA SAFETY] ${path.basename(filePath)} is CORRUPT — original bytes preserved at ${savedAs}. Fix/restore it before continuing. Refusing to run on an empty database.`);
+    throw err;
   }
 }
 
+// ATOMIC WRITE: temp file + rename — a crash/restart mid-write can never leave a half-file
+// behind (rename is atomic on POSIX). Also narrows the panel-editor race window.
 function writeJSON(filePath, data) {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  const tmp = filePath + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  fs.renameSync(tmp, filePath);
+}
+// ROLLING LOCAL BACKUP: copy economy.json into data/backups/ (keep newest BACKUP_KEEP).
+// Called at boot + every 6h from index.js — catches ANY corruption class, no premium host
+// feature needed. Survives because the threat is a clobbered FILE, not a wiped container.
+const BACKUP_DIR = path.join(path.dirname(ECONOMY_PATH), 'backups');
+const BACKUP_KEEP = 14;
+function backupEconomy() {
+  try {
+    if (!fs.existsSync(ECONOMY_PATH)) return null;
+    const stat = fs.statSync(ECONOMY_PATH);
+    if (stat.size < 3) return null; // {} / empty — nothing worth snapshotting
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 17); // minute resolution
+    const destName = 'economy-' + stamp + '.json';
+    const existing = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith('economy-')).sort();
+    if (existing.includes(destName)) return null; // same minute — skip
+    fs.copyFileSync(ECONOMY_PATH, path.join(BACKUP_DIR, destName));
+    while (existing.length + 1 > BACKUP_KEEP) { // prune oldest beyond BACKUP_KEEP
+      try { fs.rmSync(path.join(BACKUP_DIR, existing.shift())); } catch { /* already gone */ }
+    }
+    return path.join(BACKUP_DIR, destName);
+  } catch (e) {
+    console.error('[DATA SAFETY] backup failed:', e.message);
+    return null;
+  }
 }
 
 // ============================================================
@@ -612,6 +656,7 @@ module.exports = {
   getAllPlayers,
   getGlobalRank,
   ECONOMY_PATH,
+  backupEconomy,
   readEconomy: readJSON.bind(null, ECONOMY_PATH),
   writeEconomy: writeJSON.bind(null, ECONOMY_PATH),
 };

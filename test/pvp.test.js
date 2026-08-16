@@ -256,28 +256,27 @@ ok(P.pvpBurnMult(100) < P.pvpBurnMult(400), 'burn mult grows with level (tracks 
 
 // ---- evasion: ADDITIVE base+gear, capped at EVASION_TOTAL_CAP (regression: this session had TWO silent
 // evasion bugs — base dead in PvE, and max() instead of additive). Rogue base 8 + gear 40 (capped) => 48%.
+// Deterministic: stub Math.random at 0.45 — between gear-cap 40% and additive 48%, so the hit dodges
+// IFF the engine adds base+gear (max() mode would land the hit). No sampling noise.
 {
   const { EVASION_TOTAL_CAP, CLASSES: C2 } = require('../utils/battleConfig');
   ok(C2.rogue.baseEvasion > 0 && EVASION_TOTAL_CAP === 48, 'config sanity: rogue baseEvasion set, total cap 48');
-  let miss = 0, total = 0;
-  for (let rep = 0; rep < 25; rep++) {
-    const fid = 'EV_' + rep;
-    const ff = P.startFight(fid, mkPlayer('A', { hp: 999999, atk: 230, matk: 4, def: 208, mdef: 100, spd: 50 }, 'warrior'),
-                                  mkPlayer('B', { hp: 999999, atk: 1, matk: 1, def: 208, mdef: 100, spd: 10 }, 'rogue'));
-    P.clearAfkTimer(fid);
-    ff.p2.passives = { evasion: 40 }; // gear at PASSIVE_CAPS cap; base 8 from _combatant => total must cap at 48, not 48+ or 40
-    while (!ff.over) {
-      if (ff.active === 'p1') {
-        const r = P.resolvePvpTurn(fid, 'A', 'slash'); // non-pierce: evasion applies
-        const hit = r.events && r.events.find((e) => e.type === 'hit');
-        if (hit) { total++; if (hit.dmg === 0) miss++; }
-      } else P.resolvePvpTurn(fid, 'B', 'backstab');
-    }
+  const fid = 'EV_det';
+  const ff = P.startFight(fid, mkPlayer('A', { hp: 999999, atk: 230, matk: 4, def: 208, mdef: 100, spd: 50 }, 'warrior'),
+                                mkPlayer('B', { hp: 999999, atk: 1, matk: 1, def: 208, mdef: 100, spd: 10 }, 'rogue'));
+  P.clearAfkTimer(fid);
+  ff.p2.passives = { evasion: 40 }; // gear at PASSIVE_CAPS cap; base 8 from _combatant → total 48
+  const origRandom = Math.random;
+  Math.random = () => 0.45;
+  try {
+    const r = P.resolvePvpTurn(fid, 'A', 'slash'); // non-pierce → evasion roll: 0.499 < 0.48? NO → dodge
+    const hit = r.events && r.events.find((e) => e.type === 'hit');
+    ok(hit && hit.dmg === 0 && hit.evaded, 'evasion ADDITIVE: base 8 + gear 40 = 48% dodges a 45% roll (max-mode 40% would hit)');
+  } finally {
+    Math.random = origRandom;
     P.endFight(fid);
+    P.activePvpFights.clear();
   }
-  P.activePvpFights.clear();
-  const rate = miss / total;
-  ok(rate > 0.40 && rate < 0.56, `rogue evasion = additive capped (base 8 + gear 40 → ~48%): measured ${(rate * 100).toFixed(1)}% over ${total} hits`);
 }
 
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));

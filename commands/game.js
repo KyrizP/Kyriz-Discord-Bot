@@ -28,6 +28,7 @@ const { createDeck, drawCard, calculateHand, formatHand, isBlackjack } = require
 const { listBuyable, getItem } = require('../utils/shopItems');
 const shopManager = require('../utils/shopManager');
 const battleCmd = require('../utils/battleCommands');
+const battleManager = require('../utils/battleManager');
 const botState = require('../utils/botState');
 
 // ============================================================
@@ -45,12 +46,19 @@ const activeTowerGames = new Map(); // userId -> tower game state
 // ============================================================
 
 let maintenanceMode = { active: botState.state.maintenance.active, message: botState.state.maintenance.message };
-let pendingBansos = {
-  active: botState.state.bansos.active,
-  amount: botState.state.bansos.amount,
-  message: botState.state.bansos.message,
-  claimedUsers: new Set(botState.state.bansos.claimedUsers),
-};
+// Bansos round: may grant BOTH currencies at once (either may be 0 = not part of the round).
+// Legacy persisted shape {amount, currency} is mapped on load for backward compat.
+const BANSOS_KRYZTAL_MAX = 5_000_000;
+const BANSOS_KRYPTONITE_MAX = 2_000_000;
+function _loadBansosState() {
+  const bs = botState.state.bansos || {};
+  let kryztal = bs.kryztal || 0, kryptonite = bs.kryptonite || 0;
+  if (!kryztal && !kryptonite && bs.amount) { // legacy single-currency round
+    if ((bs.currency || 'kryztal') === 'kryptonite') kryptonite = bs.amount; else kryztal = bs.amount;
+  }
+  return { active: !!bs.active, kryztal, kryptonite, message: bs.message || '', claimedUsers: new Set(bs.claimedUsers || []) };
+}
+let pendingBansos = _loadBansosState();
 function persistMaintenance() {
   botState.state.maintenance = { active: maintenanceMode.active, message: maintenanceMode.message };
   botState.save();
@@ -59,11 +67,43 @@ function isMaintenanceActive() { return maintenanceMode.active; }
 function persistBansos() {
   botState.state.bansos = {
     active: pendingBansos.active,
-    amount: pendingBansos.amount,
+    kryztal: pendingBansos.kryztal,
+    kryptonite: pendingBansos.kryptonite,
     message: pendingBansos.message,
     claimedUsers: [...pendingBansos.claimedUsers],
   };
   botState.save();
+}
+// One-time bansos claim on a user's next command (shared by slash + prefix paths).
+// A round may grant 💎 Kryztal, 🧪 Kryptonite, or both.
+async function claimBansosIfPending(userId, send) {
+  if (!(pendingBansos.active && isRegistered(userId) && !isSuperAdmin(userId) && !pendingBansos.claimedUsers.has(userId))) return;
+  // CREDIT FIRST, mark claimed after: if a credit throws (e.g. unreadable economy), the
+  // player must NOT be marked as claimed — they'd silently lose their one-time reward.
+  const received = [];
+  const balances = [];
+  if (pendingBansos.kryztal > 0) {
+    addBalance(userId, pendingBansos.kryztal);
+    received.push(`💎 **+${pendingBansos.kryztal.toLocaleString()}** Kryztal`);
+    balances.push(`💎 **${getBalance(userId).toLocaleString()}** Kryztal`);
+  }
+  if (pendingBansos.kryptonite > 0) {
+    const r = battleManager.grantKryptonite(userId, pendingBansos.kryptonite);
+    received.push(`🧪 **+${pendingBansos.kryptonite.toLocaleString()}** Kryptonite`);
+    balances.push(`🧪 **${r.kryptonite.toLocaleString()}** Kryptonite`);
+  }
+  pendingBansos.claimedUsers.add(userId);
+  persistBansos(); // persist immediately — a restart must not allow a second claim
+  const bansosEmbed = new EmbedBuilder()
+    .setColor(0x57f287)
+    .setTitle('🎁 Compensation Reward!')
+    .setDescription(
+      `${pendingBansos.message}\n\n` +
+      `You received ${received.join(' and ')}!\n` +
+      `New balance: ${balances.join(' · ')}`
+    )
+    .setTimestamp();
+  try { await send({ content: `<@${userId}>`, embeds: [bansosEmbed] }); } catch {}
 }
 
 // ============================================================
@@ -456,23 +496,8 @@ async function execute(interaction) {
     return interaction.reply({ content: maintenanceMode.message, ephemeral: true });
   }
 
-  // Bansos check — one-time reward claim
-  if (pendingBansos.active && isRegistered(userId) && !isSuperAdmin(userId) && !pendingBansos.claimedUsers.has(userId)) {
-    pendingBansos.claimedUsers.add(userId);
-    persistBansos(); // persist immediately — a restart must not allow a second claim
-    addBalance(userId, pendingBansos.amount);
-    const bansosEmbed = new EmbedBuilder()
-      .setColor(0x57f287)
-      .setTitle('🎁 Compensation Reward!')
-      .setDescription(
-        `${pendingBansos.message}\n\n` +
-        `You received 💎 **+${pendingBansos.amount.toLocaleString()}** Kryztal!\n` +
-        `New balance: 💎 **${getBalance(userId).toLocaleString()}** Kryztal`
-      )
-      .setTimestamp();
-    // Send bansos notification, then continue with normal command
-    try { await interaction.channel.send({ content: `<@${userId}>`, embeds: [bansosEmbed] }); } catch {}
-  }
+  // Bansos check — one-time reward claim (💎 Kryztal or 🧪 Kryptonite)
+  await claimBansosIfPending(userId, (opts) => interaction.channel.send(opts));
 
   // Update username on every interaction (sync Discord username changes)
   if (isRegistered(userId) || isSuperAdmin(userId)) {
@@ -586,22 +611,8 @@ async function handlePrefixCommand(message, command, args) {
     return message.reply({ embeds: [embed] });
   }
 
-  // Bansos check — one-time reward claim
-  if (pendingBansos.active && isRegistered(userId) && !isSuperAdmin(userId) && !pendingBansos.claimedUsers.has(userId)) {
-    pendingBansos.claimedUsers.add(userId);
-    persistBansos(); // persist immediately — a restart must not allow a second claim
-    addBalance(userId, pendingBansos.amount);
-    const bansosEmbed = new EmbedBuilder()
-      .setColor(0x57f287)
-      .setTitle('🎁 Compensation Reward!')
-      .setDescription(
-        `${pendingBansos.message}\n\n` +
-        `You received 💎 **+${pendingBansos.amount.toLocaleString()}** Kryztal!\n` +
-        `New balance: 💎 **${getBalance(userId).toLocaleString()}** Kryztal`
-      )
-      .setTimestamp();
-    try { await message.channel.send({ content: `<@${userId}>`, embeds: [bansosEmbed] }); } catch {}
-  }
+  // Bansos check — one-time reward claim (💎 Kryztal or 🧪 Kryptonite)
+  await claimBansosIfPending(userId, (opts) => message.channel.send(opts));
 
   // Update username (sync Discord username changes)
   if (isRegistered(userId) || isSuperAdmin(userId)) {
@@ -723,47 +734,62 @@ async function handleBansos(message, userId, args) {
 
   if (action === 'off' || action === 'stop') {
     const claimed = pendingBansos.claimedUsers.size;
-    pendingBansos = { active: false, amount: 0, message: '', claimedUsers: new Set() };
+    pendingBansos = { active: false, kryztal: 0, kryptonite: 0, message: '', claimedUsers: new Set() };
     persistBansos();
     return message.reply(`Bansos **stopped**. Total claimed: **${claimed}** users.`);
   }
 
   if (action === 'status') {
     if (!pendingBansos.active) return message.reply('No active bansos.');
+    const rewards = [];
+    if (pendingBansos.kryztal > 0) rewards.push(`💎 **${pendingBansos.kryztal.toLocaleString()}** Kryztal`);
+    if (pendingBansos.kryptonite > 0) rewards.push(`🧪 **${pendingBansos.kryptonite.toLocaleString()}** Kryptonite`);
     return message.reply(
-      `Bansos **active**: 💎 **${pendingBansos.amount.toLocaleString()}** Kryztal per user.\n` +
+      `Bansos **active**: ${rewards.join(' + ')} per user.\n` +
       `Claimed: **${pendingBansos.claimedUsers.size}** users so far.\n` +
       `Message: ${pendingBansos.message}`
     );
   }
 
-  // ky bansos [amount] [optional message]
-  const amount = parseInt(action);
-  if (isNaN(amount) || amount < 1) {
-    return message.reply(
-      'Usage:\n' +
-      '`ky bansos [amount] [message]` — Set reward for all users\n' +
-      '`ky bansos status` — Check active bansos\n' +
-      '`ky bansos off` — Stop bansos'
-    );
+  // ky bansos <kryztal> [message]                → 💎 Kryztal only
+  // ky bansos kry <kryptonite> [message]         → 🧪 Kryptonite only
+  // ky bansos <kryztal> kry <kryptonite> [msg]   → BOTH in one round
+  const usage = () => message.reply(
+    'Usage:\n' +
+    '`ky bansos <kryztal> [message]` — reward all users with 💎 Kryztal\n' +
+    '`ky bansos kry <kryptonite> [message]` — reward all users with 🧪 Kryptonite\n' +
+    '`ky bansos <kryztal> kry <kryptonite> [message]` — reward BOTH at once\n' +
+    '`ky bansos status` — Check active bansos\n' +
+    '`ky bansos off` — Stop bansos'
+  );
+  let kryztal = 0, kryptonite = 0;
+  let i = 0;
+  if (/^\d+$/.test(String(args[i] || ''))) kryztal = parseInt(args[i++]);
+  if (['kry', 'kryptonite'].includes(String(args[i] || '').toLowerCase())) {
+    i++;
+    if (!/^\d+$/.test(String(args[i] || ''))) return usage(); // 'kry' without a number
+    kryptonite = parseInt(args[i++]);
   }
+  if (!kryztal && !kryptonite) return usage();
+  if (kryztal > BANSOS_KRYZTAL_MAX) return message.reply(`Maximum 💎 Kryztal per bansos is **${BANSOS_KRYZTAL_MAX.toLocaleString()}**.`);
+  if (kryptonite > BANSOS_KRYPTONITE_MAX) return message.reply(`Maximum 🧪 Kryptonite per bansos is **${BANSOS_KRYPTONITE_MAX.toLocaleString()}**.`);
 
-  if (amount > 2000000) {
-    return message.reply('Maximum bansos amount is 💎 **2,000,000** Kryztal.');
-  }
-
-  const customMessage = args.slice(1).join(' ') || 'Thank you for your patience!';
+  const customMessage = args.slice(i).join(' ') || 'Thank you for your patience!';
   pendingBansos = {
     active: true,
-    amount: amount,
+    kryztal: kryztal,
+    kryptonite: kryptonite,
     message: customMessage,
     claimedUsers: new Set(), // fresh round — everyone can claim once again
   };
   persistBansos(); // survive restarts — active bansos + claimers persist
 
+  const rewards = [];
+  if (kryztal > 0) rewards.push(`💎 **${kryztal.toLocaleString()}** Kryztal`);
+  if (kryptonite > 0) rewards.push(`🧪 **${kryptonite.toLocaleString()}** Kryptonite`);
   return message.reply(
     `🎁 Bansos **activated**!\n` +
-    `Amount: 💎 **${amount.toLocaleString()}** Kryztal per user\n` +
+    `Amount: ${rewards.join(' + ')} per user\n` +
     `Message: ${customMessage}\n\n` +
     `Users will receive it on their next command.`
   );
@@ -918,10 +944,14 @@ async function handleMaintenance(message, userId, args) {
   return message.reply(`Maintenance is currently **${status}**.\nUsage: \`ky maintenance on [message]\` or \`ky maintenance off\``);
 }
 
-async function handleBackup(message, userId) {
-  if (!isSuperAdmin(userId)) return; // Only superadmin
-
+// Core backup sender — shared by manual `ky backup` and the daily 00:01 WIB auto-backup
+// (index.js). DMs the data files to the SUPERADMIN_ID account: copies live OFF-server in
+// Discord, so even a wiped container loses nothing. One-per-day guard via botState so a
+// restart near midnight can never double-send.
+async function sendBackupDM(client, daily) {
   const DATA_DIR = path.join(__dirname, '..', 'data');
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' }); // 2026-08-17 WIB
+  if (daily && botState.state.lastBackupDM === today) return { sent: false, reason: 'already-sent-today' };
   const targets = ['economy.json', 'replies.json', 'users.json', 'botState.json'];
   const attachments = [];
   const summary = [];
@@ -933,38 +963,49 @@ async function handleBackup(message, userId) {
       summary.push(`• \`${name}\` — ${kb} KB`);
     }
   }
+  if (attachments.length === 0) return { sent: false, reason: 'no-files' };
 
-  if (attachments.length === 0) {
-    return message.reply('⚠️ Tidak ada file data di folder `data/` untuk di-backup.');
+  let owner;
+  try {
+    owner = await client.users.fetch(process.env.SUPERADMIN_ID);
+  } catch {
+    return { sent: false, reason: 'no-superadmin' };
   }
-
-  // Hitung jumlah pemain dari economy.json (buat konfirmasi)
+  const ts = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'short', timeStyle: 'short' });
   let playerCount = null;
   try {
     const d = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'economy.json'), 'utf-8'));
     playerCount = Object.keys(d).length;
   } catch { /* economy.json belum ada — abaikan */ }
-
-  const ts = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'short', timeStyle: 'short' });
-
-  // Kirim file ke DM superadmin — tersimpan di Discord (off-server), bukan di Wispbyte.
-  let owner;
-  try {
-    owner = await message.client.users.fetch(process.env.SUPERADMIN_ID);
-  } catch {
-    return message.reply('❌ Gagal mengambil user superadmin. Cek `SUPERADMIN_ID` di .env.');
-  }
-
   try {
     await owner.send({
-      content: `📦 **Kyriz Backup**\nDibuat: ${ts} WIB\n\nFile:\n${summary.join('\n')}${playerCount != null ? `\n\nPemain terdaftar: **${playerCount}**` : ''}\n\n_Untuk restore: taruh file-file ini di folder \`data/\` lalu restart bot._`,
+      content: `📦 **Kyriz ${daily ? 'Auto-Backup Harian' : 'Backup'}**\nDibuat: ${ts} WIB\n\nFile:\n${summary.join('\n')}${playerCount != null ? `\n\nPemain terdaftar: **${playerCount}**` : ''}\n\n_Untuk restore: taruh file-file ini di folder \`data/\` lalu restart bot._`,
       files: attachments,
     });
   } catch {
-    return message.reply('❌ Gagal kirim DM (kemungkinan DM dari bot dimatikan). Aktifkan pengaturan DM dari bot ini, lalu coba `ky backup` lagi. Data sengaja TIDAK dikirim ke channel demi keamanan.');
+    return { sent: false, reason: 'dm-closed', summary, playerCount };
   }
+  if (daily) {
+    // mark AFTER a successful send: a failed DM (closed) stays unmarked so the next
+    // boot/schedule retries — a rare duplicate beats a silently missing daily backup
+    botState.state.lastBackupDM = today;
+    botState.save();
+  }
+  return { sent: true, count: attachments.length, summary, playerCount };
+}
 
-  return message.reply(`✅ Backup terkirim ke DM kamu (**${attachments.length} file**):\n${summary.join('\n')}${playerCount != null ? `\n\nPemain: **${playerCount}**` : ''}`);
+async function handleBackup(message, userId) {
+  if (!isSuperAdmin(userId)) return; // Only superadmin
+  const r = await sendBackupDM(message.client, false);
+  if (!r.sent) {
+    const reasons = {
+      'no-files': '⚠️ Tidak ada file data di folder `data/` untuk di-backup.',
+      'no-superadmin': '❌ Gagal mengambil user superadmin. Cek `SUPERADMIN_ID` di .env.',
+      'dm-closed': '❌ Gagal kirim DM (kemungkinan DM dari bot dimatikan). Aktifkan pengaturan DM dari bot ini, lalu coba `ky backup` lagi. Data sengaja TIDAK dikirim ke channel demi keamanan.',
+    };
+    return message.reply(reasons[r.reason] || '❌ Backup gagal.');
+  }
+  return message.reply(`✅ Backup terkirim ke DM kamu (**${r.count} file**):\n${r.summary.join('\n')}${r.playerCount != null ? `\n\nPemain: **${r.playerCount}**` : ''}`);
 }
 
 // ============================================================
@@ -4750,6 +4791,7 @@ module.exports = {
   execute,
   handlePrefixCommand,
   handleButton,
+  sendBackupDM,
   handleSelectMenu,
   handleShop,
   isValidPrefixCommand,

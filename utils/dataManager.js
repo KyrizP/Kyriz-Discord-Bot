@@ -8,21 +8,35 @@ const USERS_PATH = path.join(__dirname, '..', 'data', 'users.json');
 // Helper: Read & write JSON
 // ============================================================
 
+// DATA-SAFETY (2026-08-17 incident class): unlike economyManager (which THROWS — money must
+// never silently vanish), replies run on EVERY message, so a corrupt file degrades to empty
+// replies — but the corrupt bytes are PRESERVED as .corrupt-<ts> first, never clobbered.
 function readJSON(filePath) {
+  let raw;
   try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
+    raw = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return {}; // no file yet — fine
+  }
+  try {
     return JSON.parse(raw);
   } catch {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    try { fs.renameSync(filePath, filePath + '.corrupt-' + stamp); } catch { /* best effort */ }
+    console.error(`[DATA SAFETY] ${path.basename(filePath)} corrupt — preserved as .corrupt-${stamp}, running with empty replies`);
     return {};
   }
 }
 
+// ATOMIC WRITE: temp + rename — a crash mid-write can never leave a half-file.
 function writeJSON(filePath, data) {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  const tmp = filePath + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  fs.renameSync(tmp, filePath);
 }
 
 // ============================================================

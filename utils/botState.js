@@ -56,8 +56,13 @@ function load() {
         versions: Array.isArray(patch.versions) ? patch.versions : d.patch.versions,
       },
     };
-  } catch {
-    return defaults(); // first deploy / deleted / corrupt file
+  } catch (err) {
+    if (err.code !== 'ENOENT') { // genuinely missing = first deploy — fine. CORRUPT = preserve bytes.
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      try { fs.renameSync(STATE_FILE, STATE_FILE + '.corrupt-' + stamp); } catch { /* best effort */ }
+      console.error(`[DATA SAFETY] botState.json corrupt — preserved as .corrupt-${stamp}, booting with defaults`);
+    }
+    return defaults(); // deleted / corrupt file — live-safe
   }
 }
 

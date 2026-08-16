@@ -756,8 +756,24 @@ function recordPvp(winnerId, loserId) {
   return { ok: true };
 }
 
+// Compensation/bansos credit — Kryptonite variant (battle currency). Auto-creates battle data
+// so casino-only players can receive it without ever having run a battle command.
+function applyGrantKryptonite(data, userId, kry) {
+  ensureUser(data, userId);
+  const b = ensureBattleData(data[userId]);
+  b.kryptonite = (b.kryptonite || 0) + Math.max(0, Math.floor(kry));
+  return { ok: true, kryptonite: b.kryptonite };
+}
+function grantKryptonite(userId, kry) {
+  const data = economy.readEconomy();
+  const r = applyGrantKryptonite(data, userId, kry);
+  economy.writeEconomy(data);
+  return r;
+}
+
 module.exports = {
   ensureBattleData, ensureUser, applyCreateCharacter, applyGainCharExp, applyDelveStart, applyExtract, applyDie,
+  applyGrantKryptonite, grantKryptonite,
   applySell, applySellGear, applyEquip, applyUnequip, applyUnequipAll, applyBuyGear, applyBuyUnique, applySetCharName, applyPvpResult,
   applyChangeClass, applySwitchClass, applyPresetSave, applyPresetDelete, applyPresetLoad, applyBuyPresetSlot,
   purgePresetsItem, presetSave, presetDelete, presetLoad, buyPresetSlot, PRESET_SLOTS_FREE, PRESET_SLOTS_CAP, PRESET_SLOT_PRICES,

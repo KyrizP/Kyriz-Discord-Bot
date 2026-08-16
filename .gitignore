@@ -1,8 +1,6 @@
 node_modules/
 .env
-data/replies.json
-data/users.json
-data/economy.json
+data/
 CONTEXT.md
 GAME_ODDS.md
 data/diagnostic.log*

@@ -8,7 +8,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { handleAutoReply } = require('./handlers/autoReply');
-const { getAllPlayers } = require('./utils/economyManager');
+const { getAllPlayers, backupEconomy } = require('./utils/economyManager');
 
 // ============================================================
 // Load Commands
@@ -39,7 +39,16 @@ const client = new Client({
 // Event: Ready
 // ============================================================
 client.once('ready', () => {
-  const playerCount = getAllPlayers().length;
+  // DATA SAFETY: an unreadable economy must not kill the rest of boot (backup, migration,
+  // maintenance restore). readJSON already preserved the corrupt bytes by now — commands
+  // will fail loudly until the admin restores; the banner below makes it unmissable.
+  let playerCount = 0;
+  try {
+    playerCount = getAllPlayers().length;
+  } catch (e) {
+    console.error('║   ⚠️ ECONOMY UNREADABLE — economy commands FAIL until restored!');
+    console.error('║   ⚠️ Corrupt file preserved as data/economy.json.corrupt-* — see console/log.');
+  }
   console.log('╔══════════════════════════════════════════╗');
   console.log('║   Kyriz — Personal Assistant Bot         ║');
   console.log('╠══════════════════════════════════════════╣');
@@ -53,6 +62,43 @@ client.once('ready', () => {
     const r = require('./utils/battleManager').migrateAllBattleData();
     if (r.migrated > 0) console.log(`║   Battle data migrated: ${String(r.migrated).padEnd(25)} ║`);
   } catch (e) { console.error('[migrate] battle sweep failed:', e.message); }
+
+  // DATA SAFETY: rolling local backup at boot + every 6h (data/backups/, keep 14).
+  // The 2026-07-17-style corrupt-file wipe can never happen again: readJSON preserves
+  // corrupt bytes instead of silently running empty, and these snapshots cap ANY loss at 6h.
+  try {
+    const dest = backupEconomy();
+    if (dest) console.log(`║   Economy snapshot: ${path.basename(dest).padEnd(30)} ║`);
+  } catch { /* boot must never die on backup failure */ }
+  setInterval(() => { try { backupEconomy(); } catch { /* non-fatal */ } }, 6 * 60 * 60 * 1000);
+
+  // DAILY OFF-SERVER BACKUP: DM all data files to the superadmin at 00:01 WIB every day
+  // (17:01 UTC — WIB is UTC+7, no DST). Copies live in Discord DMs, so even a wiped
+  // container loses at most one day. sendBackupDM guards itself against double-sends.
+  const dailyBackupDM = async () => {
+    try {
+      const r = await gameCommand.sendBackupDM(client, true);
+      if (r && r.sent) console.log(`║   Daily backup DM sent (${r.count} files) — data safe off-server ✅`);
+      else if (r && r.reason === 'dm-closed') console.error('║   ⚠️ Daily backup DM FAILED — superadmin DMs closed!');
+    } catch (e) { console.error('[backup-dm] failed:', e.message); }
+  };
+  const msToNext001WIB = () => { // next 00:01 WIB
+    const now = new Date();
+    const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 17, 1, 0));
+    if (t <= now) t.setUTCDate(t.getUTCDate() + 1);
+    return t - now;
+  };
+  setTimeout(() => { dailyBackupDM(); setInterval(dailyBackupDM, 24 * 60 * 60 * 1000); }, msToNext001WIB());
+  // Retry hole: if today's 00:01 DM failed (bot down / DMs closed), a restart mid-day must
+  // retry it — sendBackupDM's one-per-day guard makes this a no-op when already sent.
+  setTimeout(() => { dailyBackupDM(); }, 60 * 1000);
+  // Housekeeping: stale .tmp-* leftovers from crashes mid-atomic-write (pre-rename)
+  try {
+    const dataDir = path.join(__dirname, 'data');
+    for (const f of fs.readdirSync(dataDir)) {
+      if (f.includes('.tmp-')) { try { fs.rmSync(path.join(dataDir, f)); } catch { /* locked */ } }
+    }
+  } catch { /* data dir missing — fine */ }
 
   // Maintenance persisted ON across a restart → restore the DND presence too
   if (gameCommand.isMaintenanceActive && gameCommand.isMaintenanceActive()) {
