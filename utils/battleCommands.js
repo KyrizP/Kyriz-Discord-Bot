@@ -219,6 +219,7 @@ async function handleBattle(context, userId) {
   }
   const note = (res.run.floor > 1 ? `⚡ Auto-swept to floor ${res.run.floor} (no loot — push for drops).\n` : '') + 'Push for loot, or Extract to bank (`ky end` also works).';
   const msg = await context.reply({ embeds: [delveFloorEmbed(username, res.run, note)], components: [actionRow(userId, res.run)] });
+  battlePanels.set(userId, msg);
   // Auto-extract on idle: frees the run if the player goes AFK.
   // Scoped to THIS run (myRun) so a stale collector from a PREVIOUS battle can't extract a newer run.
   const myRun = res.run;
@@ -297,6 +298,13 @@ async function handleEnd(context, userId) {
   if (battle.hasActiveRun(userId)) {
     const res = battle.extractRun(userId);
     notifyProfileLevelUp(context.channel, userId, res.xpResult);
+    // Close the delve panel this run belongs to — its buttons must not outlive the run
+    // (stale panels stayed clickable and would control the NEXT run from old messages).
+    const panel = battlePanels.get(userId);
+    if (panel) {
+      battlePanels.delete(userId);
+      try { await panel.edit({ embeds: [infoEmbed(uname(context, userId), '⚔️ Run ended via `ky end` — this panel is closed.')], components: [] }); } catch {}
+    }
     return context.reply({ embeds: [extractEmbed(uname(context, userId), res)] });
   }
   // PvP forfeit (works any time — your turn or not)
@@ -372,16 +380,18 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
   const baseEva = clsDef.baseEvasion || 0; // Rogue class passive
   const EVA_TOTAL_CAP = require('./battleConfig').EVASION_TOTAL_CAP; // single source of truth (engine + display)
   const effEva = Math.min(baseEva + (passSum.evasion || 0), EVA_TOTAL_CAP);
-  const passLines = Object.entries(passSum)
+  const passLineList = Object.entries(passSum)
     .filter(([id, v]) => v > 0 && PASSIVES[id])
     .map(([id, v]) => {
       if (id === 'evasion' && baseEva > 0) return `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${effEva}${PASSIVES[id].unit}${effEva >= EVA_TOTAL_CAP ? ' *(MAX)*' : ''}`;
       return `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(MAX)*' : ''}`;
-    })
-    .join('\n');
+    });
+  // Rogue class evasion is ALWAYS active in combat — it must be listed even when no gear
+  // passive exists (full non-evasion gear used to hide the base 8% entirely).
+  if (baseEva > 0 && !passSum.evasion) passLineList.push(`🌀 Evasion ${effEva}% *(class)*`);
+  const passLines = passLineList.join('\n');
   let passSection = '';
   if (passLines) passSection = `\n\n**✨ Active Passives:**\n${passLines}`;
-  else if (baseEva > 0) passSection = `\n\n**✨ Active Passives:**\n🌀 Evasion ${baseEva}% *(class)*`;
   const banner = isActive
     ? `🟢 ACTIVE · ${clsDef.emoji} ${clsDef.name} — Lv.${c.charLevel}`
     : `⚪ INACTIVE · ${clsDef.emoji} ${clsDef.name} — Lv.${c.charLevel}`;
@@ -1031,6 +1041,10 @@ function pvpResultEmbed(fight) {
     );
 }
 const pvpMessages = new Map(); // fightId -> live Discord message (for edits + AFK callback)
+// userId -> live DELVE panel message. Tracked so `ky end` (a text command, no button context)
+// can close the panel it belongs to — otherwise the old panel keeps working buttons forever
+// and, after a NEW run starts, stale panels control the new run from old messages.
+const battlePanels = new Map();
 function _pvpFinish(fightId, fight) {
   const loserKey = fight.winner === 'p1' ? 'p2' : 'p1';
   battle.recordPvp(fight[fight.winner].id, fight[loserKey].id);
