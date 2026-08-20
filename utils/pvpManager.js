@@ -121,8 +121,9 @@ function resolvePvpTurn(fightId, actorId, skillId) {
   const atkMult = actor.buff.turns > 0 ? (1 + actor.buff.atkPct / 100) : 1;
   if (actor.buff.turns > 0) actor.buff.turns -= 1;
   const pierce = (skill.effect && skill.effect.pierce) ? skill.effect.pierce : 0;
+  const rupt = (actor.passives.rupture || 0) > 0 ? 0.15 : 0; // Abyssal Edge: rupture 15% (fixed) — additive with skill pierce
   const rawAtk = skill.type === 'magic' ? actor.stats.matk * atkMult : actor.stats.atk * atkMult;
-  const rawDef = (skill.type === 'magic' ? def.stats.mdef : def.stats.def) * (1 - pierce);
+  const rawDef = (skill.type === 'magic' ? def.stats.mdef : def.stats.def) * (1 - pierce - rupt);
   let dmg = PVP_DEF_MODE === 'mult'
     ? Math.max(1, Math.round(rawAtk * skill.mult * (1 - rawDef / (rawDef + PVP_DEF_K))))
     : (skill.type === 'magic' ? magicDamage(rawAtk, rawDef, skill.mult) : physicalDamage(rawAtk, rawDef, skill.mult));

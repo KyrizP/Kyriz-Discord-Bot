@@ -698,6 +698,7 @@ async function handlePrefixCommand(message, command, args) {
     }
     case 'battle':
       if (args[0] && args[0].toLowerCase() === 'help') return battleCmd.handleBattleHelp(message);
+      if (args[0] && args[0].toLowerCase() === 'abyss') return battleCmd.handleAbyss(message, userId, args.slice(1));
       if (message.mentions && message.mentions.users.first()) return battleCmd.handlePvp(message, userId, message.mentions.users.first().id);
       return battleCmd.handleBattle(message, userId);
     case 'switch':
@@ -1642,8 +1643,11 @@ async function handleBuyPrefix(message, userId, args) {
 
 // USE: consumable -> shopManager.useItem; permanent cosmetic -> shopManager.equipCosmetic.
 async function handleUse(context, userId, args, isPrefix = false) {
-  const itemId = isPrefix ? (args[0] || '').toLowerCase() : context.options.getString('item', true);
-  const item = getItem(itemId);
+  // Prefix ergonomics: `ky use drake slayer` -> 'drake_slayer'; bare title names resolve
+  // ('drake_slayer' -> title_drake_slayer) — players kept guessing these (owner live report).
+  let itemId = isPrefix ? (args || []).join('_').toLowerCase() : context.options.getString('item', true);
+  let item = getItem(itemId);
+  if (!item && getItem('title_' + itemId)) { itemId = 'title_' + itemId; item = getItem(itemId); } // 'gambler' -> title_gambler
   if (!item) {
     const m = 'Unknown item. Browse with `ky shop`, then `ky use <id>` (e.g. `ky use lucky_token`).';
     return isPrefix ? context.reply(m) : context.reply({ content: m, ephemeral: true });
@@ -1689,7 +1693,7 @@ async function handleProfile(context, targetId, username, avatarURL, isPrefix = 
   const bar = '▰'.repeat(filled) + '▱'.repeat(10 - filled);
 
   const equipped = [
-    titleItem ? `Title [${titleItem.effect.value}]` : null,
+    titleItem ? `Title [${(titleItem.emoji && titleItem.emoji !== '🏷️') ? titleItem.emoji + ' ' : ''}${titleItem.effect.value}]` : null,
     badgeItem ? `Badge ${badgeItem.effect.value}` : null,
     colorItem ? `Color ${colorItem.name.replace('Color: ', '')}` : null,
   ].filter(Boolean).join(' · ') || '_None_';
@@ -4534,7 +4538,7 @@ function createHelpEmbed() {
       '🃏 **Games**\n' +
       '`bj [bet]` · `cf [bet] [h/t]` · `slots [bet]` · `dice [bet] [1-6/e/o]` · `crash [bet]` · `rl [bet] [red/black/0-36]` · `mines [bet]` · `hl [bet]` · `tw [bet]`\n\n' +
       '⚔️ **Battle** _— Kryptonite RPG_\n' +
-      '`battle [@user]` · `battle help` · `char [name <nama>|page]` · `switch <class>` · `bag` · `gear [id]` · `sell [all|code n]` · `buygear <code>` · `equip <id>` · `unequip <slot>` · `sellgear <id> | <rarity> all` · `preset [n|save n|delete n|buy slot]` · `shop gear [tier|rates]` · `lb battle [all]`\n\n' +
+      '`battle [@user]` · `battle abyss` · `battle help` · `char [name <nama>|page]` · `switch <class>` · `bag` · `gear [id]` · `sell [all|code n]` · `buygear <code>` · `equip <id>` · `unequip <slot>` · `sellgear <id> | <rarity> all` · `preset [n|save n|delete n|buy slot]` · `shop gear [tier|rates]` · `lb battle [all]`\n\n' +
       '💰 **Economy**\n' +
       '`wallet` · `daily` · `tf @user <amt>` · `lb [all]`\n\n' +
       '🛍️ **Shop**\n' +

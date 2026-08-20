@@ -128,6 +128,7 @@ const TIER_INFO = {
   legendary: { letter: 'L', color: '🟠', price: 5000,  passives: 1 },
   mythic:    { letter: 'M', color: '🟡', price: 10000, passives: 1 },
   divine:    { letter: 'D', color: '🔶', price: 20000, passives: 2 },
+  abyssal:   { letter: 'A', color: '🌌', price: 0,     passives: 3 }, // Abyssal Edge trophy tier — not purchasable/sellable (battleManager guard)
   immortal:  { letter: 'I', color: '🔴', price: 0,     passives: 0 },
 };
 
@@ -179,6 +180,9 @@ const PASSIVES = {
   evasion:   { emoji: '🌀', name: 'Evasion',   weight: 10, unit: '%', ranges: { legendary: [3, 5],   mythic: [5, 8],   divine: [8, 13] } },
   greed:     { emoji: '🧪', name: 'Greed',     weight: 11, unit: '%', ranges: { legendary: [12, 18], mythic: [17, 23], divine: [22, 30] } },
   wisdom:    { emoji: '📚', name: 'Wisdom',    weight: 11, unit: '%', ranges: { legendary: [12, 18], mythic: [17, 23], divine: [22, 30] } },
+  // Abyss Tower trophy passive (Abyssal Edge, fixed 15% DEF/MDEF pierce — value lives on the item).
+  // weight 0 + no ranges = NEVER rolls from mystery boxes (rollPassives filters weight > 0).
+  rupture:   { emoji: '🕳️', name: 'Rupture',   weight: 0,  unit: '%', ranges: null },
 };
 
 // EVASION_TOTAL_CAP — additive total of class baseEvasion + gear evasion (Rogue's edge:

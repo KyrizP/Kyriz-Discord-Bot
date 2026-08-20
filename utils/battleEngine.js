@@ -127,9 +127,10 @@ function resolveFight(player, enemy) {
     const atkMult = buff.turns > 0 ? (1 + buff.atkPct / 100) : 1;
     if (buff.turns > 0) buff.turns -= 1; // buff applies to this hit, then expends a turn
     const pierce = (skill.effect && skill.effect.pierce) ? skill.effect.pierce : 0;
+    const rupt = (p.rupture || 0) > 0 ? 0.15 : 0; // Abyssal Edge: rupture 15% (fixed) — stacks additively with skill pierce (single source, no cap needed)
     let dmg = skill.type === 'magic'
-      ? magicDamage(stats.matk * atkMult, enemy.mdef * (1 - pierce), skill.mult)
-      : physicalDamage(stats.atk * atkMult, enemy.def * (1 - pierce), skill.mult);
+      ? magicDamage(stats.matk * atkMult, enemy.mdef * (1 - pierce - rupt), skill.mult)
+      : physicalDamage(stats.atk * atkMult, enemy.def * (1 - pierce - rupt), skill.mult);
     if ((p.berserker || 0) > 0) dmg = Math.round(dmg * (1 + p.berserker / 100));
     if (crit > 0 && Math.random() < crit) dmg = Math.floor(dmg * CRIT.mult);
     ehp -= dmg;

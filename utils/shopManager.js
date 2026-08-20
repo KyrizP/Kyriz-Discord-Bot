@@ -4,13 +4,23 @@
 // swap I/O without touching production behavior.
 // Self-check: `node utils/shopManager.js`.
 const economyManager = require('./economyManager');
-const { getItem, spinWheel, LUCKY_WHEEL } = require('./shopItems');
+const { getItem, spinWheel, LUCKY_WHEEL, MILESTONE_TITLE_LABELS } = require('./shopItems');
 
 // ---- Defensive accessors: existing users may lack shop fields ----
 function inv(user) { return user.inventory || (user.inventory = {}); }
+// Pre-catalog era: Abyss milestones pushed the emoji'd DISPLAY STRING into cosmetics.
+// Those can never equip (getItem looks up catalog ids). Normalize label -> id, in place,
+// idempotent — runs on every cosmetics access, so old data self-heals on first touch.
+function normalizeCosmetics(user) {
+  const c = user.cosmetics;
+  if (!c) return;
+  if (c.title && MILESTONE_TITLE_LABELS[c.title]) c.title = MILESTONE_TITLE_LABELS[c.title];
+  if (Array.isArray(c.owned)) c.owned = c.owned.map((x) => MILESTONE_TITLE_LABELS[x] || x);
+}
 function cosmetics(user) {
   if (!user.cosmetics) user.cosmetics = { title: null, badge: null, color: null, owned: [] };
   if (!Array.isArray(user.cosmetics.owned)) user.cosmetics.owned = [];
+  normalizeCosmetics(user);
   return user.cosmetics;
 }
 function boosts(user) { return user.activeBoosts || (user.activeBoosts = {}); }
@@ -27,6 +37,7 @@ function getInventoryState(userId) {
   const data = economyManager.readEconomy();
   const u = data[userId];
   if (!u) return null;
+  if (u.cosmetics) normalizeCosmetics(u); // inv/profile view also self-heals legacy labels
   return {
     inventory: { ...(u.inventory || {}) },
     cosmetics: {
@@ -75,6 +86,7 @@ function purchase(userId, itemId) {
 
   const item = getItem(itemId);
   if (!item) return { success: false, message: 'Item not found.', newBalance: 0 };
+  if (item.unlisted) return { success: false, message: 'This item cannot be purchased — it is earned, not bought.', newBalance: 0 }; // milestone grants: price 0, never buyable
 
   const data = economyManager.readEconomy();
   const u = data[userId];
@@ -348,6 +360,24 @@ if (require.main === module) {
     const r16b = useItem('999', 'lucky_token');
     ok(r16b.success === false, 'useItem missing user fails');
     ok(writes === 0, `useItem missing user writes zero (got ${writes})`);
+
+    // 17. milestone titles: legacy display labels self-heal to catalog ids + equip works.
+    // (bugfix: pre-catalog era stored '🐉 Drake Slayer' in cosmetics — unequippable forever)
+    store = { '411': { username: 'mz', balance: 0, cosmetics: { title: '🐉 Drake Slayer', badge: null, color: null, owned: ['🐉 Drake Slayer', '🪞 Self-Slayer'] } } };
+    writes = 0;
+    const st17 = getInventoryState('411');
+    ok(JSON.stringify(st17.cosmetics.owned) === JSON.stringify(['title_drake_slayer', 'title_self_slayer']), 'legacy owned labels normalize to catalog ids on view');
+    ok(st17.cosmetics.title === 'title_drake_slayer', 'legacy equipped label normalizes too');
+    const r17 = equipCosmetic('411', 'title_self_slayer');
+    ok(r17.success === true, 'milestone title equips after migration (ky use title_self_slayer)');
+    ok(writes >= 1, 'equip writes');
+
+    // 18. milestone titles are NEVER purchasable (unlisted, price 0 — earned only).
+    store = { '412': { username: 'by', balance: 999999999 } };
+    writes = 0;
+    const r18 = purchase('412', 'title_abyssal_master');
+    ok(r18.success === false, 'purchasing a milestone title is blocked');
+    ok(writes === 0, 'blocked milestone purchase writes zero');
   } finally {
     // Restore originals so we never leak the stub into other requires.
     economyManager.readEconomy = origRead;

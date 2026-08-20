@@ -46,12 +46,35 @@ const ITEMS = {
   color_gold:       { id: 'color_gold',      name: 'Color: Gold',       emoji: '💛', category: 'cosmetic', type: 'permanent', price: 2000000, effect: { kind: 'color', value: 'gold', hex: 0xFFD700 }, description: 'Gold embed color (Premium).' },
   color_royal:      { id: 'color_royal',     name: 'Color: Royal',      emoji: '💜', category: 'cosmetic', type: 'permanent', price: 2000000, effect: { kind: 'color', value: 'royal', hex: 0x9B59B6 }, description: 'Royal embed color (Premium).' },
   color_obsidian:   { id: 'color_obsidian',  name: 'Color: Obsidian',   emoji: '⚫', category: 'cosmetic', type: 'permanent', price: 2000000, effect: { kind: 'color', value: 'obsidian', hex: 0x1A1A2E }, description: 'Obsidian embed color (Premium).' },
+  // --- Abyss milestone titles: granted by Abyss Tower clears, NEVER purchasable ---
+  // unlisted:true keeps them out of listBuyable() (shop pages + buy/use slash choices —
+  // also protects Discord's 25-choice cap: 21 buyable + 7 would exceed it).
+  // Equip via prefix: ky use title_drake_slayer (the id shows in the ky inv panel).
+  title_gatebreaker:      { id: 'title_gatebreaker',      name: 'Title: Gatebreaker',      emoji: '🗝️', category: 'cosmetic', type: 'permanent', price: 0, unlisted: true, effect: { kind: 'title', value: 'Gatebreaker' },    description: 'Abyss milestone — clear Floor 1.' },
+  title_drake_slayer:     { id: 'title_drake_slayer',     name: 'Title: Drake Slayer',     emoji: '🐉', category: 'cosmetic', type: 'permanent', price: 0, unlisted: true, effect: { kind: 'title', value: 'Drake Slayer' },   description: 'Abyss milestone — clear Floor 3.' },
+  title_stormcaller:      { id: 'title_stormcaller',      name: 'Title: Stormcaller',      emoji: '⚡', category: 'cosmetic', type: 'permanent', price: 0, unlisted: true, effect: { kind: 'title', value: 'Stormcaller' },    description: 'Abyss milestone — clear Floor 5.' },
+  title_frozen_heart:     { id: 'title_frozen_heart',     name: 'Title: Frozen Heart',     emoji: '❄️', category: 'cosmetic', type: 'permanent', price: 0, unlisted: true, effect: { kind: 'title', value: 'Frozen Heart' },   description: 'Abyss milestone — clear Floor 7.' },
+  title_self_slayer:      { id: 'title_self_slayer',      name: 'Title: Self-Slayer',      emoji: '🪞', category: 'cosmetic', type: 'permanent', price: 0, unlisted: true, effect: { kind: 'title', value: 'Self-Slayer' },    description: 'Abyss milestone — clear Floor 9 (beat your mirror).' },
+  title_abyssal_overlord: { id: 'title_abyssal_overlord', name: 'Title: Abyssal Overlord', emoji: '💀', category: 'cosmetic', type: 'permanent', price: 0, unlisted: true, effect: { kind: 'title', value: 'Abyssal Overlord' }, description: 'Abyss milestone — clear Floor 10.' },
+  title_abyssal_master:   { id: 'title_abyssal_master',   name: 'Title: Abyssal Master',   emoji: '🌌', category: 'cosmetic', type: 'permanent', price: 0, unlisted: true, effect: { kind: 'title', value: 'Abyssal Master' },  description: 'Abyss 30-star mastery title.' },
+};
+
+// Legacy milestone labels (pre-catalog era stored the emoji'd display string in
+// cosmetics.owned/equipped). Map display -> catalog id; normalizeCosmetics migrates old data.
+const MILESTONE_TITLE_LABELS = {
+  '🗝️ Gatebreaker': 'title_gatebreaker',
+  '🐉 Drake Slayer': 'title_drake_slayer',
+  '⚡ Stormcaller': 'title_stormcaller',
+  '❄️ Frozen Heart': 'title_frozen_heart',
+  '🪞 Self-Slayer': 'title_self_slayer',
+  '💀 Abyssal Overlord': 'title_abyssal_overlord',
+  '🌌 Abyssal Master': 'title_abyssal_master',
 };
 
 const WHEELS = { LUCKY_WHEEL, MYSTERY_WHEEL };
 
 function getItem(id) { return ITEMS[id] || null; }
-function listBuyable() { return Object.values(ITEMS); }
+function listBuyable() { return Object.values(ITEMS).filter((i) => !i.unlisted); } // unlisted = milestone grants (never shop-listed, never buyable)
 
 // Pick a wheel slice. rng is injectable for testing (defaults to Math.random).
 function spinWheel(wheelName, rng = Math.random) {
@@ -79,7 +102,7 @@ function wheelEV(wheelName) {
 }
 
 module.exports = {
-  ITEMS, LUCKY_WHEEL, MYSTERY_WHEEL,
+  ITEMS, LUCKY_WHEEL, MYSTERY_WHEEL, MILESTONE_TITLE_LABELS,
   getItem, listBuyable, spinWheel, applyDailyMultiplier, wheelEV,
 };
 

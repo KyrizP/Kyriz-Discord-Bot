@@ -12,6 +12,7 @@
 
 const { CLASSES, GEAR, DROPS } = require('./battleConfig');
 const { computeStats, generateEnemy, resolveFight, rollDrop, getPassives } = require('./battleEngine');
+const { ensureAbyssData } = require('./abyssManager'); // one direction only — abyssManager must NOT require battleManager (circular)
 const economy = require('./economyManager');
 const { isSuperAdmin } = economy;
 const unique = require('./uniqueItems');
@@ -76,6 +77,7 @@ function ensureBattleData(user) {
   if (b.pvpLosses == null) b.pvpLosses = 0;
   if (!Array.isArray(b.presets)) b.presets = [];
   if (b.presetSlots == null) b.presetSlots = PRESET_SLOTS_FREE;
+  ensureAbyssData(b); // Abyss Tower progress (stars/rewarded/milestones) — backfill + shape repair
   // v1.6 lazy migration: flat single-char -> characters map (idempotent, proven v1.1 pattern)
   if (b.charClass && !b.characters) {
     b.characters = {};
@@ -231,7 +233,7 @@ function applySellGear(data, userId, itemId, qty) {
   if (itemId && itemId.startsWith('ky')) {
     const uq = b.uniqueItems[itemId];
     if (!uq) return { ok: false, reason: 'Not in your collection.' };
-    if (uq.rarity === 'immortal') return { ok: false, reason: 'This item cannot be sold.' }; // one-of-a-kind tier, no sell value — never deletable
+    if (uq.rarity === 'immortal' || uq.rarity === 'abyssal') return { ok: false, reason: 'This item cannot be sold.' }; // one-of-a-kind tiers, no sell value — never deletable (abyssal = Abyssal Edge trophy)
     if (isEquippedOnAnyChar(b, itemId)) return { ok: false, reason: 'Unequip it first.' };
     const kry = unique.sellValue(uq);
     delete b.uniqueItems[itemId];

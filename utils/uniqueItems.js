@@ -82,7 +82,7 @@ function rollStats(tier, slot, variant) {
 
 function rollPassives(tier) {
   const count = TIER_INFO[tier].passives;
-  const ids = Object.keys(PASSIVES);
+  const ids = Object.keys(PASSIVES).filter((id) => (PASSIVES[id].weight || 0) > 0); // weight-0 passives (rupture) are unrollable — they also have no gacha ranges
   const picked = [];
   const used = new Set();
   while (picked.length < count) {

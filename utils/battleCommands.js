@@ -14,6 +14,8 @@ const { CLASSES, GEAR, DROPS, TIER_INFO, PASSIVES, LEGEND_GEAR_RANGES, MYSTERY_B
 const { computeStats, getPassives } = require('./battleEngine');
 const unique = require('./uniqueItems');
 const pvp = require('./pvpManager');
+const abyss = require('./abyssManager');
+const { ABYSS_FLOORS, BOSS_DIALOGUES, STAR_THRESHOLDS, ABYSS_MILESTONES } = require('./abyssConfig');
 const { getItem } = require('../utils/shopItems');
 
 const BAG_PAGE_SIZE = 8;
@@ -126,6 +128,7 @@ function passiveDesc(p) {
     case 'evasion': return `${v} chance to dodge enemy attack`;
     case 'greed': return `Gain ${v} more 🧪 from drops`;
     case 'wisdom': return `Gain ${v} more Char EXP`;
+    case 'rupture': return `Attacks ignore ${v} of target's DEF/MDEF`; // Abyssal Edge only — never rolls from boxes
     default: return '';
   }
 }
@@ -208,6 +211,9 @@ function extractEmbed(username, res) {
 
 // ---------- handlers (context = interaction OR message) ----------
 async function handleBattle(context, userId) {
+  if (abyss.isInAbyssFight(userId)) {
+    return context.reply({ content: 'Finish your Abyss fight first (`ky battle abyss`).' }); // E10
+  }
   if (battle.hasActiveRun(userId)) {
     return context.reply({ content: '⚔️ You already have an active battle. Use **Push** / **Extract**, or end it with `ky end`.' });
   }
@@ -246,6 +252,10 @@ const HELP_PAGES = [
         '`ky battle` — enter dungeon (**5,000 💎** entry). First time: pick a class.\n' +
         '`ky char` — stats, gear, depth · `ky switch <class>` — swap character\n' +
         '`ky preset [n]` — gear loadouts · `ky bag` — drops · `ky gear` — equipment\n\n' +
+        '🌌 **ABYSS TOWER** — `ky battle abyss`\n' +
+        '10 unique bosses · turn-based (you pick skills) · floors unlock in order · free entry & retry\n' +
+        'Rewards **1× per floor, forever** — replays improve stars only · ⭐⭐⭐ = ≤18 turns + HP ≥50%\n' +
+        '⚠️ Recommended class & level are a **hint** — gear matters (epic hits a wall at Floor 3).\n\n' +
         '🎭 **MULTIPLE CHARACTERS**\n' +
         '`ky switch <class>` — one command: owned = free swap, unowned = create (**🧪 5,000**). Gear **per-character**, 🧪/bag/collection **shared**.\n\n' +
         '🎒 **GEAR PRESETS**\n' +
@@ -314,6 +324,24 @@ async function handleEnd(context, userId) {
       if (res.ok) { _pvpFinish(fightId, f); return context.reply({ embeds: [infoEmbed(uname(context, userId), 'You forfeited the duel.')] }); }
     }
   }
+  // Abyss fight: `ky end` = flee the tower (R-contract parity with delve/PvP — same
+  // mental model: one command ends whatever you're in). No rewards, no penalty.
+  if (abyss.isInAbyssFight(userId)) {
+    const st = abyssPanels.get(userId);
+    const fight = abyss.getAbyssFight(userId);
+    if (fight && fight.over) {
+      // race window: the killing blow already landed and the victory/defeat panel is
+      // mid-render (~3s animation). Do NOT claim a flee — the real result owns the panel.
+      return context.reply({ content: 'Your Abyss fight is already ending — check the panel for the result.' });
+    }
+    if (fight) {
+      fight.over = true; fight.winner = 'boss'; fight.forfeit = true;
+      if (st) { try { await st.msg.edit({ embeds: [infoEmbed(uname(context, userId), '🚪 You fled the Abyss via `ky end`. No rewards, no penalty.')], components: [] }); } catch {} }
+      abyss.endAbyssFight(userId);
+      if (st) abyssPanels.delete(userId);
+    }
+    return context.reply({ embeds: [infoEmbed(uname(context, userId), '🚪 You fled the Abyss. The tower waits for your return.')] });
+  }
   return context.reply({ content: 'You have no active battle or duel.' });
 }
 function handleName(context, userId, nameStr) {
@@ -367,6 +395,12 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
   const c = b.characters[cls];
   const clsDef = CLASSES[cls];
   const isActive = cls === b.activeClass;
+  // Abyss progress (account-level like PvP/Kryptonite): highest cleared + stars
+  const abyssData = (b.abyss && Array.isArray(b.abyss.stars)) ? b.abyss : { stars: Array(10).fill(0) };
+  let abyssHighest = 0;
+  for (let i = 0; i < abyssData.stars.length; i++) if (abyssData.stars[i] > 0) abyssHighest = i + 1;
+  const abyssStars = abyssData.stars.reduce((a, x) => a + x, 0);
+  const abyssFloorLabel = abyssHighest > 0 ? String(abyssHighest) : '—';
   const stats = computeStats(c.charLevel, cls, c.equipment, b.uniqueItems || {});
   const totalStat = stats.hp + stats.atk + stats.matk + stats.def + stats.mdef + stats.spd;
   const equipLines = ['weapon', 'head', 'armor', 'boots', 'accessory']
@@ -384,6 +418,7 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
     .filter(([id, v]) => v > 0 && PASSIVES[id])
     .map(([id, v]) => {
       if (id === 'evasion' && baseEva > 0) return `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${effEva}${PASSIVES[id].unit}${effEva >= EVA_TOTAL_CAP ? ' *(MAX)*' : ''}`;
+      if (id === 'rupture') return `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit} — attacks ignore ${v}${PASSIVES[id].unit} of target's DEF/MDEF`; // Abyss Edge: inline desc (new/foreign passive, spec §9.1)
       return `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(MAX)*' : ''}`;
     });
   // Rogue class evasion is ALWAYS active in combat — it must be listed even when no gear
@@ -407,7 +442,8 @@ function buildCharEmbed(b, cls, displayName, pageIdx, totalPages) {
       `🏷️ Name: ${c.charName || `_(unset — \`ky char name <nama>\`)`}\n` +
       `**Char EXP:** ${c.charExp}/${c.charExpNeeded}\n` +
       `🧪 Kryptonite: **${b.kryptonite.toLocaleString()}** · 🏰 Best depth: **${c.bestDepth}**\n` +
-      `⚔️ PvP: **${b.pvpWins || 0}W/${b.pvpLosses || 0}L**${((b.pvpWins || 0) + (b.pvpLosses || 0)) > 0 ? ` (${Math.round((b.pvpWins || 0) / ((b.pvpWins || 0) + (b.pvpLosses || 0)) * 100)}% win rate)` : ''}\n\n` +
+      `⚔️ PvP: **${b.pvpWins || 0}W/${b.pvpLosses || 0}L**${((b.pvpWins || 0) + (b.pvpLosses || 0)) > 0 ? ` (${Math.round((b.pvpWins || 0) / ((b.pvpWins || 0) + (b.pvpLosses || 0)) * 100)}% win rate)` : ''}\n` +
+      `🌌 Abyss: **Floor ${abyssFloorLabel} · ${abyssStars}/30 ⭐**\n\n` +
       `❤️ HP **${stats.hp}** · ⚔️ ATK **${stats.atk}** · 🔮 MATK **${stats.matk}**\n` +
       `🛡️ DEF **${stats.def}** · ✨ MDEF **${stats.mdef}** · 💨 SPD **${stats.spd}**\n` +
       `**Combat Score: ${totalStat}**\n\n${equipLines}${passSection}`
@@ -707,6 +743,7 @@ async function handleSwitchClass(context, userId, args) {
     return context.reply({ content: 'Invalid class. You own: ' + (bd && bd.b.characters ? Object.keys(bd.b.characters).join(', ') : 'none') + '.' });
   }
   if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
+  if (abyss.isInAbyssFight(userId)) return context.reply({ content: 'Finish your Abyss fight first (`ky battle abyss`).' }); // E4
   if (hasPendingChallenge(userId)) return context.reply({ content: 'You have a pending duel challenge — settle it first.' });
   const bd = getBattle(userId);
   if (!bd || !battle.getActiveChar(bd.b)) return context.reply({ content: 'Create a character first (`ky battle`).' }); // switch needs >=1 char — don't offer creation to a classless player
@@ -793,7 +830,10 @@ function buildPresetPanel(b, userId, page, viewerId) {
     const passRaw = gpr(preset.slots, b.uniqueItems || {});
     const passLine = Object.entries(passSum)
       .filter(([id, v]) => v > 0 && PASSIVES[id])
-      .map(([id, v]) => `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(MAX)*' : ''}`)
+      .map(([id, v]) => {
+        if (id === 'rupture') return `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit} — attacks ignore ${v}${PASSIVES[id].unit} of target's DEF/MDEF`; // Abyss Edge: inline desc (matches ky char)
+        return `${PASSIVES[id].emoji} ${PASSIVES[id].name} ${v}${PASSIVES[id].unit}${(CAPS[id] && passRaw[id] > v) ? ' *(MAX)*' : ''}`;
+      })
       .join('\n');
     desc = `${gearLines}\n\n**✨ Active Passives:**\n${passLine || '—'}`;
   }
@@ -850,6 +890,7 @@ async function handlePresetBuy(context, userId, bd) {
 async function handlePreset(context, userId, args) {
   args = args || [];
   if (pvp.isInFight(userId)) return context.reply({ content: 'Finish your duel first (`ky end`).' });
+  if (abyss.isInAbyssFight(userId)) return context.reply({ content: 'Finish your Abyss fight first (`ky battle abyss`).' }); // E4 — no preset save/load mid-fight
   if (hasPendingChallenge(userId)) return context.reply({ content: 'You have a pending duel challenge — settle it first.' });
   const bd = getBattle(userId);
   if (!bd) return context.reply({ content: 'You are not registered.' });
@@ -949,6 +990,7 @@ function renderGearRates(username) {
   for (const t of tiers) desc += shortName[t].padEnd(10);
   desc += '\n';
   for (const [id, p] of Object.entries(P)) {
+    if (!p.ranges) continue; // non-gacha passives (🕳️ Rupture — Abyssal Edge only, never rolls from boxes)
     desc += (p.emoji + ' ' + p.name).padEnd(14) + '  ';
     for (const t of tiers) desc += (p.ranges[t][0] + '-' + p.ranges[t][1] + (p.unit || '')).padEnd(10);
     desc += '\n';
@@ -1081,10 +1123,10 @@ function clearChallengeTimer(aId, bId) {
 async function handlePvp(context, userId, targetId) {
   if (!targetId) return context.reply({ content: 'Mention someone to duel: `ky battle @user`' });
   if (targetId === userId) return context.reply({ content: 'You cannot duel yourself.' });
-  if (battle.hasActiveRun(userId) || pvp.isInFight(userId))
+  if (battle.hasActiveRun(userId) || pvp.isInFight(userId) || abyss.isInAbyssFight(userId))
     return context.reply({ content: 'Finish your current battle/duel first.' });
-  if (battle.hasActiveRun(targetId) || pvp.isInFight(targetId))
-    return context.reply({ content: 'That player is busy right now.' });
+  if (battle.hasActiveRun(targetId) || pvp.isInFight(targetId) || abyss.isInAbyssFight(targetId))
+    return context.reply({ content: 'That player is busy right now.' }); // E12 — target mid-Abyss
   const data = economy.readEconomy();
   const me = data[userId], foe = data[targetId];
   const hasChar = (u) => u && u.battle && battle.getActiveChar(battle.ensureBattleData(u));
@@ -1114,7 +1156,8 @@ async function handlePvpButton(interaction) {
     const aId = parts[2], bId = parts[3];
     clearChallengeTimer(aId, bId); // cancel expiry timer — challenge being resolved
     if (interaction.user.id !== bId) return interaction.reply({ content: '⛔ This challenge is not yours.', ephemeral: true });
-    if (battle.hasActiveRun(aId) || battle.hasActiveRun(bId) || pvp.isInFight(aId) || pvp.isInFight(bId))
+    if (battle.hasActiveRun(aId) || battle.hasActiveRun(bId) || pvp.isInFight(aId) || pvp.isInFight(bId)
+        || abyss.isInAbyssFight(aId) || abyss.isInAbyssFight(bId)) // E11 — mutual lock with Abyss
       return interaction.update({ embeds: [infoEmbed('', 'Duel cancelled — a player is now busy.')], components: [] });
     const data = economy.readEconomy();
     const aU = data[aId], bU = data[bId];
@@ -1192,6 +1235,575 @@ async function handlePvpButton(interaction) {
   }
 }
 
+// ---------- ABYSS TOWER (`ky battle abyss`) — turn-based boss fights (spec 2026-08-19) ----------
+const ABYSS_COLOR = 0x7c3aed;
+const ABYSS_ENTRY_MS = 60_000;   // floor-select panel auto-flee (does NOT reset on selection — anti-stall)
+const ABYSS_RESULT_MS = 120_000; // result panel auto-close: buttons die, embed becomes plain progress summary
+const ABYSS_AFK_MS = 120_000;    // per player turn — boss fights need thinking time (spec §5.2)
+const N_FLOORS = ABYSS_FLOORS.length;
+// userId -> { timer, msg, floor } — the entry select+confirm flow (60s)
+const abyssEntryStates = new Map();
+// userId -> { msg, username } — the live fight panel (AFK/timeout callbacks edit it)
+const abyssPanels = new Map();
+const abyssAfkTimers = new Map(); // userId -> setTimeout handle
+const abyssResultTimers = new Map(); // userId -> result-panel auto-close handle
+function armAbyssResultTimer(userId, msg, username) {
+  clearAbyssResultTimer(userId);
+  const t = setTimeout(async () => {
+    abyssResultTimers.delete(userId);
+    try { await msg.edit({ embeds: [abyssProgressEmbed(username || 'Player', userId)], components: [] }); } catch { /* message gone */ }
+  }, ABYSS_RESULT_MS);
+  abyssResultTimers.set(userId, t);
+}
+function clearAbyssResultTimer(userId) {
+  const t = abyssResultTimers.get(userId);
+  if (t) { clearTimeout(t); abyssResultTimers.delete(userId); }
+}
+
+function clearAbyssAfk(userId) {
+  const t = abyssAfkTimers.get(userId);
+  if (t) { clearTimeout(t); abyssAfkTimers.delete(userId); }
+}
+function armAbyssAfk(userId) {
+  clearAbyssAfk(userId);
+  const t = setTimeout(() => onAbyssAfk(userId), ABYSS_AFK_MS);
+  abyssAfkTimers.set(userId, t);
+  const f = abyss.getAbyssFight(userId);
+  if (f) f.afkTimer = t; // endAbyssFight clears this too (double-safe)
+}
+// AFK = auto-LOSS (spec §5.2): 2 min without a skill pick on the player's turn.
+async function onAbyssAfk(userId) {
+  abyssAfkTimers.delete(userId);
+  const fight = abyss.getAbyssFight(userId);
+  if (!fight || fight.over || fight.awaiting !== 'player') return;
+  const st = abyssPanels.get(userId) || {};
+  _abyssFinish(st.msg, fight, st.username || ((economy.getUser(userId) || {}).username || 'Player'), { afk: true });
+}
+
+// ----- static render helpers (pure — config -> text) -----
+function abyssMechanicText(m) {
+  if (!m) return null;
+  const parts = [];
+  if (m.shield) parts.push(`🛡️ **SHIELD** — every ${m.shield.every} turns: barrier absorbing ${Math.round(m.shield.pct * 100)}% max HP`);
+  if (m.enrage) parts.push(`🔥 **ENRAGE** — every ${m.enrage.every} turns: ATK +${Math.round(m.enrage.pct * 100)}% (stacking)`);
+  if (m.regen) parts.push(`💚 **REGEN** — every ${m.regen.every} turns: heals ${Math.round(m.regen.pct * 100)}% max HP`);
+  if (m.counter) parts.push(`⚡ **COUNTER** — you use a CD skill: ${m.counter.chance}% chance it strikes back for ${m.counter.mult}×`);
+  if (m.phaseShift) parts.push(`🌑 **PHASE SHIFT** — at ${Math.round(m.phaseShift.at * 100)}% HP: DEF↔MDEF swap + guaranteed stun`);
+  if (m.frostAura) parts.push(`🧊 **FROST AURA** — permanent: your physical damage −${Math.round(m.frostAura.physReduction * 100)}%`);
+  if (m.swarm) parts.push(`👥 **SWARM** — every ${m.swarm.every} turns: spawns a drone (max ${m.swarm.max}) that hits you on each of its turns for ${Math.round(m.swarm.droneAtkPct * 100)}% boss ATK; untargetable, expires after ${m.swarm.droneTtl} turns`);
+  if (m.darkAdapt) parts.push(`🌑 **DARK ADAPTATION** — every ${m.darkAdapt.every} turns: ATK/MATK +${Math.round(m.darkAdapt.pct * 100)}% (stacking)${m.darkAdapt.antiHeal ? `\n🕳️ **SHADOW DRAIN** — your lifesteal −${m.darkAdapt.antiHeal}%, permanent from round 1` : ''}`);
+  if (m.p1 && m.p2 && m.p3) parts.push(
+    `💀 **THREE PHASES**\n` +
+    `> 🩸 **Vampiric** (100–60%): heals ${Math.round((m.p1.lifesteal || 0) * 100)}% of damage dealt to you${m.p1.enrage ? ` · every ${m.p1.enrage.every} turns: ATK +${Math.round(m.p1.enrage.pct * 100)}% (stacking)` : ''}\n` +
+    `> ⚡ **Punish** (60–30%): ${m.p2.counter ? `${m.p2.counter.chance}% counter for ${m.p2.counter.mult}× when you use a CD skill${m.p2.counter.antiHeal ? ` · wounds: anti-heal −${m.p2.counter.antiHeal.reduction}% / ${m.p2.counter.antiHeal.turns}t` : ''}` : 'grows more aggressive'}\n` +
+    `> 💀 **Berserk** (30–0%): ATK/MATK ×${m.p3.berserk.atk}${m.p3.antiHeal ? ` + anti-heal (lifesteal −${m.p3.antiHeal}%)` : ''}`
+  );
+  return parts.length ? parts.join('\n') : null;
+}
+function abyssSkillText(sk) {
+  const type = sk.type === 'magic' ? '🔮 magic' : sk.type === 'mixed' ? '⚔️🔮 mixed' : '⚔️ physical';
+  const fx = [];
+  if (sk.burn) fx.push(`🔥 burn ${sk.burn.pct}% / ${sk.burn.turns}t`);
+  if (sk.poison) fx.push(`🧪 poison ${sk.poison.pct}% / ${sk.poison.turns}t`);
+  if (sk.cc) { const lbl = sk.cc.kind === 'frozen' ? '❄️' : sk.cc.kind === 'rooted' ? '🌿' : '🪢'; fx.push(`${lbl} ${sk.cc.chance}% ${sk.cc.kind || 'stun'}`); }
+  if (sk.heal) fx.push(`💚 heal ${Math.round(sk.heal * 100)}%`);
+  if (sk.antiHeal) fx.push(`🚫 anti-heal −${sk.antiHeal.reduction}% / ${sk.antiHeal.turns}t`);
+  if (sk.pierceEva) fx.push('💨 pierces evasion');
+  if (sk.parry) fx.push('🛡️ parry next hit');
+  if (sk.dodge) fx.push('🗡️ 2 dodge charges');
+  if (sk.buff) fx.push('⚔️ self-buff');
+  return `**${sk.name}** — ${sk.mult}× ${type}${sk.cd ? ` · CD ${sk.cd}` : ''}${fx.length ? ` _(${fx.join(' · ')})_` : ''}`;
+}
+function abyssArchetype(fl) {
+  if (fl.mirror) return '🪞 **Mirror** — copies your stats, your class skills, and half of your gear passives';
+  const types = new Set((fl.skills || []).map((s) => s.type));
+  const dmg = types.has('physical') && types.has('magic') ? 'hybrid damage' : types.has('magic') ? 'magic damage' : 'physical damage';
+  const m = fl.mechanic || {};
+  let tag = '';
+  if (m.shield) tag = ' · fortified';
+  else if (m.regen) tag = ' · self-sustaining';
+  else if (m.enrage || m.darkAdapt || (m.p1 && m.p1.enrage)) tag = ' · scales over time';
+  else if (m.swarm) tag = ' · swarm summoner';
+  else if (m.frostAura) tag = ' · anti-physical';
+  else if (m.counter || m.p2) tag = ' · punishes cooldowns';
+  else if (m.phaseShift) tag = ' · shapeshifter';
+  const crit = fl.crit > 0 ? ` · crit ${Math.round(fl.crit * 100)}% ×${fl.critMult}` : '';
+  return `Boss — ${dmg}${tag}${crit}`;
+}
+// Archetype accent color for floor-scoped embeds (boss info / intro / fight panel).
+// Same branch priority as abyssArchetype: tank=blue, sustain=green, aggro=red, chaos=purple;
+// no mechanic = tower purple. Outcome embeds keep semantic green/red.
+function abyssColor(fl) {
+  const m = (fl && fl.mechanic) || {};
+  if (m.shield) return 0x3498db;                                                      // tank — F2
+  if (m.regen) return 0x57f287;                                                       // sustain — F4
+  if (m.enrage || m.darkAdapt || (m.p1 && m.p1.enrage)) return 0xed4245;              // aggro — F3/F9/F10
+  if (m.counter || m.p2 || m.phaseShift || m.frostAura || m.swarm) return 0x9b59b6;   // chaos — F5–F8
+  return ABYSS_COLOR;                                                                // balanced — F1
+}
+function abyssFloorLabel(i) { const fl = ABYSS_FLOORS[i]; return `Floor ${fl.id} — ${fl.emoji} ${fl.name}`; }
+// CLEARED floors + the next uncompleted one (spec §5.1) — anything beyond stays hidden.
+function abyssEntryOptions(progress) {
+  const opts = [];
+  for (let i = 0; i <= Math.min(progress.highestFloor, N_FLOORS - 1); i++) {
+    const isNext = i === progress.highestFloor; // first uncompleted floor (false when ALL are cleared)
+    opts.push({
+      label: `${abyssFloorLabel(i)}${isNext ? ' 🔒 NEW' : ''}`.slice(0, 100),
+      value: String(i),
+      description: isNext ? 'Unlocked — not yet cleared' : `Cleared — best ${'⭐'.repeat(progress.stars[i]) || '(no stars)'}`,
+    });
+  }
+  return opts;
+}
+function abyssSelectRow(userId, progress) {
+  return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+    .setCustomId(`battle_abysssel_${userId}`)
+    .setPlaceholder('Choose a floor…')
+    .addOptions(abyssEntryOptions(progress)));
+}
+function abyssEntryRow(userId, enterEnabled) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`battle_abyss_enter_${userId}`).setLabel('⚔️ Enter').setStyle(ButtonStyle.Success).setDisabled(!enterEnabled),
+    new ButtonBuilder().setCustomId(`battle_abyss_flee_${userId}`).setLabel('🚪 Flee').setStyle(ButtonStyle.Secondary),
+  );
+}
+// Supersede a pending entry/dossier panel (owner round 7: stale panels must die VISIBLY —
+// kill the 60s timer, drop the state, and strip the buttons so a stale Enter/Flee click
+// can't happen; any click racing the edit still gets an ephemeral note, not silence).
+function retireAbyssEntry(userId) {
+  const st = abyssEntryStates.get(userId);
+  if (!st) return;
+  clearTimeout(st.timer);
+  abyssEntryStates.delete(userId);
+  try { st.msg.edit({ components: [] }); } catch { /* message gone — nothing to do */ }
+}
+// Dossier actions (post-clear Next/Retry preview + floor browse): Enter / Progress / Flee
+function abyssPreviewRow(userId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`battle_abyss_enter_${userId}`).setLabel('⚔️ Enter').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`battle_abyss_prog_${userId}`).setLabel('📋 Progress').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`battle_abyss_flee_${userId}`).setLabel('🚪 Flee').setStyle(ButtonStyle.Secondary),
+  );
+}
+function abyssWelcomeEmbed(username, progress) {
+  return new EmbedBuilder()
+    .setAuthor({ name: `${username}'s abyss` })
+    .setColor(ABYSS_COLOR)
+    .setTitle('🌌 ABYSS TOWER')
+    .setDescription(
+      'Ten bosses guard the climb. Each falls once — but stars are forever.\n\n' +
+      `🏆 Highest floor cleared: **${progress.highestFloor}/${N_FLOORS}** · ⭐ Stars: **${progress.totalStars}/${N_FLOORS * 3}**\n\n` +
+      'Free entry · full HP every floor · turn-based, 30-turn limit.\n' +
+      '_The tower auto-rejects the idle: flee in 60s._'
+    )
+    .setTimestamp();
+}
+// Boss info (spec §5.1 step 2). Shows recLevel ONLY — never the tuned level, never gear expectations (discovery by design).
+function abyssBossInfoEmbed(username, fl) {
+  const dlg = BOSS_DIALOGUES[fl.id] || {};
+  const rec = fl.recClass ? `${CLASSES[fl.recClass].emoji} ${CLASSES[fl.recClass].name}` : 'Any class';
+  const skills = fl.mirror
+    ? ['🪞 Copies **your class skills** at full power — parries, buffs and dodges work for it too.']
+    : (fl.skills || []).map(abyssSkillText);
+  const mech = abyssMechanicText(fl.mechanic) || '_No special mechanic — a fair fight._';
+  const elusive = fl.bossEvasion ? `\n\n💨 **ELUSIVE** — ${fl.bossEvasion}% chance to dodge your attacks (pierce-evasion ults ignore it)` : '';
+  return new EmbedBuilder()
+    .setAuthor({ name: `${username}'s abyss` })
+    .setColor(abyssColor(fl))
+    .setTitle(`🌌 Floor ${fl.id} — ${fl.emoji} ${fl.name}`)
+    .setDescription(
+      `${abyssArchetype(fl)}\n\n` +
+      `**Recommended:** ${rec} · Lv ${fl.recLevel}\n\n` +
+      `**Skills:**\n${skills.join('\n')}\n\n` +
+      `**Mechanic:**\n${mech}${elusive}\n\n` +
+      `**Stars:**\n⭐⭐⭐ ≤${STAR_THRESHOLDS.three.turns} turns + HP ≥${STAR_THRESHOLDS.three.hpPct}%\n⭐⭐ ≤${STAR_THRESHOLDS.two.turns} turns\n⭐ any clear\n\n` +
+      `> _"${dlg.intro || '…'}"_`
+    )
+    .setTimestamp();
+}
+function abyssIntroEmbed(username, fl) {
+  const dlg = BOSS_DIALOGUES[fl.id] || {};
+  return new EmbedBuilder()
+    .setAuthor({ name: `${username}'s abyss` })
+    .setColor(abyssColor(fl))
+    .setTitle(`🌌 Floor ${fl.id} — ${fl.emoji} ${fl.name}`)
+    .setDescription(`> _"${dlg.intro || '…'}"_\n\nThe gate slams shut behind you…`)
+    .setTimestamp();
+}
+
+// ----- fight panel -----
+function abyssEffectTags(side) {
+  const t = [];
+  if (side.burn && side.burn.turns > 0) t.push(`🔥 Burn ${side.burn.turns}t`);
+  if (side.poison && side.poison.turns > 0) t.push(`🧪 Poison ${side.poison.turns}t`);
+  if (side.parry > 0) t.push('🛡️ Parry ready');
+  if (side.dodge > 0) t.push(`🗡️ ${side.dodge} dodge`);
+  if (side.buff && side.buff.turns > 0) t.push(`⚔️ ATK +${side.buff.atkPct}% (${side.buff.turns}t)`);
+  if (side.cc > 0) t.push(side.ccKind === 'frozen' ? '❄️ Frozen' : side.ccKind === 'rooted' ? '🌿 Rooted' : '🪢 Stunned');
+  return t;
+}
+function abyssFightEmbed(fight, note) {
+  const fl = fight.floor, p = fight.player, b = fight.boss;
+  const sep = '─'.repeat(28);
+  const bossFx = abyssEffectTags(b);
+  if (b.shield > 0) bossFx.unshift(`🛡️ Shield ${b.shield.toLocaleString()}`);
+  if (b.atkMultStack > 1) bossFx.push(`🔥 Enraged +${Math.round((b.atkMultStack - 1) * 100)}%`);
+  if (b.drones.length) bossFx.push(`👥 ${b.drones.length} drone(s)`);
+  if (fl.mechanic && fl.mechanic.p1 && fl.mechanic.p2) bossFx.push(`💀 Phase ${b.phase}`);
+  else if (fl.mechanic && fl.mechanic.phaseShift && b.phase > 1) bossFx.push('💀 Phase 2');
+  const playerFx = abyssEffectTags(p);
+  if (p.antiHeal && p.antiHeal.turns > 0) playerFx.push(`🚫 Anti-heal −${p.antiHeal.reduction}%`);
+  const fx = (arr) => (arr.length ? `\n⚙️ ${arr.join(' · ')}` : '');
+  const turnN = fight.over ? fight.turnCount : Math.min(fight.turnCount + 1, abyss.TURN_LIMIT);
+  const head = fight.over ? '🏁 Fight Over'
+    : fight.awaiting === 'player' ? '🔄 **Your turn — pick a skill**'
+    : '💨 The boss is acting…';
+  const log = (note || '').trim();
+  return new EmbedBuilder()
+    .setAuthor({ name: `${abyssPanels.get(fight.userId)?.username || 'Player'}'s abyss` })
+    .setColor(abyssColor(fl))
+    .setTitle(`🌌 Floor ${fl.id}: ${fl.emoji} ${fl.name} — Turn ${turnN}/${abyss.TURN_LIMIT}`)
+    .setDescription(
+      `**${fl.emoji} ${fl.name}**\n❤️ ${hpBar20(b.hp, b.hpMax)} ${Math.max(0, b.hp)}/${b.hpMax}${fx(bossFx)}\n${sep}\n` +
+      `**🛡️ You**\n❤️ ${hpBar20(p.hp, p.hpMax)} ${Math.max(0, p.hp)}/${p.hpMax}${fx(playerFx)}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n${log ? `${log}\n` : ''}${head}`
+    )
+    .setTimestamp();
+}
+// Player skill buttons — CD state read AFTER turn resolution (post-tick, the panel
+// renders once the boss phase completes). Disabled while the boss acts.
+function abyssSkillRow(fight) {
+  const row = new ActionRowBuilder();
+  const myTurn = fight.awaiting === 'player' && !fight.over;
+  for (const sk of fight.player.skills) {
+    const cd = fight.player.cdLeft[sk.id] || 0;
+    row.addComponents(new ButtonBuilder()
+      .setCustomId(`battle_abyss_skill_${sk.id}_${fight.userId}`)
+      .setLabel(`${sk.name}${cd > 0 ? ` (CD:${cd})` : ''}`)
+      .setStyle(sk.cd > 0 ? ButtonStyle.Secondary : ButtonStyle.Primary)
+      .setDisabled(!myTurn || cd > 0));
+  }
+  return [row];
+}
+// Engine events -> English log lines (PvP eventStr style).
+function abyssEventLog(events) {
+  return (events || []).map((e) => {
+    const mine = e.actor === 'player';
+    switch (e.type) {
+      case 'hit': {
+        if (e.parried) return `${e.crit ? '💥 CRIT! ' : ''}🛡️ ${mine ? 'Boss parries' : 'You parry'} ${e.skill} — ${e.dmg}`;
+        if (e.dodged) return e.dmg > 0 ? `🗡️ Dodge pierced! ${e.skill} — ${e.dmg}` : '🗡️ Dodged!';
+        if (e.evaded) return '💨 Evaded!';
+        return `${e.crit ? '💥 CRIT! ' : ''}${mine ? '🗡️' : '☠️'} ${e.skill} — ${e.dmg}${e.absorbed ? ` (shield ate ${e.absorbed})` : ''}`;
+      }
+      case 'burn': return `🔥 Burn${e.target === 'boss' ? ' (boss)' : ''} — ${e.dmg}`;
+      case 'poison': return `🧪 Poison${e.target === 'boss' ? ' (boss)' : ''} — ${e.dmg}`;
+      case 'lifesteal': return e.target === 'boss' ? `🩸 Boss drains +${e.heal}` : `🩸 Lifesteal +${e.heal}`;
+      case 'heal': return `💚 Boss heals +${e.heal}`;
+      case 'cc': { const lbl = e.kind === 'frozen' ? '❄️' : e.kind === 'rooted' ? '🌿' : '🪢'; return `${lbl} ${e.skill} — ${e.kind || 'stunned'}! (next turn skipped)`; }
+      case 'ccSkip': { const lbl = e.kind === 'frozen' ? '❄️' : e.kind === 'rooted' ? '🌿' : '🪢'; const k = e.kind || 'stunned'; return `${lbl} ${k.charAt(0).toUpperCase() + k.slice(1)} — turn skipped!`; }
+      case 'counter': return '⚡ Counter-attack!';
+      case 'antiHeal': return `🚫 Anti-heal — lifesteal −${e.reduction}% (${e.turns >= 999 ? 'permanent' : e.turns + 't'})`;
+      case 'drone': return `🐝 Drone strike — ${e.dmg}`;
+      case 'mechanic':
+        if (e.kind === 'swarm') return `👥 Swarm — ${e.drones} drone(s) active`;
+        if (e.kind === 'phaseShift') return '🌑 PHASE SHIFT — DEF↔MDEF swapped + stun!';
+        if (e.kind === 'phase') return `💀 The boss enters **Phase ${e.phase}**!`;
+        return '';
+      default: return '';
+    }
+  }).filter(Boolean).join('\n');
+}
+
+// ----- results -----
+function abyssResultRow(fight, won) {
+  const row = new ActionRowBuilder();
+  if (won && fight.floorIdx + 1 < N_FLOORS) {
+    row.addComponents(new ButtonBuilder().setCustomId(`battle_abyss_next_${fight.floorIdx + 1}_${fight.userId}`).setLabel('➡️ Next Floor').setStyle(ButtonStyle.Success));
+  }
+  if (!won) {
+    row.addComponents(new ButtonBuilder().setCustomId(`battle_abyss_retry_${fight.floorIdx}_${fight.userId}`).setLabel('🔄 Retry').setStyle(ButtonStyle.Primary));
+  }
+  row.addComponents(new ButtonBuilder().setCustomId(`battle_abyss_prog_${fight.userId}`).setLabel('📋 Progress').setStyle(ButtonStyle.Secondary));
+  return [row];
+}
+function abyssVictoryEmbed(username, fl, fight, rec) {
+  const dlg = BOSS_DIALOGUES[fl.id] || {};
+  const rd = fight.resultData || { turns: '?', hpPct: 0 };
+  const stars = rec && rec.ok ? rec.stars : 0;
+  const lines = ['⭐'.repeat(stars) + '▫'.repeat(3 - stars)];
+  lines.push(`Cleared in **${rd.turns}** turn(s) · HP remaining **${rd.hpPct}%**`);
+  if (rec && rec.ok && rec.rewards) {
+    const rw = rec.rewards;
+    lines.push(`🧪 **+${rw.kryptonite.toLocaleString()}** Kryptonite (base + star bonus)`);
+    if (rw.kryztal) lines.push(`💎 **+${rw.kryztal.toLocaleString()}** Kryztal milestone`);
+    if (rw.drop) lines.push(`🎁 Gear drop: ${tierBadge(rw.drop.rarity)} **${rw.drop.name}** \`${rw.drop.id}\``);
+    for (const t of rw.titles || []) lines.push(`🏷️ Title unlocked: **${t}**`);
+  } else {
+    lines.push('_First-clear rewards already claimed — replays improve stars only._');
+  }
+  if (rec && rec.edge) lines.push(`🌌 **${rec.edge.name}** obtained — the ${ABYSS_MILESTONES.allStars.stars}⭐ trophy weapon \`${rec.edge.id}\`!`);
+  if (fight.floorIdx + 1 < N_FLOORS) lines.push(`\n🔓 **Floor ${ABYSS_FLOORS[fight.floorIdx + 1].id} — ${ABYSS_FLOORS[fight.floorIdx + 1].name}** is now unlocked.`);
+  return new EmbedBuilder()
+    .setAuthor({ name: `${username}'s abyss` })
+    .setColor(0x57f287)
+    .setTitle(`🏆 FLOOR ${fl.id} CLEARED — ${fl.emoji} ${fl.name}`)
+    .setDescription(`${lines.join('\n')}\n\n> _"${dlg.victory || '…'}"_`)
+    .setTimestamp();
+}
+function abyssDefeatEmbed(username, fl, fight, opts = {}) {
+  const dlg = BOSS_DIALOGUES[fl.id] || {};
+  const b = fight.boss;
+  const bossPct = Math.max(0, Math.ceil((Math.max(0, b.hp) / b.hpMax) * 100));
+  const turns = (fight.resultData && fight.resultData.turns) || fight.turnCount;
+  const why = opts.afk
+    ? '⌛ You hesitated too long (2 min AFK) — the Abyss claims the absent.'
+    : fight.timeout ? '⏳ Turn limit reached — the boss outlasted you.'
+    : '💀 You fell.';
+  return new EmbedBuilder()
+    .setAuthor({ name: `${username}'s abyss` })
+    .setColor(0xed4245)
+    .setTitle(`💀 DEFEAT — Floor ${fl.id}: ${fl.emoji} ${fl.name}`)
+    .setDescription(
+      `${why}\n\n` +
+      `${fl.emoji} ${fl.name} HP remaining: **${bossPct}%** · You fell on turn **${turns}/${abyss.TURN_LIMIT}**\n\n` +
+      `> _"${dlg.defeat || '…'}"_`
+    )
+    .setTimestamp();
+}
+// Progress panel — all floors, stars, reward state, Edge milestone (spec §5/D).
+function abyssProgressEmbed(username, userId) {
+  const prog = abyss.getAbyssProgress(userId);
+  const lines = ABYSS_FLOORS.map((fl, i) => {
+    const stars = '⭐'.repeat(prog.stars[i]) || '🔒';
+    const reward = prog.rewarded[i] ? ' · ✓ rewarded' : '';
+    return `${fl.emoji} **Floor ${fl.id} — ${fl.name}** · ${stars}${reward}`;
+  });
+  const edge = prog.milestones.allStars
+    ? `🌌 **${ABYSS_MILESTONES.allStars.title}** — Abyssal Edge claimed`
+    : `🌌 Abyssal Edge: **${prog.totalStars}/${ABYSS_MILESTONES.allStars.stars}** stars (3⭐ every floor)`;
+  return new EmbedBuilder()
+    .setAuthor({ name: `${username}'s abyss` })
+    .setColor(ABYSS_COLOR)
+    .setTitle('🌌 ABYSS TOWER — Progress')
+    .setDescription(
+      `${lines.join('\n')}\n\n⭐ **Total stars: ${prog.totalStars}/${N_FLOORS * 3}**\n${edge}\n\n_Climb again: \`ky battle abyss\`_`
+    )
+    .setTimestamp();
+}
+
+// ----- driver -----
+// THE single terminal path — cleanup first, render second. Every end route (win,
+// death, timeout, AFK) lands here; a leaked over-fight would lock the player out.
+async function _abyssFinish(msg, fight, username, opts = {}) {
+  clearAbyssAfk(fight.userId);
+  abyssPanels.delete(fight.userId);
+  const won = !opts.afk && fight.winner === 'player';
+  let rec = null;
+  if (won) rec = abyss.recordClear(fight.userId, fight.floorIdx, fight.resultData.turns, fight.resultData.hpPct);
+  abyss.endAbyssFight(fight.userId);
+  if (!msg) return;
+  // ky end mid-animation lands here with winner='boss' from the forfeit — render the
+  // flee state instead of a defeat embed overwriting the "You fled" panel (cosmetic race,
+  // both terminal/no-buttons; this just keeps the message honest).
+  if (fight.forfeit) {
+    try { await msg.edit({ embeds: [infoEmbed(username, '🚪 You fled the Abyss. No rewards, no penalty — climb again anytime with `ky battle abyss`.')], components: [] }); } catch {}
+    return;
+  }
+  const embed = won ? abyssVictoryEmbed(username, fight.floor, fight, rec) : abyssDefeatEmbed(username, fight.floor, fight, opts);
+  try { await msg.edit({ embeds: [embed], components: abyssResultRow(fight, won) }); } catch { /* message gone — nothing to do */ }
+  // Result buttons are conveniences, not state — auto-close after 2 min so no clickable
+  // button outlives its fight (stale Retry/Next panels clickable forever otherwise).
+  armAbyssResultTimer(fight.userId, msg, username);
+}
+// Boss phase animation: "preparing…" -> resolve -> result frame (spec §5.2).
+async function _abyssBossPhase(msg, userId, prependLog) {
+  const fight = abyss.getAbyssFight(userId);
+  if (!fight || fight.over) return;
+  try { await msg.edit({ embeds: [abyssFightEmbed(fight, `${prependLog ? prependLog + '\n' : ''}💨 ${fight.floor.name} is preparing an attack…`)], components: [] }); } catch {}
+  await sleep(1500);
+  const cur = abyss.getAbyssFight(userId);
+  if (!cur || cur !== fight || fight.over) return; // ended mid-animation (AFK can't fire here, but be safe)
+  const res = abyss.resolveAbyssBossTurn(userId);
+  if (!res.ok) { // unreachable by construction — but NEVER strand a live fight without its AFK timer
+    abyss.endAbyssFight(userId);
+    try { await msg.edit({ embeds: [infoEmbed(uname({ author: { username: 'Player' } }), '⚠️ The Abyss glitched — your fight was voided. No rewards, no penalty.')], components: [] }); } catch {}
+    return;
+  }
+  await sleep(1500);
+  const cur2 = abyss.getAbyssFight(userId);
+  if (res.over || !cur2 || cur2 !== fight) {
+    if (fight.over) return _abyssFinish(msg, fight, (abyssPanels.get(userId) || {}).username || 'Player', res);
+    return;
+  }
+  // Final frame shows ONLY the boss's events — the player already saw their own
+  // in the previous frame (owner preference: no stacking player+boss logs together)
+  const log = abyssEventLog(res.events) || '…';
+  try { await msg.edit({ embeds: [abyssFightEmbed(fight, log || '…')], components: abyssSkillRow(fight) }); } catch {}
+  armAbyssAfk(userId);
+}
+async function _abyssBeginFight(interaction, fight, username) {
+  const msg = interaction.message;
+  abyssPanels.set(fight.userId, { msg, username });
+  try { await interaction.update({ embeds: [abyssIntroEmbed(username, fight.floor)], components: [] }); } catch {}
+  await sleep(1500); // boss intro beat (spec §5.1 step 3)
+  const cur = abyss.getAbyssFight(fight.userId);
+  if (!cur || cur !== fight || fight.over) return;
+  if (fight.awaiting === 'boss') return _abyssBossPhase(msg, fight.userId, '💨 The boss moves first!');
+  try { await msg.edit({ embeds: [abyssFightEmbed(fight, '⚔️ The fight begins — your move.')], components: abyssSkillRow(fight) }); } catch {}
+  armAbyssAfk(fight.userId);
+}
+// Entry cross-locks (spec E10/E11): delve + PvP checked HERE (abyssManager cannot
+// require their managers — circular). busy reason is a ready-to-render string.
+async function _abyssStartFromButton(interaction, userId, username, floorIdx) {
+  let busy = null;
+  if (battle.hasActiveRun(userId)) busy = 'Finish your delve first (`ky end`).';
+  else if (pvp.isInFight(userId)) busy = 'Finish your duel first (`ky end`).';
+  if (busy) return interaction.update({ embeds: [infoEmbed(username, busy)], components: [] });
+  const start = abyss.startAbyssFight(userId, floorIdx, {});
+  if (!start.ok) return interaction.update({ embeds: [infoEmbed(username, start.reason)], components: [] });
+  return _abyssBeginFight(interaction, start.fight, username);
+}
+
+// ----- command entry: `ky battle abyss` -----
+async function handleAbyss(context, userId, args) {
+  clearAbyssResultTimer(userId); // a fresh entry panel invalidates any pending result auto-close
+  args = args || [];
+  if (String(args[0] || '').toLowerCase() === 'lb') return handleAbyssLb(context);
+  if (abyss.isInAbyssFight(userId)) return context.reply({ content: '🌌 You are already in an Abyss fight — its panel has your skill buttons.' });
+  const username = uname(context, userId);
+  const bd = getBattle(userId);
+  if (!bd) return context.reply({ content: 'You are not registered yet — use `ky daily` or `ky wallet` first.' });
+  if (!battle.getActiveChar(bd.b)) return context.reply({ content: 'Create a character first (`ky battle`).' });
+  const stale = abyssEntryStates.get(userId); // a re-run supersedes any pending entry panel
+  if (stale) retireAbyssEntry(userId);
+  const progress = abyss.getAbyssProgress(userId);
+  const msg = await context.reply({
+    embeds: [abyssWelcomeEmbed(username, progress)],
+    components: [abyssSelectRow(userId, progress), abyssEntryRow(userId, false)],
+    fetchReply: true,
+  });
+  const state = { timer: null, msg, floor: null };
+  abyssEntryStates.set(userId, state);
+  state.timer = setTimeout(async () => { // auto-flee (E8): buttons die with the edit
+    if (abyssEntryStates.get(userId) !== state) return;
+    abyssEntryStates.delete(userId);
+    try { await msg.edit({ embeds: [infoEmbed(username, '🚪 You fled the Abyss — no floor chosen in 60s.')], components: [] }); } catch {}
+  }, ABYSS_ENTRY_MS);
+  return msg;
+}
+// `ky battle abyss lb` — highest floor, then total stars.
+function handleAbyssLb(context) {
+  const data = economy.readEconomy();
+  const rows = [];
+  for (const [uid, u] of Object.entries(data)) {
+    if (!u || !u.battle) continue;
+    const a = abyss.ensureAbyssData(u.battle);
+    const totalStars = a.stars.reduce((s, x) => s + x, 0);
+    let highest = 0;
+    a.stars.forEach((s, i) => { if (s > 0) highest = i + 1; });
+    if (highest === 0 && totalStars === 0) continue;
+    rows.push({ name: u.username || uid, highest, totalStars });
+  }
+  if (!rows.length) return context.reply({ content: 'No one has cleared an Abyss floor yet. Be the first — `ky battle abyss`!' });
+  rows.sort((x, z) => z.highest - x.highest || z.totalStars - x.totalStars);
+  const lines = rows.slice(0, 10).map((r, i) => {
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `**${i + 1}.**`;
+    return `${medal} **${r.name}** — 🏰 Floor ${r.highest} · ⭐ ${r.totalStars}/${N_FLOORS * 3}`;
+  });
+  const embed = new EmbedBuilder()
+    .setColor(ABYSS_COLOR)
+    .setTitle('🌌 Abyss Tower Leaderboard')
+    .setDescription(lines.join('\n'))
+    .setFooter({ text: 'Sorted by highest floor, then stars · ky battle abyss' })
+    .setTimestamp();
+  return context.reply({ embeds: [embed] });
+}
+
+// ----- abyss buttons (routed from handleButton; executor already verified) -----
+async function handleAbyssButton(interaction, userId, username) {
+  const customId = interaction.customId;
+
+  if (customId.startsWith('battle_abyss_flee_')) {
+    const state = abyssEntryStates.get(userId);
+    if (!state || state.msg.id !== interaction.message.id) return interaction.reply({ content: '⌛ This Abyss panel expired — your newest panel (above) is the active one.', ephemeral: true }); // stale panel: visible, not silent
+    clearTimeout(state.timer);
+    abyssEntryStates.delete(userId);
+    return interaction.update({ embeds: [infoEmbed(username, '🚪 You fled the Abyss. Come back stronger.')], components: [] });
+  }
+
+  if (customId.startsWith('battle_abyss_enter_')) {
+    const state = abyssEntryStates.get(userId);
+    if (!state || state.msg.id !== interaction.message.id) return interaction.reply({ content: '⌛ This Abyss panel expired — your newest panel (above) is the active one.', ephemeral: true }); // stale panel: visible, not silent
+    if (state.floor == null) return interaction.deferUpdate(); // Enter enabled only after a selection — belt and braces
+    clearTimeout(state.timer); // cancel the 60s timer on EVERY exit path
+    abyssEntryStates.delete(userId);
+    return _abyssStartFromButton(interaction, userId, username, state.floor);
+  }
+
+  if (customId.startsWith('battle_abyss_retry_') || customId.startsWith('battle_abyss_next_') || customId.startsWith('battle_abyss_prog_')) {
+    clearAbyssResultTimer(userId); // panel actioned — its auto-close is no longer wanted
+  }
+  if (customId.startsWith('battle_abyss_retry_') || customId.startsWith('battle_abyss_next_')) {
+    const parts = customId.split('_'); // battle, abyss, retry|next, <floorIdx>, <userId>
+    const floorIdx = parseInt(parts[3], 10);
+    if (!(floorIdx >= 0) || floorIdx >= N_FLOORS) return interaction.deferUpdate();
+    // Owner UX: dossier first (same as floor pick at entry) — read the kit, then Enter/Progress/Flee.
+    // Re-registers the entry state so Enter/Flee staleness guards + 60s auto-flee work unchanged.
+    const gate = abyss.canEnterFloor(userId, floorIdx);
+    if (!gate.ok) return interaction.update({ embeds: [infoEmbed(username, gate.reason)], components: [] });
+    retireAbyssEntry(userId); // any older pending panel is superseded — buttons stripped
+    const prog = abyss.getAbyssProgress(userId);
+    const embed = abyssBossInfoEmbed(username, ABYSS_FLOORS[floorIdx])
+      .setFooter({ text: '⚔️ Enter starts the fight · 📋 check progress · auto-flee in 60s' });
+    await interaction.update({ embeds: [embed], components: [abyssSelectRow(userId, prog), abyssPreviewRow(userId)] });
+    const msg = interaction.message;
+    const state = { timer: null, msg, floor: floorIdx };
+    abyssEntryStates.set(userId, state);
+    state.timer = setTimeout(async () => { // auto-flee (E8): buttons die with the edit
+      if (abyssEntryStates.get(userId) !== state) return;
+      abyssEntryStates.delete(userId);
+      try { await msg.edit({ embeds: [infoEmbed(username, '🚪 You fled the Abyss — no floor entered in 60s.')], components: [] }); } catch {}
+    }, ABYSS_ENTRY_MS);
+    return;
+  }
+
+  if (customId.startsWith('battle_abyss_prog_')) {
+    const state = abyssEntryStates.get(userId); // from a dossier preview: kill its 60s timer so it can't clobber this embed
+    if (state && state.msg.id === interaction.message.id) { clearTimeout(state.timer); abyssEntryStates.delete(userId); }
+    return interaction.update({ embeds: [abyssProgressEmbed(username, userId)], components: [] });
+  }
+
+  if (customId.startsWith('battle_abyss_skill_')) {
+    const fight = abyss.getAbyssFight(userId);
+    if (!fight) return interaction.reply({ content: 'This Abyss fight has ended.', ephemeral: true });
+    if (fight.over || fight.animating) return interaction.deferUpdate();
+    clearAbyssAfk(userId); // close the AFK race window synchronously BEFORE any await
+    const skillId = customId.split('_').slice(3, -1).join('_');
+    const res = abyss.resolveAbyssPlayerTurn(userId, skillId);
+    if (!res.ok) { armAbyssAfk(userId); return interaction.reply({ content: res.reason || 'Invalid action.', ephemeral: true }); }
+    fight.animating = true; // UI-side double-click lock (buttons are removed, but stale messages exist)
+    const st = abyssPanels.get(userId) || {};
+    const msg = interaction.message;
+    abyssPanels.set(userId, { msg, username: st.username || username });
+    try {
+      const playerLog = abyssEventLog(res.events) || '…';
+      try { await interaction.deferUpdate(); } catch {}
+      try { await msg.edit({ embeds: [abyssFightEmbed(fight, playerLog)], components: [] }); } catch {}
+      await sleep(1500);
+      const cur = abyss.getAbyssFight(userId);
+      if (res.over || !cur || cur !== fight) {
+        if (fight.over) return _abyssFinish(msg, fight, st.username || username, res);
+        return;
+      }
+      await _abyssBossPhase(msg, userId, playerLog);
+    } finally { fight.animating = false; }
+    return;
+  }
+
+  return interaction.deferUpdate();
+}
+
 // ---------- slash subcommand registration ----------
 // Battle mode is PREFIX-ONLY (ky battle, ky char, ky bag, ...).
 // /kyriz already has 23 subcommands; adding 6 more would exceed Discord's
@@ -1215,6 +1827,7 @@ async function handleButton(interaction) {
     if (tail === 'cancel') return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'Cancelled — no Kryptonite spent.')], components: [] });
     // Re-run guards at click time (state may have changed since the embed was posted)
     if (pvp.isInFight(ownerId)) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'Finish your duel first (`ky end`).')], components: [] });
+    if (abyss.isInAbyssFight(ownerId)) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'Finish your Abyss fight first (`ky battle abyss`).')], components: [] }); // E4
     if (hasPendingChallenge(ownerId)) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), 'You have a pending duel challenge — settle it first.')], components: [] });
     const res = battle.changeClass(ownerId, tail); // manager re-checks: owned class, cap, kryptonite, run-lock (G1/G9)
     if (!res.ok) return interaction.update({ embeds: [infoEmbed(uname(interaction, ownerId), res.reason)], components: [] });
@@ -1265,6 +1878,9 @@ async function handleButton(interaction) {
     return interaction.reply({ content: '⛔ This is not yours.', ephemeral: true });
   }
   const username = uname(interaction, userId);
+
+  // Abyss Tower entry/fight/result buttons (customIds end with the executor's userId)
+  if (customId.startsWith('battle_abyss_')) return handleAbyssButton(interaction, userId, username);
 
   // class pick -> create character + start delve
   const classMatch = customId.match(/^battle_class_(warrior|mage|rogue)_/);
@@ -1420,6 +2036,24 @@ async function handleBattleLb(context, subArgs) {
 // Select menus: battle_gearsel_<targetId>_<viewerId> — slot filter on ky gear (executor-locked)
 async function handleSelectMenu(interaction) {
   const customId = interaction.customId || '';
+  if (customId.startsWith('battle_abysssel_')) {
+    // battle_abysssel_<userId> — floor picker on the Abyss entry panel
+    const userId = customId.split('_')[2];
+    if (interaction.user.id !== userId)
+      return interaction.reply({ content: '⛔ This is not your Abyss panel.', ephemeral: true });
+    const state = abyssEntryStates.get(userId);
+    if (!state || state.msg.id !== interaction.message.id) return interaction.reply({ content: '⌛ This Abyss panel expired — your newest panel (above) is the active one.', ephemeral: true }); // stale panel: visible, not silent
+    const floorIdx = parseInt((interaction.values || [])[0], 10);
+    if (!(floorIdx >= 0) || floorIdx >= N_FLOORS) return interaction.deferUpdate();
+    const gate = abyss.canEnterFloor(userId, floorIdx);
+    if (!gate.ok) return interaction.update({ embeds: [infoEmbed(uname(interaction, userId), gate.reason)], components: [] });
+    state.floor = floorIdx; // timer does NOT reset — it runs out its remaining time (anti-stall)
+    const prog = abyss.getAbyssProgress(userId);
+    return interaction.update({
+      embeds: [abyssBossInfoEmbed(uname(interaction, userId), ABYSS_FLOORS[floorIdx])],
+      components: [abyssSelectRow(userId, prog), abyssPreviewRow(userId)],
+    });
+  }
   if (customId.startsWith('battle_gearsel_')) {
     const parts = customId.split('_'); // battle, gearsel, targetId, viewerId
     if (parts.length < 4) return interaction.deferUpdate();
@@ -1438,6 +2072,6 @@ async function handleSelectMenu(interaction) {
 module.exports = {
   attachSubcommands, handleButton, handleSelectMenu,
   handleBattle, handleBattleHelp, handleBattleLb, handleEnd, handleName, handleCharacter, handleBag, handleGear, handleSell, handleSellGear, handleBuyGear, handleEquip, handleUnequip, handleShopEquipment,
-  handlePvp, handleChangeClass, handleSwitchClass, handlePreset,
+  handlePvp, handleChangeClass, handleSwitchClass, handlePreset, handleAbyss,
   getKryptonite,
 };

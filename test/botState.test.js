@@ -44,9 +44,15 @@ fs.writeFileSync(FILE, '{not json');
 bs = fresh();
 ok(bs.state.maintenance.active === false, 'corrupt file → safe defaults (no crash)');
 
-// ---- cleanup: restore pre-test state ----
+// ---- cleanup: restore pre-test state + remove .corrupt-* test debris ----
 if (snapshot === null) fs.rmSync(FILE, { force: true });
 else fs.writeFileSync(FILE, snapshot);
+try {
+  const dir = path.dirname(FILE);
+  for (const f of fs.readdirSync(dir)) {
+    if (f.startsWith(path.basename(FILE) + '.corrupt-')) fs.rmSync(path.join(dir, f));
+  }
+} catch { /* dir issue — non-fatal */ }
 
 console.log('\n' + (fail === 0 ? '✅ SEMUA TEST LULUS' : '❌ ADA TEST GAGAL'));
 console.log('Pass: ' + pass + ' | Fail: ' + fail);
