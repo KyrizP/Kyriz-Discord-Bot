@@ -499,9 +499,10 @@ async function execute(interaction) {
   // Bansos check — one-time reward claim (💎 Kryztal or 🧪 Kryptonite)
   await claimBansosIfPending(userId, (opts) => interaction.channel.send(opts));
 
-  // Update username on every interaction (sync Discord username changes)
+  // Update username on every interaction (sync Discord username changes).
+  // Cosmetic only — a failed write (e.g. full disk) must never kill the command.
   if (isRegistered(userId) || isSuperAdmin(userId)) {
-    updateUsername(userId, username);
+    try { updateUsername(userId, username); } catch {}
   }
 
   // T&C check (skip for superadmin)
@@ -614,9 +615,10 @@ async function handlePrefixCommand(message, command, args) {
   // Bansos check — one-time reward claim (💎 Kryztal or 🧪 Kryptonite)
   await claimBansosIfPending(userId, (opts) => message.channel.send(opts));
 
-  // Update username (sync Discord username changes)
+  // Update username (sync Discord username changes). Cosmetic only — a failed
+  // write (e.g. full disk) must never kill the command.
   if (isRegistered(userId) || isSuperAdmin(userId)) {
-    updateUsername(userId, username);
+    try { updateUsername(userId, username); } catch {}
   }
 
   // T&C check for commands that require registration
@@ -1699,12 +1701,16 @@ async function handleProfile(context, targetId, username, avatarURL, isPrefix = 
   ].filter(Boolean).join(' · ') || '_None_';
 
   const rankLine = isSuperAdmin(targetId) ? '🌟 Superadmin' : (rank ? `🏆 Rank #${rank} Global` : 'Unranked');
+  // Battle rank applies to EVERYONE incl. superadmin/admin — the battle board ranks any
+  // economy entry with characters (only the Kryztal rank is superadmin-gated above).
+  const battleRank = battleManager.getBattleGlobalRank(targetId);
+  const battleRankLine = battleRank ? `\n⚔️ Battle Rank #${battleRank} Global` : '';
   const banner = titleItem ? `━━━━ ✦ ${(titleItem.emoji && titleItem.emoji !== '🏷️') ? titleItem.emoji + ' ' : ''}${titleItem.effect.value} ✦ ━━━━\n` : '';
 
   const embed = new EmbedBuilder()
     .setColor(embedColor)
     .setAuthor({ name: display, iconURL: avatarURL })
-    .setDescription(banner + rankLine)
+    .setDescription(banner + rankLine + battleRankLine)
     .addFields(
       { name: `⭐ Level ${level}`, value: `${bar}  ${xp}/${xpNeeded} XP (${Math.round(pct * 100)}%)` },
       { name: 'Balance', value: `💎 **${bal}** Kryztal` },

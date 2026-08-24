@@ -38,9 +38,35 @@ function writeJSON(filePath, data) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  const payload = JSON.stringify(data, null, 2);
   const tmp = filePath + '.tmp-' + process.pid;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  fs.renameSync(tmp, filePath);
+  // ENOSPC retry — on shared hosting the node disk flaps full/free on a
+  // second-scale (neighbor tenants churn). Failing a player's bet/payout
+  // because of a 1-second bad window is avoidable: retry shortly and the
+  // write usually lands. Sync sleep via Atomics.wait (writeJSON is sync-only).
+  const MAX_TRIES = 3;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.writeFileSync(tmp, payload, 'utf-8');
+      fs.renameSync(tmp, filePath);
+      return;
+    } catch (err) {
+      if (err.code !== 'ENOSPC' || attempt >= MAX_TRIES) {
+        // Forensics: whose disk is full? Real filesystem stats for this path,
+        // straight from the kernel — attach this line to hosting tickets.
+        if (err.code === 'ENOSPC') {
+          try {
+            const st = fs.statfsSync(dir);
+            const mb = (n) => Math.round((n * st.bsize) / 1048576);
+            console.error(`[DATA] ENOSPC forensics — filesystem of ${dir}: total ${mb(st.blocks)}MB, free ${mb(st.bfree)}MB`);
+          } catch { /* statfsSync unavailable (Node < 18.15) */ }
+        }
+        throw err;
+      }
+      console.error(`[DATA] disk full (ENOSPC) — retrying write in 1s (${attempt}/${MAX_TRIES - 1})`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    }
+  }
 }
 // ROLLING LOCAL BACKUP: copy economy.json into data/backups/ (keep newest BACKUP_KEEP).
 // Called at boot + every 6h from index.js — catches ANY corruption class, no premium host
@@ -215,6 +241,10 @@ function updateUsername(userId, username) {
     writeJSON(ECONOMY_PATH, data);
     return;
   }
+  // Skip the full-file write when nothing changed — this runs on EVERY command,
+  // and rewriting economy.json just to re-save an identical name is what made
+  // every player command die (not just games) when the host disk hit ENOSPC.
+  if (data[userId].username === username) return;
   data[userId].username = username;
   writeJSON(ECONOMY_PATH, data);
 }

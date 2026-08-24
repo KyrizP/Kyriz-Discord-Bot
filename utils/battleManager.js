@@ -724,6 +724,12 @@ function getBattleLeaderboardFor(data, limit = 10, classFilter = null, memberIds
 function getBattleLeaderboard(limit = 10, memberIds = null, classFilter = null) {
   return getBattleLeaderboardFor(economy.readEconomy(), limit, classFilter, memberIds);
 }
+// Global battle rank for ky profile (same ordering as ky lb battle all: bestDepth > score > earliest).
+function getBattleGlobalRank(userId) {
+  const board = buildBattleLeaderboard(economy.readEconomy(), null, null);
+  const idx = board.findIndex((p) => p.userId === userId);
+  return idx === -1 ? null : idx + 1;
+}
 
 // Record a PvP outcome atomically: W/L for both combatants (no ELO — dropped).
 function applyPvpResult(data, winnerId, loserId) {
@@ -780,7 +786,7 @@ module.exports = {
   applyChangeClass, applySwitchClass, applyPresetSave, applyPresetDelete, applyPresetLoad, applyBuyPresetSlot,
   purgePresetsItem, presetSave, presetDelete, presetLoad, buyPresetSlot, PRESET_SLOTS_FREE, PRESET_SLOTS_CAP, PRESET_SLOT_PRICES,
   migrateAllBattleData, createCharacter, startDelve, nextFloor, extractRun, fastSweep, hasActiveRun, getRun,
-  sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, changeClass, switchClass, setCharName, getCharName, getBattleLeaderboard, getBattleLeaderboardFor, recordPvp,
+  sell, sellGear, equip, unequip, unequipAll, buyGear, buyUnique, changeClass, switchClass, setCharName, getCharName, getBattleLeaderboard, getBattleLeaderboardFor, getBattleGlobalRank, recordPvp,
   createCharacterRecord, getActiveChar, getCharClass, isEquippedOnAnyChar, EQUIP_SLOTS,
   ENTRY_FEE, GEAR_SELLBACK, CHAR_CHANGE_COST,
 };

@@ -137,6 +137,13 @@ client.on('messageCreate', async (message) => {
         await gameCommand.handlePrefixCommand(message, command, args);
       } catch (error) {
         console.error('Error executing prefix command:', error);
+        // Storage hiccups (shared-host disk flaps) used to fail SILENTLY to the
+        // player — bot looked dead. Tell them it's temporary and retryable.
+        if (error && error.code === 'ENOSPC') {
+          try {
+            await message.reply('⚠️ Storage is momentarily unavailable — please try again in a few seconds.');
+          } catch { /* already replied / stale */ }
+        }
       }
       return; // Don't process auto-reply for prefix commands
     }
@@ -157,12 +164,17 @@ client.on('interactionCreate', async (interaction) => {
       await gameCommand.handleButton(interaction);
     } catch (error) {
       console.error('Error handling button:', error);
-      if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({
-          content: 'An error occurred. Please try again.',
-          ephemeral: true,
-        });
-      }
+      // Surface storage hiccups explicitly — silent stuck panels read as "bot dead".
+      const content = error && error.code === 'ENOSPC'
+        ? '⚠️ Storage is momentarily unavailable — please try again in a few seconds.'
+        : 'An error occurred. Please try again.';
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content, ephemeral: true });
+        } else if (interaction.deferred) {
+          await interaction.followUp({ content, ephemeral: true });
+        }
+      } catch { /* stale interaction */ }
     }
     return;
   }

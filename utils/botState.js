@@ -69,8 +69,12 @@ function load() {
 const state = load();
 
 function save() {
+  // Atomic tmp+rename — a failed write (e.g. ENOSPC) leaves the old file
+  // intact instead of truncating it to 0 bytes. Same pattern as economyManager.
+  const tmp = STATE_FILE + '.tmp-' + process.pid;
   try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf-8');
+    fs.renameSync(tmp, STATE_FILE);
   } catch (err) {
     console.error('[botState] Failed to save state:', err.message);
   }

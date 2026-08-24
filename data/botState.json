@@ -1,6 +1,6 @@
 {
   "maintenance": {
-    "active": true,
+    "active": false,
     "message": "Bot is currently under maintenance. Please try again later."
   },
   "bansos": {
@@ -27,6 +27,5 @@
     ],
     "channelId": null,
     "messageId": null
-  },
-  "lastBackupDM": "2026-08-20"
+  }
 }
