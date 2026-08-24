@@ -257,31 +257,21 @@ const ABYSSAL_EDGE = {
   slot: 'weapon',
   tier: 'abyssal',
   stats: { atk: 100, matk: 100 }, // fixed (divine max is 55 — off-stat is dead per class, not OP cross-class)
-  fixedPassives: [{ id: 'rupture', value: 15 }],
+  fixedPassives: [
+    { id: 'rupture', value: 15 },
+    { id: 'berserker', value: 40 },
+    { id: 'precision', value: 30 },
+    { id: 'lifesteal', value: 30 },
+  ],
   sellable: false,
   onePerAccount: true,
 };
 
-// Roll pool for the 2 extra passives: COMBAT passives only at divine MAX values.
-// greed/wisdom excluded — the top trophy must never roll trash.
-const ABYSSAL_EDGE_ROLL_POOL = {
-  berserker: 32, precision: 25, lifesteal: 25, swift: 20, fortify: 22, evasion: 13,
-};
-
-// Pure helper: returns 2 DISTINCT combat passive ids from the pool.
-// rand = () => [0..1) (injectable for tests; defaults to Math.random).
-function rollAbyssalEdgePassives(rand) {
-  const r = rand || Math.random;
-  const ids = Object.keys(ABYSSAL_EDGE_ROLL_POOL);
-  const i = Math.floor(r() * ids.length);
-  let j = Math.floor(r() * (ids.length - 1)); // uniform over the 5 remaining
-  if (j >= i) j++;
-  return [ids[i], ids[j]];
-}
+// All passives are FIXED — no rolling. See ABYSSAL_EDGE.fixedPassives.
 
 module.exports = {
   ABYSS_FLOORS, TURN_LIMIT, STAR_THRESHOLDS,
   BOSS_DIALOGUES, ABYSS_REWARDS, ABYSS_MILESTONES,
   REC_BIAS, bossTunedLevel,
-  ABYSSAL_TIER, ABYSS_PASSIVES, ABYSSAL_EDGE, ABYSSAL_EDGE_ROLL_POOL, rollAbyssalEdgePassives,
+  ABYSSAL_TIER, ABYSS_PASSIVES, ABYSSAL_EDGE,
 };

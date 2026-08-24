@@ -157,40 +157,26 @@ eq(MS.allStars.stars, 30, 'allStars at 30 stars');
 eq(MS.allStars.title, '🌌 Abyssal Master', '30-star title');
 eq(MS.allStars.abyssalEdge, true, '30-star grants Abyssal Edge');
 
-// Abyssal Edge + roll pool
-const E = A.ABYSSAL_EDGE, P = A.ABYSSAL_EDGE_ROLL_POOL;
+// Abyssal Edge — all fixed passives (no rolling)
+const E = A.ABYSSAL_EDGE;
 eq(E.slot, 'weapon', 'Edge slot weapon');
 eq(E.stats.atk, 100, 'Edge atk 100');
 eq(E.stats.matk, 100, 'Edge matk 100');
-eq(E.fixedPassives.length, 1, 'Edge 1 fixed passive');
-eq(E.fixedPassives[0].id, 'rupture', 'Edge fixed = rupture');
+eq(E.fixedPassives.length, 4, 'Edge 4 fixed passives');
+eq(E.fixedPassives[0].id, 'rupture', 'Edge fixed[0] = rupture');
 eq(E.fixedPassives[0].value, 15, 'Edge rupture 15');
+eq(E.fixedPassives[1].id, 'berserker', 'Edge fixed[1] = berserker');
+eq(E.fixedPassives[1].value, 40, 'Edge berserker 40');
+eq(E.fixedPassives[2].id, 'precision', 'Edge fixed[2] = precision');
+eq(E.fixedPassives[2].value, 30, 'Edge precision 30');
+eq(E.fixedPassives[3].id, 'lifesteal', 'Edge fixed[3] = lifesteal');
+eq(E.fixedPassives[3].value, 30, 'Edge lifesteal 30');
 eq(E.sellable, false, 'Edge unsellable');
-ok(!('greed' in P) && !('wisdom' in P), 'roll pool excludes greed/wisdom');
-eq(Object.keys(P).length, 6, 'roll pool has exactly 6');
-eq(P.berserker, 32, 'pool berserker 32');
-eq(P.precision, 25, 'pool precision 25');
-eq(P.lifesteal, 25, 'pool lifesteal 25');
-eq(P.swift, 20, 'pool swift 20');
-eq(P.fortify, 22, 'pool fortify 22');
-eq(P.evasion, 13, 'pool evasion 13');
 eq(A.ABYSSAL_TIER.letter, 'A', 'tier letter A');
 eq(A.ABYSSAL_TIER.name, 'Abyssal', 'tier name Abyssal');
 eq(A.ABYSSAL_TIER.price, 0, 'tier price 0 (not purchasable)');
 const rup = A.ABYSS_PASSIVES.rupture;
 ok(rup && rup.value === 15 && !('ranges' in rup) && !('weight' in rup), 'rupture entry: value 15, no gacha ranges/weight');
-
-// rollAbyssalEdgePassives — deterministic + distinct + in-pool
-eq(JSON.stringify(A.rollAbyssalEdgePassives(() => 0)), JSON.stringify(['berserker', 'precision']), 'roll deterministic rand=0');
-eq(JSON.stringify(A.rollAbyssalEdgePassives(() => 0.999)), JSON.stringify(['evasion', 'fortify']), 'roll deterministic rand=0.999');
-const seen = new Set();
-for (let s = 0; s < 500; s++) {
-  const ids = A.rollAbyssalEdgePassives(Math.random);
-  ok(ids.length === 2 && ids[0] !== ids[1] && P[ids[0]] !== undefined && P[ids[1]] !== undefined, 'roll yields 2 distinct pool ids (seed ' + s + ')');
-  ids.forEach((x) => seen.add(x));
-  if (fail > 0) break;
-}
-eq(seen.size, 6, 'rolls cover the full pool over 500 draws');
 
 // ---- 5. dialogues (spec §6.1) ----
 for (let i = 1; i <= 10; i++) {
@@ -343,13 +329,15 @@ boundary(30, 1, 1);
   eq(edge.stats.matk, 100, 'edge matk 100');
   eq(edge.rarity, 'abyssal', 'edge rarity abyssal');
   eq(edge.slot, 'weapon', 'edge slot weapon');
-  eq(edge.passives.length, 3, 'edge: rupture + exactly 2 rolled');
-  eq(edge.passives[0].id, 'rupture', 'edge fixed passive rupture');
+  eq(edge.passives.length, 4, 'edge: 4 fixed passives (rupture + berserker + precision + lifesteal)');
+  eq(edge.passives[0].id, 'rupture', 'edge passive[0] rupture');
   eq(edge.passives[0].value, 15, 'edge rupture 15');
-  const rolled = edge.passives.slice(1).map((p) => p.id);
-  ok(rolled[0] !== rolled[1], 'edge rolled passives distinct');
-  ok(rolled.every((id) => id in A.ABYSSAL_EDGE_ROLL_POOL), 'edge rolled passives from pool');
-  ok(rolled.every((id) => edge.passives.find((p) => p.id === id).value === A.ABYSSAL_EDGE_ROLL_POOL[id]), 'edge rolled values = pool (divine max)');
+  eq(edge.passives[1].id, 'berserker', 'edge passive[1] berserker');
+  eq(edge.passives[1].value, 40, 'edge berserker 40');
+  eq(edge.passives[2].id, 'precision', 'edge passive[2] precision');
+  eq(edge.passives[2].value, 30, 'edge precision 30');
+  eq(edge.passives[3].id, 'lifesteal', 'edge passive[3] lifesteal');
+  eq(edge.passives[3].value, 30, 'edge lifesteal 30');
   eq(d.u1.battle.uniqueItems[edge.id], edge, 'edge stored in uniqueItems');
   eq(abyss(d).milestones.allStars, true, 'allStars flag set');
   eq(AM.applyCheckAllStarsMilestone(d, 'u1'), null, 'edge granted ONCE (second call no-op)');

@@ -246,7 +246,7 @@
 | F10 | **300,000** | 75,000 | 🔶 Divine drop | 💎 1,000,000 + Title: 💀 Abyssal Overlord |
 | 30⭐ | — | — | 🌌 **Abyssal Edge** | Title: 🌌 Abyssal Master |
 
-**🌌 Abyssal Edge**: weapon class-neutral, tier baru **[A] Abyssal** (atas Divine) — +100 ATK & +100 MATK fixed, 🕳️ Rupture 15% (passive baru: semua hit pakai 85% def lawan) + 2 roll passive combat @ max divine (brs32/prec25/LS25/swift20/fort22/eva13). Unsellable, 1×/akun. Sim: pemegang ≈ autowin di mirror setara — accepted (eligibility: ~1 pemain, berbulan-bulan).
+**🌌 Abyssal Edge**: weapon class-neutral, tier baru **[A] Abyssal** (atas Divine) — +100 ATK & +100 MATK fixed, 🕳️ Rupture 15% + 🗡️ Berserker 40% + 🎯 Precision 30% + 🩸 Lifesteal 30% (all fixed, no roll). Unsellable, 1×/akun. Sim: pemegang ≈ autowin di mirror setara — accepted (eligibility: ~1 pemain, berbulan-bulan).
 
 **Total max:** ~1.17jt 🧪 + 2.6jt 💎 + 4 gear + 7 title — sekali selamanya.
 

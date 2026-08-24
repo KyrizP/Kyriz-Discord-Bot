@@ -128,7 +128,7 @@ const TIER_INFO = {
   legendary: { letter: 'L', color: '🟠', price: 5000,  passives: 1 },
   mythic:    { letter: 'M', color: '🟡', price: 10000, passives: 1 },
   divine:    { letter: 'D', color: '🔶', price: 20000, passives: 2 },
-  abyssal:   { letter: 'A', color: '🌌', price: 0,     passives: 3 }, // Abyssal Edge trophy tier — not purchasable/sellable (battleManager guard)
+  abyssal:   { letter: 'A', color: '🌌', price: 0,     passives: 4 }, // Abyssal Edge trophy tier — not purchasable/sellable (battleManager guard)
   immortal:  { letter: 'I', color: '🔴', price: 0,     passives: 0 },
 };
 

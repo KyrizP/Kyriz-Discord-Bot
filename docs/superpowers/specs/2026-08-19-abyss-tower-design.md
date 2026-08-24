@@ -326,7 +326,7 @@ Max 30 stars. Best kept. _F4 (sustain) & F10 (final) = mastery floors: 3⭐-nya 
 | Tier baru | **[A] Abyssal** (di atas Divine, di bawah Immortal) — huruf A bebas |
 | Bentuk | SATU weapon class-neutral: `🌌 Abyssal Edge` — pilihan 3 senjata DIBATALKAN (atk+matk dua-duanya menyelesaikan masalah class) |
 | Stat | **+100 ATK & +100 MATK** fixed (divine max 55; off-stat = dead stat per class — tidak OP lintas class) |
-| Passive | 🕳️ **Rupture 15%** (BARU: semua hit mengabaikan 15% DEF/MDEF target — tidak ada di gacha pool) + **roll 2 passive dari pool combat** di nilai MAX divine: brs 32 / prec 25 / LS 25 / swift 20 / fort 22 / eva 13 (greed/wisdom dikecualikan — trophy puncak tidak boleh ngerol sampah) |
+| Passive | 🕳️ **Rupture 15%** (BARU: semua hit mengabaikan 15% DEF/MDEF target — tidak ada di gacha pool) + **3 passive combat FIXED**: 🗡️ Berserker 40% + 🎯 Precision 30% + 🩸 Lifesteal 30% (tidak di-roll — semua pemain dapat set yang sama) |
 | Guard | Tidak bisa dijual · 1 per akun · fixed stat (bukan re-roll) |
 | **Cap rules** | **Semua passive Edge tetap kena cap normal** — weapon masuk pipeline `getPassives()` yang sama (brs→100, prec→50, evasion→40+base 48). Abyssal Edge TIDAK menembus cap apa pun. Rupture tidak stack (fixed 15%, tidak ada sumber lain) |
 | **Display** | Rupture tampil di Active Passives `ky char` **dan** `ky preset` dengan deskripsi inline: `🕳️ Rupture 15% — attacks ignore 15% of target's DEF/MDEF` (passive lain format lama) |

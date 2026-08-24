@@ -13,7 +13,7 @@
 // ============================================================
 
 const { STAR_THRESHOLDS, ABYSS_REWARDS, ABYSS_MILESTONES, ABYSS_FLOORS, TURN_LIMIT,
-        bossTunedLevel, ABYSSAL_EDGE, ABYSSAL_TIER, ABYSS_PASSIVES, rollAbyssalEdgePassives } = require('./abyssConfig');
+        bossTunedLevel, ABYSSAL_EDGE, ABYSSAL_TIER, ABYSS_PASSIVES } = require('./abyssConfig');
 const { PASSIVES, CLASSES, CRIT, EVASION_TOTAL_CAP } = require('./battleConfig'); // pure data — no cycle
 const { MILESTONE_TITLE_LABELS } = require('./shopItems'); // pure data — no cycle (title label -> catalog id)
 const { computeStats, getPassives, physicalDamage, magicDamage } = require('./battleEngine'); // no cycle (battleEngine requires battleConfig only)
@@ -94,12 +94,10 @@ function applyCheckAllStarsMilestone(data, userId) {
     rarity: ABYSSAL_EDGE.tier,          // 'abyssal' — unsellable tier (battleManager guard)
     slot: ABYSSAL_EDGE.slot,
     stats: { ...ABYSSAL_EDGE.stats },   // fixed {atk:100, matk:100} — NO re-roll
-    passives: [
-      // fixed rupture (abyss-local passive — never rolls from boxes)
-      { id: 'rupture', emoji: ABYSS_PASSIVES.rupture.emoji, value: ABYSSAL_EDGE.fixedPassives[0].value, unit: ABYSS_PASSIVES.rupture.unit },
-      // 2 distinct pool passives at DIVINE MAX value (= pool value, config parity)
-      ...rollAbyssalEdgePassives(Math.random).map((id) => ({ id, emoji: PASSIVES[id].emoji, value: PASSIVES[id].ranges.divine[1], unit: PASSIVES[id].unit })),
-    ],
+    passives: ABYSSAL_EDGE.fixedPassives.map((fp) => {
+      const src = fp.id === 'rupture' ? ABYSS_PASSIVES.rupture : PASSIVES[fp.id];
+      return { id: fp.id, emoji: src.emoji, value: fp.value, unit: src.unit };
+    }),
     boughtAt: new Date().toISOString(), // field name kept: battleCommands sorts the collection by it
   };
   b.uniqueItems[edge.id] = edge;
