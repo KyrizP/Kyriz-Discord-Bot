@@ -6,6 +6,7 @@
 // ============================================================
 
 const { CLASSES, GEAR, ENEMY_BASE, DROP_RARITIES, DROP_ZONES, DROPS, CRIT, PASSIVE_CAPS, EVASION_TOTAL_CAP } = require('./battleConfig');
+const { ABYSS_FLOORS } = require('./abyssConfig'); // pure data — no circular dep
 
 const STAT_KEYS = ['hp', 'atk', 'matk', 'def', 'mdef', 'spd'];
 const EQUIP_SLOTS = ['weapon', 'head', 'armor', 'boots', 'accessory'];
@@ -247,7 +248,67 @@ function simulateDelve(charLevel, charClass, equipment = {}, uniqueItems = {}, o
   return { deathFloor, floorsCleared, kryptonitePotential, dropsByRarity };
 }
 
+// ============================================================
+// Ranking extractors (SQLite migration spec §3.1) — single source
+// of truth for the MATERIALIZED ranking columns. economyManager's
+// writePlayer calls these on every write; the global battle/abyss
+// leaderboards read the columns via SQL instead of recomputing.
+//
+// ⚠️ Formula-dependent: battle_score derives from computeStats —
+// every computeStats retune REQUIRES a one-time recompute sweep of
+// all rows (UPDATE each row through extractBattleRanking).
+//
+// Note: battleScore > 0 doubles as the "has ≥1 character" marker —
+// base stats are always positive, so a char-less player is exactly
+// battleScore === 0. Legacy LBs list only players with characters.
+// Mirror of buildBattleLeaderboard's best-char pick (battleManager):
+// max by (bestDepth desc → score desc); tiebreak string kept verbatim
+// from the winning char: ch.scoreAchievedAt || registeredAt || '9999'.
+// ============================================================
+
+function extractBattleRanking(battle, registeredAt) {
+  const zero = { bestDepth: 0, battleScore: 0, scoreAchievedAt: '9999' };
+  if (!battle || typeof battle !== 'object') return zero;
+  const characters = battle.characters;
+  if (!characters || typeof characters !== 'object') return zero;
+  let best = null;
+  for (const [cls, ch] of Object.entries(characters)) {
+    if (!ch || typeof ch !== 'object') continue;
+    const stats = computeStats(ch.charLevel, cls, ch.equipment, battle.uniqueItems || {});
+    const score = stats.hp + stats.atk + stats.matk + stats.def + stats.mdef + stats.spd;
+    const depth = ch.bestDepth || 0;
+    if (!best || depth > best.depth || (depth === best.depth && score > best.score)) {
+      best = { depth, score, at: ch.scoreAchievedAt || registeredAt || '9999' };
+    }
+  }
+  if (!best) return zero;
+  return { bestDepth: best.depth, battleScore: best.score, scoreAchievedAt: best.at };
+}
+
+// Mirror of handleAbyssLb's star math (battleCommands): read-only version of
+// abyssManager.ensureAbyssData normalization (clamp 0..3, non-numbers → 0,
+// short/long arrays read up to ABYSS_FLOORS.length). Returns highest cleared
+// floor (index+1 of last nonzero) + total stars. Zero-progress = both 0 —
+// the SQL LB filters those out to match the legacy zero-skip.
+function extractAbyssRanking(battle) {
+  const zero = { bestFloor: 0, totalStars: 0 };
+  if (!battle || typeof battle !== 'object') return zero;
+  const a = battle.abyss;
+  const stars = (a && typeof a === 'object' && Array.isArray(a.stars)) ? a.stars : [];
+  const n = Math.min(stars.length, ABYSS_FLOORS.length);
+  let total = 0;
+  let highest = 0;
+  for (let i = 0; i < n; i++) {
+    const v = stars[i];
+    const c = (typeof v === 'number' && Number.isFinite(v)) ? Math.min(3, Math.max(0, Math.floor(v))) : 0;
+    total += c;
+    if (c > 0) highest = i + 1;
+  }
+  return { bestFloor: highest, totalStars: total };
+}
+
 module.exports = {
   computeStats, getPassivesRaw, getPassives, getCritChance, physicalDamage, magicDamage, generateEnemy, resolveFight,
   rollDrop, merchantPrice, simulateDelve, STAT_KEYS, EQUIP_SLOTS, MAX_ROUNDS,
+  extractBattleRanking, extractAbyssRanking,
 };

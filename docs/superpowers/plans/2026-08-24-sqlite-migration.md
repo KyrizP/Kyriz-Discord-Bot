@@ -12,9 +12,9 @@
 
 ## Pre-flight
 
-- [ ] **Step 0:** `npm install better-sqlite3` — verify compiles & loads di Node lokal. Catat versi Node. (`package.json` + `package-lock.json` ter-update BERSAMA — keduanya nanti masuk satu commit deploy).
+- [x] **Step 0:** `npm install better-sqlite3` — Node v22.17.0, better-sqlite3 v13.0.3, load+CRUD roundtrip `:memory:` OK, 0 vulnerabilities. (`package.json` + `package-lock.json` ter-update BERSAMA — keduanya nanti masuk satu commit deploy).
 
-- [ ] **Step 0.5: Snapshot fixture legacy — SEBELUM Step 1b, tanpa pengecualian**
+- [x] **Step 0.5: Snapshot fixture legacy** — tersnapshot dari `5f0fa42` (SHA256 8691daac… + HEAD tercatat); layout sandbox terverifikasi: fixture resolve ke `test/fixtures/data/economy.json`, getUser roundtrip OK
   - `mkdir -p test/fixtures/legacy test/fixtures/data`
   - `git show <HEAD>:utils/economyManager.js > test/fixtures/legacy/economyManager.js` (catat commit SHA)
   - SHA-256 fixture → `test/fixtures/legacy/SHA256`
@@ -25,7 +25,7 @@
 
 ## Phase 1: Core Persistence Layer
 
-- [ ] **Step 1a:** ADD `battleEngine.extractBattleRanking(battleObj, registeredAt)` → `{ bestDepth, battleScore, scoreAchievedAt }` + `extractAbyssRanking(battleObj)` → `{ bestFloor, totalStars }`
+- [x] **Step 1a:** DONE — kedua extractor masuk `battleEngine.js` (+import `ABYSS_FLOORS` dari abyssConfig, pure). **Parity probe atas data server asli 48 player**: battle LB 28 baris urutan+triple-nilai IDENTIK vs `getBattleLeaderboardFor`; abyss 9 baris IDENTIK (zero-skip cocok); null-battle → zeros. Engine tests tetap hijau (45+630) → `{ bestDepth, battleScore, scoreAchievedAt }` + `extractAbyssRanking(battleObj)` → `{ bestFloor, totalStars }`
   - Pure, di `battleEngine.js`. Sort triple identik `buildBattleLeaderboard` (bestDepth desc → score desc → achievedAt asc; fallback `|| registeredAt || '9999'`); stars/highest identik `handleAbyssLb`
   - Comment: *"Formula-dependent — retune `computeStats` WAJIB disertai recompute sweep"*
 

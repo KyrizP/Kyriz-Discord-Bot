@@ -8,10 +8,15 @@
     "deploy": "node deploy-commands.js",
     "test": "node test/crash.test.js && node test/battleConfig.test.js && node test/battleEngine.test.js && node test/battleManager.test.js"
   },
-  "keywords": ["discord", "bot", "kyriz"],
+  "keywords": [
+    "discord",
+    "bot",
+    "kyriz"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.7"
   }
