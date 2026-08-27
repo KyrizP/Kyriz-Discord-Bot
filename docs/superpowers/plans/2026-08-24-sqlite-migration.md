@@ -49,7 +49,7 @@
   - **Invariant sync consumer:** urutan `readPlayer → writePlayer` WAJIB tetap sinkron — DILARANG await di antara (atomicitas = event-loop + better-sqlite3 sync; re-read fresh di tiap step interaksi)
   - `backupEconomy()`: **skip + JANGAN prune kalau COUNT(*)=0** (jaga backup JSON-era lama tetap hidup; log `[DATA SAFETY] refusing to snapshot/prune on empty db`) · db.backup Promise → `.catch` + **log sukses di completion callback** (bukan sebelum) · naming/prune 14
 
-- [ ] **Step 1c: ⛔ GERBANG ATOMISITAS — Steps 1b–7 = SATU UNIT**
+- [x] **Step 1c: ⛔ GERBANG ATOMISITAS — Steps 1b–7 = SATU UNIT** — DONE: no push terjadi sepanjang eksekusi (7 commit lokal, 0 push); no boot penuh dilakukan (semua via sandbox env)
   - No boot/no deploy/**no push** (`push = deploy` di egg AUTO_UPDATE) sampai Step 7 selesai. Verifikasi antar-phase = `node -c` + test runner saja
 
 ---
@@ -80,13 +80,13 @@
 
 ## Phase 4: Tests
 
-- [ ] **Step 8:** UPDATE `test/classSwitch.exploit.js` + `classSwitch.test.js` — monkeypatch → readPlayer/writePlayer (+addXP); **SET KEDUA env SEBELUM require**: `KYRIZ_ECONOMY_DB=<temp>` **DAN** `KYRIZ_ECONOMY_JSON=<path-tidak-ada>` (setengah isolasi = migrasi data dev tetap terjadi — JSON_SRC default masih kebaca). `:231 getUser` = real read → SQLite temp
+- [x] **Step 8:** DONE — exploit shim readPlayer/writePlayer (75 pass + 38/38 probes); classSwitch.test hijau tanpa perubahan (82); env isolate via harness sandbox
 - [x] **Step 9:** DONE — **19/19 PASS**: fixture-hash gate (stale=FAIL) · replay 43-op identik (seeded RNG reset, timestamp-scrub, sorted-key canon, player-shape kanonik §3) · final-state deep-equal · round-trip + extra + __proto__-craft + rowid-stabilitas · battle LB order + abyss LB rows/zero-skip vs legacy
   - Fixture dari Step 0.5; **hash mismatch = FAIL**. Module baru via KEDUA env (fixture copy per-run — **migrasi mengonsumsi fixture** (rename), jadi salin segar sebelum tiap run)
   - (a) Round-trip: `deep-equal(readPlayer(writePlayer(obj)), normalize(obj))` — **invariant atas bentuk KANONIK** (bukan obj mentah); + assert rowid row TIDAK berubah across writePlayer; + player `extra` berisi `__proto__`/`constructor` craft → round-trip dengan Object.prototype tak tersentuh
   - (b) Replay API-surface (seeded Math.random reset antar run): register ×N → balance/daily/transfer/addXP/recordWin-Loss/updateUsername → **getUser(superadmin)** → **transfer sender-superadmin (triple-skip)** → getTransferData (rollover) → leaderboard/rank/getAllPlayers (admin TETAP di getAllPlayers, HILANG di leaderboard; **tie-semantics = competition rank, assert eksplisit**) → whitelist sadar: `getLeaderboard` legacy `cosmetics: null` vs baru `{}` (behavior identik — semua consumer `|| {}`)
   - (c) Materialized-order: battle LB + abyss LB (rows/order/zero-skip/empty-state) == legacy
-- [ ] **Step 10:** VERIFY `abyss.test.js` — `:373 getAbyssProgress` = real read → **KEDUA env** temp; unknown-user tetap zeros
+- [x] **Step 10:** DONE — :373 real read berjalan via sandbox; unknown-user zeros terverifikasi (630 asserts hijau); klaim zero-IO lama terkoreksi di spec §8
 
 ---
 
