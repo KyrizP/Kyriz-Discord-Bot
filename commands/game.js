@@ -24,6 +24,7 @@ const {
   getTransferData,
   getGlobalRank,
   isAdmin,
+  snapshotTo,
 } = require('../utils/economyManager');
 const { createDeck, drawCard, calculateHand, formatHand, isBlackjack } = require('../utils/cardDeck');
 const { listBuyable, getItem } = require('../utils/shopItems');
@@ -960,13 +961,13 @@ async function sendBackupDM(client, daily) {
   const attachments = [];
   const summary = [];
   let playerCount = null;
-  try { playerCount = economy.getAllPlayers().length; } catch { /* store belum siap */ }
+  try { playerCount = getAllPlayers().length; } catch { /* store belum siap */ }
   // economy.db via WAL-aware snapshot → gzip (spec §6): a raw .db copy can miss
   // hours of transactions still living in -wal, and a raw .gz drop-in boots EMPTY.
   const dbTemp = path.join(DATA_DIR, 'economy.db.tmp-backup');
   let gzPath = null;
   try {
-    await economy.snapshotTo(dbTemp);
+    await snapshotTo(dbTemp);
     const gz = zlib.gzipSync(fs.readFileSync(dbTemp));
     gzPath = dbTemp + '.gz';
     fs.writeFileSync(gzPath, gz);
