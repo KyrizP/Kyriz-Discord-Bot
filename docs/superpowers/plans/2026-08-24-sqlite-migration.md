@@ -66,12 +66,12 @@
 
 ## Phase 3: Peripheral Updates
 
-- [ ] **Step 6:** UPDATE `commands/game.js` — jalur backup saja
+- [x] **Step 6:** DONE — economy.json keluar dari targets; snapshotTo → gzipSync → `economy.db.gz` (push sebelum guard, ikut count, cleanup temp di finally); player count via getAllPlayers; reason `gzip-fail` + 3 existing; teks restore = STOP-bot-first + instruksi gunzip + catatan era-JSON usang (literal filename dihilangkan demi gate)
   - **Keluarkan `'economy.json'` dari array `targets` (:958)** (sisakan replies/users/botState) + **hapus fallback `JSON.parse(readFileSync('economy.json'))` (:980-982)**
   - Alur: `snapshotTo(temp)` → gzip → push ke `attachments` SAMA **sebelum** guard length → include di count/summary · guard >8MB split, >50MB hard-stop+saran cloud · reason codes: **2 baru** (`gzip-fail`, `backup-too-large`) + 3 existing (`no-files`, `no-superadmin`, `dm-closed`) — semua gagal = log keras + DM peringatan
   - **Teks restore DM (rewrite :985):** "**1. STOP bot dulu** (panel → Stop, bukan restart) → 2. JSON: taruh di `data/` · `economy.db.gz`: `gunzip` → taruh sebagai `data/economy.db` → hapus `-wal`/`-shm` lama → 3. start bot → 4. cek `ky wallet` beberapa player". Tambah: "backup era-JSON (`economy.json` dari DM lama) TIDAK berlaku lagi pasca-migrasi — jalur restore SQLite saja"
   - Game kasino/admin/bansos TIDAK disentuh
-- [ ] **Step 7:** UPDATE `index.js`
+- [x] **Step 7:** DONE — dead banner :42-51 diganti count polos (perilaku refuse-to-start tercatat); dailyBackupDM log SEMUA reason; ENOSPC||SQLITE_FULL di prefix+button; SIGTERM/SIGINT `closeDatabase()` (WAL checkpoint); namespace import economyManager
   - **Dead banner block :42-51** (bukan :41 — baris 41 opener `client.once('ready')` HIDUP) — hapus catch+banner-nya, ganti `playerCount = getAllPlayers().length` polos. Perilaku boot baru (korup = refuse-to-start) = keputusan tercatat spec §5
   - **SIGTERM/SIGINT: `try { db.close(); } catch {}` SEBELUM `process.exit(0)`** — checkpoint WAL ke file utama (tutup window "-wal berisi commit saat bot mati")
   - Broaden `error.code`: `ENOSPC` || `SQLITE_FULL` · `dailyBackupDM` log SEMUA reason non-sent · log snapshot boot dari completion callback · tmp-cleanup: jangan match `.db-wal`/`.db-shm`/`*.db`; **temp backup dinamai `economy.db.tmp-backup`** (match pola housekeeping `.tmp-` yang ada — file sisa gagal-kirim kebersihkan otomatis di boot)

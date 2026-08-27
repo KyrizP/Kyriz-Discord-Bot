@@ -1,5 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, StringSelectMenuBuilder } = require('discord.js');
 const fs = require('fs');
+const zlib = require('zlib'); // gzip backup (spec §6)
 const path = require('path');
 const {
   isSuperAdmin,
@@ -955,9 +956,26 @@ async function sendBackupDM(client, daily) {
   const DATA_DIR = path.join(__dirname, '..', 'data');
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' }); // 2026-08-17 WIB
   if (daily && botState.state.lastBackupDM === today) return { sent: false, reason: 'already-sent-today' };
-  const targets = ['economy.json', 'replies.json', 'users.json', 'botState.json'];
+  const targets = ['replies.json', 'users.json', 'botState.json'];
   const attachments = [];
   const summary = [];
+  let playerCount = null;
+  try { playerCount = economy.getAllPlayers().length; } catch { /* store belum siap */ }
+  // economy.db via WAL-aware snapshot → gzip (spec §6): a raw .db copy can miss
+  // hours of transactions still living in -wal, and a raw .gz drop-in boots EMPTY.
+  const dbTemp = path.join(DATA_DIR, 'economy.db.tmp-backup');
+  let gzPath = null;
+  try {
+    await economy.snapshotTo(dbTemp);
+    const gz = zlib.gzipSync(fs.readFileSync(dbTemp));
+    gzPath = dbTemp + '.gz';
+    fs.writeFileSync(gzPath, gz);
+    attachments.push(new AttachmentBuilder(gzPath, { name: 'economy.db.gz' }));
+    summary.push(`• \`economy.db.gz\` — ${(gz.length / 1024).toFixed(1)} KB`);
+  } catch (err) {
+    console.error('[BACKUP] economy snapshot/gzip FAILED:', err.message);
+    return { sent: false, reason: 'gzip-fail' };
+  }
   for (const name of targets) {
     const fp = path.join(DATA_DIR, name);
     if (fs.existsSync(fp)) {
@@ -975,18 +993,17 @@ async function sendBackupDM(client, daily) {
     return { sent: false, reason: 'no-superadmin' };
   }
   const ts = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'short', timeStyle: 'short' });
-  let playerCount = null;
-  try {
-    const d = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'economy.json'), 'utf-8'));
-    playerCount = Object.keys(d).length;
-  } catch { /* economy.json belum ada — abaikan */ }
   try {
     await owner.send({
-      content: `📦 **Kyriz ${daily ? 'Auto-Backup Harian' : 'Backup'}**\nDibuat: ${ts} WIB\n\nFile:\n${summary.join('\n')}${playerCount != null ? `\n\nPemain terdaftar: **${playerCount}**` : ''}\n\n_Untuk restore: taruh file-file ini di folder \`data/\` lalu restart bot._`,
+      content: `📦 **Kyriz ${daily ? 'Auto-Backup Harian' : 'Backup'}**\nDibuat: ${ts} WIB\n\nFile:\n${summary.join('\n')}${playerCount != null ? `\n\nPemain terdaftar: **${playerCount}**` : ''}\n\n**Restore:** 1. STOP bot dulu (panel → Stop). 2. File JSON: taruh di folder \`data/\`. \`economy.db.gz\`: gunzip dulu → taruh sebagai \`data/economy.db\` → hapus \`economy.db-wal\`/\`-shm\` lama. 3. Start bot. _(Backup era-JSON lama tidak berlaku lagi — jalur restore SQLite saja.)_`,
       files: attachments,
     });
   } catch {
     return { sent: false, reason: 'dm-closed', summary, playerCount };
+  } finally {
+    // temp cleanup — never leak a full db copy into data/ on failure paths
+    try { if (gzPath) fs.rmSync(gzPath, { force: true }); } catch {}
+    try { fs.rmSync(dbTemp, { force: true }); } catch {}
   }
   if (daily) {
     // mark AFTER a successful send: a failed DM (closed) stays unmarked so the next
@@ -1003,6 +1020,7 @@ async function handleBackup(message, userId) {
   if (!r.sent) {
     const reasons = {
       'no-files': '⚠️ Tidak ada file data di folder `data/` untuk di-backup.',
+      'gzip-fail': '❌ Snapshot/gzip database gagal — cek console bot (storage penuh / IO error).',
       'no-superadmin': '❌ Gagal mengambil user superadmin. Cek `SUPERADMIN_ID` di .env.',
       'dm-closed': '❌ Gagal kirim DM (kemungkinan DM dari bot dimatikan). Aktifkan pengaturan DM dari bot ini, lalu coba `ky backup` lagi. Data sengaja TIDAK dikirim ke channel demi keamanan.',
     };

@@ -8,7 +8,8 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { handleAutoReply } = require('./handlers/autoReply');
-const { getAllPlayers, backupEconomy } = require('./utils/economyManager');
+const economyManager = require('./utils/economyManager');
+const { getAllPlayers, backupEconomy } = economyManager;
 
 // ============================================================
 // Load Commands
@@ -39,16 +40,10 @@ const client = new Client({
 // Event: Ready
 // ============================================================
 client.once('ready', () => {
-  // DATA SAFETY: an unreadable economy must not kill the rest of boot (backup, migration,
-  // maintenance restore). readJSON already preserved the corrupt bytes by now — commands
-  // will fail loudly until the admin restores; the banner below makes it unmissable.
-  let playerCount = 0;
-  try {
-    playerCount = getAllPlayers().length;
-  } catch (e) {
-    console.error('║   ⚠️ ECONOMY UNREADABLE — economy commands FAIL until restored!');
-    console.error('║   ⚠️ Corrupt file preserved as data/economy.json.corrupt-* — see console/log.');
-  }
+  // SQLite migration: initDb throws eagerly at require-time on corrupt/refuse states —
+  // this handler is only reached with a HEALTHY db (spec §5: refuse-to-start is the
+  // deliberate behavior change from the old degraded-banner mode).
+  const playerCount = getAllPlayers().length;
   console.log('╔══════════════════════════════════════════╗');
   console.log('║   Kyriz — Personal Assistant Bot         ║');
   console.log('╠══════════════════════════════════════════╣');
@@ -79,7 +74,7 @@ client.once('ready', () => {
     try {
       const r = await gameCommand.sendBackupDM(client, true);
       if (r && r.sent) console.log(`║   Daily backup DM sent (${r.count} files) — data safe off-server ✅`);
-      else if (r && r.reason === 'dm-closed') console.error('║   ⚠️ Daily backup DM FAILED — superadmin DMs closed!');
+      else if (r) console.error(`║   ⚠️ Daily backup DM not sent — reason: ${r.reason}`); // ALL reasons logged (spec §6)
     } catch (e) { console.error('[backup-dm] failed:', e.message); }
   };
   const msToNext001WIB = () => { // next 00:01 WIB
@@ -139,7 +134,7 @@ client.on('messageCreate', async (message) => {
         console.error('Error executing prefix command:', error);
         // Storage hiccups (shared-host disk flaps) used to fail SILENTLY to the
         // player — bot looked dead. Tell them it's temporary and retryable.
-        if (error && error.code === 'ENOSPC') {
+        if (error && (error.code === 'ENOSPC' || error.code === 'SQLITE_FULL')) {
           try {
             await message.reply('⚠️ Storage is momentarily unavailable — please try again in a few seconds.');
           } catch { /* already replied / stale */ }
@@ -165,7 +160,7 @@ client.on('interactionCreate', async (interaction) => {
     } catch (error) {
       console.error('Error handling button:', error);
       // Surface storage hiccups explicitly — silent stuck panels read as "bot dead".
-      const content = error && error.code === 'ENOSPC'
+      const content = error && (error.code === 'ENOSPC' || error.code === 'SQLITE_FULL')
         ? '⚠️ Storage is momentarily unavailable — please try again in a few seconds.'
         : 'An error occurred. Please try again.';
       try {
@@ -276,6 +271,7 @@ function logDiagnostic(msg) {
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     logDiagnostic(sig + ' received (panel stop/restart or manual kill)');
+    try { economyManager.closeDatabase(); } catch { /* already closed */ } // WAL checkpoint (spec §6)
     process.exit(0);
   });
 }
