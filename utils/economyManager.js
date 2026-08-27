@@ -434,6 +434,9 @@ const S = {
   allPlayers: db.prepare('SELECT * FROM players WHERE user_id != ? ORDER BY balance DESC, rowid ASC'),
   rank: db.prepare(`SELECT COUNT(*) + 1 AS r FROM players WHERE user_id != ? AND is_admin = 0 AND (balance > ? OR (balance = ? AND rowid < (SELECT rowid FROM players WHERE user_id = ?)))`),
   battleTop: db.prepare('SELECT user_id FROM players WHERE battle_score > 0 ORDER BY best_depth DESC, battle_score DESC, score_achieved_at ASC, rowid ASC LIMIT ?'),
+  win: db.prepare('UPDATE players SET total_wins = total_wins + 1 WHERE user_id = ?'),
+  loss: db.prepare('UPDATE players SET total_losses = total_losses + 1 WHERE user_id = ?'),
+  allRows: db.prepare('SELECT * FROM players'),
   battleRankTriple: db.prepare(`SELECT best_depth AS bd, battle_score AS bs, score_achieved_at AS saa FROM players WHERE user_id = ?`),
   battleRankCount: db.prepare(`SELECT COUNT(*) + 1 AS r FROM players WHERE battle_score > 0 AND (
     best_depth > :bd OR (best_depth = :bd AND battle_score > :bs) OR (best_depth = :bd AND battle_score = :bs AND score_achieved_at < :saa))`),
@@ -454,7 +457,7 @@ function writePlayer(userId, playerObj) {
 
 function readAllPlayers() {
   const out = {};
-  for (const row of db.prepare('SELECT * FROM players').all()) out[row.user_id] = rowToPlayer(row);
+  for (const row of S.allRows.all()) out[row.user_id] = rowToPlayer(row);
   return out;
 }
 
@@ -775,14 +778,12 @@ function addXP(userId, amount) {
 
 function recordWin(userId) {
   if (isSuperAdmin(userId)) return;
-  if (!S.get.get(userId)) return;
-  db.prepare('UPDATE players SET total_wins = total_wins + 1 WHERE user_id = ?').run(userId);
+  S.win.run(userId); // no-op on a missing row — matches legacy tolerance
 }
 
 function recordLoss(userId) {
   if (isSuperAdmin(userId)) return;
-  if (!S.get.get(userId)) return;
-  db.prepare('UPDATE players SET total_losses = total_losses + 1 WHERE user_id = ?').run(userId);
+  S.loss.run(userId); // no-op on a missing row — matches legacy tolerance
 }
 
 // ============================================================
@@ -855,8 +856,11 @@ function getAllPlayers() {
 }
 
 function getGlobalRank(userId) {
-  const row = S.getBal.get(userId);
-  if (!row) return null;
+  // Legacy contract: admins (like superadmin) are UNRANKED — the ranked pool
+  // excludes them, so their own profile must show 'Unranked', not a rank
+  // computed against a pool they're not in.
+  const row = S.get.get(userId);
+  if (!row || row.is_admin) return null;
   return S.rank.get(SUPERADMIN_BIND, row.balance, row.balance, userId).r;
 }
 
