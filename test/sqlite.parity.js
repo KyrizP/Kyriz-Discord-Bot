@@ -22,7 +22,6 @@ const crypto = require('crypto');
 const ROOT = path.join(__dirname, '..');
 const FIX_LEGACY = path.join(__dirname, 'fixtures', 'legacy', 'economyManager.js');
 const FIX_SHA = path.join(__dirname, 'fixtures', 'legacy', 'SHA256');
-const FIX_DATA_SRC = path.join(__dirname, 'fixtures', 'data', 'economy.json');
 
 let pass = 0, fail = 0;
 function ok(cond, label) {
