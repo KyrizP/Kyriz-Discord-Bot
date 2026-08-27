@@ -56,11 +56,11 @@
 
 ## Phase 2: Consumer Adaptation
 
-- [ ] **Step 2:** ADAPT `utils/shopManager.js` (4 read :37/:62/:91/:135, **4 write** :75/:115/:152/:162 + self-check harness)
+- [x] **Step 2:** ADAPT shopManager DONE — 4 read + 4 write → readPlayer/writePlayer; self-check harness re-shim (per-player, deep-copy isolate) + assertion per-player shape; komentar stale dibersihkan (grep bersih: 0 hit). Self-check HIJAU di sandbox (4 read :37/:62/:91/:135, **4 write** :75/:115/:152/:162 + self-check harness)
   - → `readPlayer`/`writePlayer`; monkeypatch target pindah; **pertahankan invariant sync** (no await read→write); bersihkan comment literal `economy.json` (:2/:33/:173/:203) **dan** `readEconomy/writeEconomy` (:172/:257) agar grep gate bersih
-- [ ] **Step 3:** ADAPT `utils/battleManager.js` (47 referensi `economy.*`) — single-user → readPlayer/writePlayer (sync invariant); `migrateAllBattleData` → readAllPlayers; `recordPvp` → withTransaction; global rank+LB → SQL kolom materialized (⛔ tanpa filter admin); varian memberIds/classFilter tetap bulk
-- [ ] **Step 4:** ADAPT `utils/abyssManager.js` — 5 callsite di 4 fungsi (`canEnterFloor` :175, `recordClear` :180+:182, `getAbyssProgress` :187, `startAbyssFight` :330)
-- [ ] **Step 5:** ADAPT `utils/battleCommands.js` — `:34` readPlayer · `:1130`+`:1162` 2× readPlayer · `:539` readAllPlayers (admin-only, diterima) · `:1697` SQL `WHERE abyss_best_floor > 0 OR abyss_total_stars > 0 ORDER BY … LIMIT 10` + empty-state branch + ⛔ tanpa filter admin
+- [x] **Step 3:** ADAPT battleManager DONE — 33 IO site → loadUserDict/saveUserDict (apply-* bekerja unchanged atas dict 1-player); global LB/rank → materialized (getBattleTopIds+readPlayersByIds hydrate top-N / getBattleRank SQL triple+rowid); recordPvp → withTransaction 2-player; migrateAllBattleData → readAllPlayers + per-user writePlayer (dirty-check per user). 0 referensi tersisa; test 53+43+44+82 hijau — single-user → readPlayer/writePlayer (sync invariant); `migrateAllBattleData` → readAllPlayers; `recordPvp` → withTransaction; global rank+LB → SQL kolom materialized (⛔ tanpa filter admin); varian memberIds/classFilter tetap bulk
+- [x] **Step 4:** ADAPT abyssManager DONE — 5 site → readPlayer/writePlayer (dict-1-player inline); opts.data test-injection tetap. abyss.test 630 hijau (termasuk smoke read real :373) — 5 callsite di 4 fungsi (`canEnterFloor` :175, `recordClear` :180+:182, `getAbyssProgress` :187, `startAbyssFight` :330)
+- [x] **Step 5:** ADAPT battleCommands DONE — :34 getBattle → readPlayer (+placeholder superadmin in-memory); :539 admin scan → readAllPlayers; :1130/:1162 duel → 2× readPlayer (makePlayer baca aU/bU closure); :1697 abyss LB → getAbyssTopRows SQL (zero-skip + no-admin-filter + empty-state dipertahankan). 0 referensi. (Step 8 exploit-shim terpaksa maju: readPlayer/writePlayer mock — 75 pass + 38/38 probes) — `:34` readPlayer · `:1130`+`:1162` 2× readPlayer · `:539` readAllPlayers (admin-only, diterima) · `:1697` SQL `WHERE abyss_best_floor > 0 OR abyss_total_stars > 0 ORDER BY … LIMIT 10` + empty-state branch + ⛔ tanpa filter admin
 
 ---
 

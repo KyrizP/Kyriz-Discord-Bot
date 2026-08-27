@@ -1,5 +1,5 @@
 // utils/shopManager.js
-// Shop logic on economy.json. Atomic read-modify-write per operation.
+// Shop logic on the economy store. Atomic read-modify-write per operation.
 // References economy I/O through the module object so the self-check can
 // swap I/O without touching production behavior.
 // Self-check: `node utils/shopManager.js`.
@@ -30,14 +30,13 @@ function boosts(user) { return user.activeBoosts || (user.activeBoosts = {}); }
  */
 function getInventoryState(userId) {
   if (economyManager.isSuperAdmin(userId)) {
-    // Superadmin isn't in economy.json (unlimited mode) — return a synthetic empty
+    // Superadmin isn't in the economy store (unlimited mode) — return a synthetic empty
     // state so /inventory shows an empty bag instead of "not registered yet".
     return { inventory: {}, cosmetics: { title: null, badge: null, color: null, owned: [] }, activeBoosts: {} };
   }
-  const data = economyManager.readEconomy();
-  const u = data[userId];
+  const u = economyManager.readPlayer(userId);
   if (!u) return null;
-  if (u.cosmetics) normalizeCosmetics(u); // inv/profile view also self-heals legacy labels
+  if (u.cosmetics) normalizeCosmetics(u); // inv/profile view also self-heals legacy labels (in-memory, persists on next cosmetic write — same as legacy)
   return {
     inventory: { ...(u.inventory || {}) },
     cosmetics: {
@@ -59,8 +58,7 @@ function equipCosmetic(userId, itemId) {
   const item = getItem(itemId);
   if (!item || item.type !== 'permanent') return { success: false, message: 'That item cannot be equipped.' };
 
-  const data = economyManager.readEconomy();
-  const u = data[userId];
+  const u = economyManager.readPlayer(userId);
   if (!u) return { success: false, message: 'User not found.' };
   const c = cosmetics(u);
 
@@ -72,7 +70,7 @@ function equipCosmetic(userId, itemId) {
   else if (item.effect.kind === 'color') c.color = itemId;
   else return { success: false, message: 'Unknown cosmetic kind.' };
 
-  economyManager.writeEconomy(data);
+  economyManager.writePlayer(userId, u);
   return { success: true, message: `Equipped **${item.name}**.` };
 }
 
@@ -88,8 +86,7 @@ function purchase(userId, itemId) {
   if (!item) return { success: false, message: 'Item not found.', newBalance: 0 };
   if (item.unlisted) return { success: false, message: 'This item cannot be purchased — it is earned, not bought.', newBalance: 0 }; // milestone grants: price 0, never buyable
 
-  const data = economyManager.readEconomy();
-  const u = data[userId];
+  const u = economyManager.readPlayer(userId);
   if (!u) return { success: false, message: 'User not found.', newBalance: 0 };
 
   // Re-validate balance NOW (balance may have changed since a confirm screen was shown).
@@ -112,7 +109,7 @@ function purchase(userId, itemId) {
   } else {
     inv(u)[itemId] = (inv(u)[itemId] || 0) + 1;
   }
-  economyManager.writeEconomy(data);
+  economyManager.writePlayer(userId, u);
   // ---- end atomic block ----
 
   return { success: true, message: `Purchased **${item.name}**.`, newBalance: u.balance };
@@ -132,8 +129,7 @@ function useItem(userId, itemId) {
     return { success: false, message: 'That item cannot be used.' };
   }
 
-  const data = economyManager.readEconomy();
-  const u = data[userId];
+  const u = economyManager.readPlayer(userId);
   if (!u) return { success: false, message: 'User not found.' };
 
   const inventory = inv(u);
@@ -149,7 +145,7 @@ function useItem(userId, itemId) {
     b.daily_mult = eff.mult;
     inventory[itemId] -= 1;
     if (inventory[itemId] <= 0) delete inventory[itemId];
-    economyManager.writeEconomy(data);
+    economyManager.writePlayer(userId, u);
     return { success: true, message: `📅 Daily boost armed (x${eff.mult}). It applies to your next /kyriz daily.` };
   }
 
@@ -159,7 +155,7 @@ function useItem(userId, itemId) {
     if (inventory[itemId] <= 0) delete inventory[itemId];
     u.balance = (u.balance || 0) + prize;
     u.totalEarned = (u.totalEarned || 0) + prize;
-    economyManager.writeEconomy(data);
+    economyManager.writePlayer(userId, u);
     return { success: true, message: `You won **💎 ${prize.toLocaleString()}**!`, outcome: { prize } };
   }
 
@@ -169,8 +165,8 @@ function useItem(userId, itemId) {
 module.exports = { getInventoryState, equipCosmetic, purchase, useItem, inv, cosmetics, boosts };
 
 // ---- Self-check (run: node utils/shopManager.js) ----
-// Monkeypatches economyManager.readEconomy/writeEconomy to an in-memory store
-// so equipCosmetic's real I/O path is exercised without touching data/economy.json.
+// Monkeypatches economyManager.readPlayer/writePlayer to an in-memory store
+// so equipCosmetic's real I/O path is exercised without touching the real economy store.
 if (require.main === module) {
   let fail = 0;
   const ok = (c, m) => { if (!c) { console.error('FAIL:', m); fail++; } };
@@ -179,11 +175,11 @@ if (require.main === module) {
   let store = {};
   let writes = 0;
   let lastWrite = null; // captured payload for atomicity proof
-  const origRead = economyManager.readEconomy;
-  const origWrite = economyManager.writeEconomy;
+  const origRead = economyManager.readPlayer;
+  const origWrite = economyManager.writePlayer;
   const origIsAdmin = economyManager.isSuperAdmin;
-  economyManager.readEconomy = () => store;
-  economyManager.writeEconomy = (data) => { store = data; lastWrite = data; writes++; };
+  economyManager.readPlayer = (uid) => (uid in store ? JSON.parse(JSON.stringify(store[uid])) : null);
+  economyManager.writePlayer = (uid, p) => { store[uid] = JSON.parse(JSON.stringify(p)); lastWrite = store[uid]; writes++; }
   // SUPERADMIN_ID is unset in the self-check, so isSuperAdmin always returns false.
 
   try {
@@ -200,16 +196,16 @@ if (require.main === module) {
     ok(snap && getInventoryState('404') === null, 'non-existent user snapshot null');
 
     // 1b. superadmin: getInventoryState returns a synthetic EMPTY state and does NOT
-    // touch economy.json (superadmin isn't stored there). Fixes the "/inventory says
+    // touch the store (superadmin isn't stored there). Fixes the "/inventory says
     // not registered" bug for superadmin.
     process.env.SUPERADMIN_ID = 'SUPER1';
-    economyManager.readEconomy = () => { throw new Error('superadmin must not read economy'); };
+    economyManager.readPlayer = () => { throw new Error('superadmin must not read economy'); };
     const superSnap = getInventoryState('SUPER1');
     ok(superSnap !== null, 'superadmin snapshot non-null (not "not registered")');
     ok(superSnap && Object.keys(superSnap.inventory).length === 0, 'superadmin inventory empty {}');
     ok(superSnap && superSnap.cosmetics && superSnap.cosmetics.owned.length === 0, 'superadmin cosmetics empty');
     ok(superSnap && superSnap.activeBoosts && Object.keys(superSnap.activeBoosts).length === 0, 'superadmin activeBoosts empty');
-    economyManager.readEconomy = () => store; // restore
+    economyManager.readPlayer = (uid) => (uid in store ? JSON.parse(JSON.stringify(store[uid])) : null); // restore
     delete process.env.SUPERADMIN_ID;
 
     // 2. equipCosmetic on an OWNED badge succeeds, sets cosmetics.badge, writes once.
@@ -254,9 +250,9 @@ if (require.main === module) {
     ok(store['300'].totalLost === 200000, `totalLost increased by 200k (got ${store['300'].totalLost})`);
     ok(writes === 1, `purchase consumable writes exactly once (got ${writes})`);
 
-    // Atomicity proof: the single payload handed to writeEconomy carried BOTH the deduction AND the grant.
-    ok(lastWrite && lastWrite['300'].balance === 800000 && lastWrite['300'].inventory.lucky_token === 1,
-       'atomic write payload contains reduced balance AND granted item (no gap)');
+    // Atomicity proof: the single payload handed to writePlayer carried BOTH the deduction AND the grant.
+    ok(lastWrite && lastWrite.balance === 800000 && lastWrite.inventory.lucky_token === 1,
+       'atomic write payload contains reduced balance AND granted item (no gap)'); // per-player shape (writePlayer)
 
     // 7. purchase: permanent. badge_crown (500k) -> success, 500k, owned includes it.
     //    Re-buy: BLOCKED (already owned) — balance unchanged, no extra write.
@@ -380,8 +376,8 @@ if (require.main === module) {
     ok(writes === 0, 'blocked milestone purchase writes zero');
   } finally {
     // Restore originals so we never leak the stub into other requires.
-    economyManager.readEconomy = origRead;
-    economyManager.writeEconomy = origWrite;
+    economyManager.readPlayer = origRead;
+    economyManager.writePlayer = origWrite;
     economyManager.isSuperAdmin = origIsAdmin;
   }
 

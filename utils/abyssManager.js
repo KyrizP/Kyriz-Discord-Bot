@@ -172,20 +172,18 @@ function applyRecordClear(data, userId, floorIdx, turnsUsed, hpPct) {
 
 // ---------- IO wrappers (read -> apply -> write, atomic via economyManager) ----------
 function canEnterFloor(userId, floorIdx) {
-  const data = economy.readEconomy();
-  return applyCanEnterFloor(data, userId, floorIdx);
+  return applyCanEnterFloor({ [userId]: economy.readPlayer(userId) }, userId, floorIdx);
 }
 
 function recordClear(userId, floorIdx, turnsUsed, hpPct) {
-  const data = economy.readEconomy();
+  const data = { [userId]: economy.readPlayer(userId) };
   const r = applyRecordClear(data, userId, floorIdx, turnsUsed, hpPct);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok && data[userId]) economy.writePlayer(userId, data[userId]);
   return r;
 }
 
 function getAbyssProgress(userId) {
-  const data = economy.readEconomy();
-  const u = data[userId];
+  const u = economy.readPlayer(userId);
   const empty = { stars: Array(N_FLOORS).fill(0), rewarded: Array(N_FLOORS).fill(false), milestones: {}, totalStars: 0, highestFloor: 0 };
   if (!u || !u.battle) return empty;
   const a = ensureAbyssData(u.battle); // in-memory repair only — persists on the next battle write
@@ -327,7 +325,7 @@ function buildAbyssFight(data, userId, floorIdx, busyReason) {
 // opts.data: test injection (pre-read economy object) — defaults to the real read.
 function startAbyssFight(userId, floorIdx, opts = {}) {
   if (isInAbyssFight(userId)) return { ok: false, reason: 'You are already in an Abyss fight.' };
-  const data = opts.data || economy.readEconomy();
+  const data = opts.data || { [userId]: economy.readPlayer(userId) };
   const r = buildAbyssFight(data, userId, floorIdx, opts.busy);
   if (!r.ok) return r;
   activeAbyssFights.set(userId, r.fight);

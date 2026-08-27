@@ -444,15 +444,13 @@ function applySetCharName(data, userId, name) {
   return { ok: true, name };
 }
 function setCharName(userId, name) {
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applySetCharName(data, userId, name);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 function getCharName(userId) {
-  const data = economy.readEconomy();
-  const u = data[userId];
+  const u = economy.readPlayer(userId);
   if (!u || !u.battle) return null;
   const c = getActiveChar(ensureBattleData(u)); // OLD-DATA COMPAT: flat shape migrates in-memory (no write) so charName resolves
   return (c && c.charName) || null;
@@ -489,19 +487,33 @@ function applyBuyUnique(data, userId, tier, slot, variant) {
 // ---------- in-memory run state ----------
 const activeRuns = new Map(); // userId -> { floor, hp, bag, expAccum, classId, stats }
 
+// ---------- per-player IO (SQLite migration) ----------
+// Legacy apply-* functions take a (data, userId) dict view. loadUserDict wraps
+// the single player row in a one-key dict so every apply works unchanged;
+// saveUserDict persists exactly that player. Invariant: apply → save with NO
+// await in between (event-loop atomicity, spec §4).
+function loadUserDict(userId) {
+  const data = {};
+  const u = economy.readPlayer(userId);
+  if (u) data[userId] = u;
+  else ensureUser(data, userId); // superadmin placeholder; missing users stay absent
+  return data;
+}
+function saveUserDict(userId, data) {
+  if (data[userId]) economy.writePlayer(userId, data[userId]);
+}
+
 // ---------- IO wrappers (read -> apply -> write) ----------
 function createCharacter(userId, classId) {
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyCreateCharacter(data, userId, classId);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 
 function startDelve(userId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'You already have an active battle. Use `ky end` to finish it.' };
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const start = applyDelveStart(data, userId);
   if (!start.ok) return { ok: false, reason: start.reason, needClass: start.reason === 'no_character' };
   const b = ensureBattleData(data[userId]);
@@ -512,7 +524,7 @@ function startDelve(userId) {
   // (you've cleared these before, they're trivial). Full HP at the sweep target. Only Push costs HP.
   const sweepTo = Math.max(1, c.bestDepth - SWEEP_BUFFER);
   run.floor = sweepTo;
-  economy.writeEconomy(data); // persist entry-fee deduction
+  saveUserDict(userId, data); // persist entry-fee deduction
   activeRuns.set(userId, run);
   return { ok: true, paid: start.paid, run, stats, startFloor: run.floor };
 }
@@ -540,9 +552,9 @@ function nextFloor(userId) {
     return { ok: true, won: true, cleared, hp: run.hp, drop, nextFloor: run.floor, enemyMaxHp: enemy.hp, log: fight.log };
   }
   const diedAt = run.floor;
-  const data = economy.readEconomy();
+  const data = loadUserDict(userId);
   const res = applyDie(data, userId, run);
-  economy.writeEconomy(data);
+  saveUserDict(userId, data);
   let xpResult = null;
   try { xpResult = economy.addXP(userId, PROFILE_XP_DIE); } catch (_) { /* consolation profile XP */ }
   activeRuns.delete(userId);
@@ -553,9 +565,9 @@ function extractRun(userId) {
   const run = activeRuns.get(userId);
   if (!run) return { ok: false, reason: 'No active battle.' };
   const depth = run.floor - 1;
-  const data = economy.readEconomy();
+  const data = loadUserDict(userId);
   const res = applyExtract(data, userId, run);
-  economy.writeEconomy(data);
+  saveUserDict(userId, data);
   let xpResult = null;
   if ((run.cleared || 0) > 0) { // only give profile XP if at least 1 floor was cleared (anti ky end spam farm)
     try { xpResult = economy.addXP(userId, PROFILE_XP_EXTRACT); } catch (_) { /* profile XP best-effort */ }
@@ -584,101 +596,93 @@ function fastSweep(userId, maxFloors) {
 }
 
 function sell(userId, itemId, qty) {
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applySell(data, userId, itemId, qty);
-  economy.writeEconomy(data);
+  saveUserDict(userId, data);
   return r;
 }
 function sellGear(userId, itemId, qty) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applySellGear(data, userId, itemId, qty);
-  economy.writeEconomy(data);
+  saveUserDict(userId, data);
   return r;
 }
 function equip(userId, itemId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyEquip(data, userId, itemId);
-  economy.writeEconomy(data);
+  saveUserDict(userId, data);
   return r;
 }
 function unequip(userId, slot) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyUnequip(data, userId, slot);
-  economy.writeEconomy(data);
+  saveUserDict(userId, data);
   return r;
 }
 function unequipAll(userId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
-  const data = economy.readEconomy(); ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyUnequipAll(data, userId);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 function buyGear(userId, itemId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyBuyGear(data, userId, itemId);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 function buyUnique(userId, tier, slot, variant) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`) — gear is locked during a run.' };
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyBuyUnique(data, userId, tier, slot, variant);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 function presetSave(userId, n) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
-  const data = economy.readEconomy(); ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyPresetSave(data, userId, n);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 function presetDelete(userId, n) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
-  const data = economy.readEconomy(); ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyPresetDelete(data, userId, n);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 function presetLoad(userId, n) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
-  const data = economy.readEconomy(); ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyPresetLoad(data, userId, n);
-  if (r.ok) economy.writeEconomy(data); // atomic: full swap persisted or nothing
+  if (r.ok) saveUserDict(userId, data); // atomic: full swap persisted or nothing
   return r;
 }
 function buyPresetSlot(userId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' };
-  const data = economy.readEconomy(); ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyBuyPresetSlot(data, userId);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 function changeClass(userId, classId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' }; // G1
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applyChangeClass(data, userId, classId);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 function switchClass(userId, classId) {
   if (activeRuns.has(userId)) return { ok: false, reason: 'Finish or end your battle first (`ky end`).' }; // G1
-  const data = economy.readEconomy();
-  ensureUser(data, userId);
+  const data = loadUserDict(userId);
   const r = applySwitchClass(data, userId, classId);
-  if (r.ok) economy.writeEconomy(data);
+  if (r.ok) saveUserDict(userId, data);
   return r;
 }
 
@@ -722,13 +726,16 @@ function getBattleLeaderboardFor(data, limit = 10, classFilter = null, memberIds
   return buildBattleLeaderboard(data, memberIds, classFilter).slice(0, limit);
 }
 function getBattleLeaderboard(limit = 10, memberIds = null, classFilter = null) {
-  return getBattleLeaderboardFor(economy.readEconomy(), limit, classFilter, memberIds);
+  if (memberIds || classFilter) return getBattleLeaderboardFor(economy.readAllPlayers(), limit, classFilter, memberIds); // rare variants: bulk path (spec §3.1)
+  // Global hot path: order via materialized columns, then hydrate only the top rows.
+  const topIds = economy.getBattleTopIds(limit);
+  if (!topIds.length) return [];
+  return buildBattleLeaderboard(economy.readPlayersByIds(topIds), null, null);
 }
 // Global battle rank for ky profile (same ordering as ky lb battle all: bestDepth > score > earliest).
 function getBattleGlobalRank(userId) {
-  const board = buildBattleLeaderboard(economy.readEconomy(), null, null);
-  const idx = board.findIndex((p) => p.userId === userId);
-  return idx === -1 ? null : idx + 1;
+  // Materialized columns (spec §3.1) — hot path, called on every ky profile.
+  return economy.getBattleRank(userId);
 }
 
 // Record a PvP outcome atomically: W/L for both combatants (no ELO — dropped).
@@ -745,23 +752,27 @@ function applyPvpResult(data, winnerId, loserId) {
 // battle command since v1.6 stay invisible on `ky lb battle` until they play.
 // Idempotent: writes ONLY when something actually changed.
 function migrateAllBattleData() {
-  const data = economy.readEconomy();
-  const before = JSON.stringify(data);
+  const data = economy.readAllPlayers();
   let migrated = 0;
-  for (const user of Object.values(data)) {
+  let changed = 0;
+  for (const [uid, user] of Object.entries(data)) {
     if (!user || !user.battle) continue;
     if (user.battle.charClass && !user.battle.characters) migrated++; // count real migrations
+    const before = JSON.stringify(user.battle);
     ensureBattleData(user);
+    if (JSON.stringify(user.battle) !== before) { economy.writePlayer(uid, user); changed++; }
   }
-  if (JSON.stringify(data) !== before) economy.writeEconomy(data);
-  return { migrated, total: Object.keys(data).length };
+  return { migrated, total: Object.keys(data).length, changed };
 }
 
 function recordPvp(winnerId, loserId) {
-  const data = economy.readEconomy();
-  applyPvpResult(data, winnerId, loserId);
-  economy.writeEconomy(data);
-  return { ok: true };
+  return economy.withTransaction(() => {
+    const data = { [winnerId]: economy.readPlayer(winnerId), [loserId]: economy.readPlayer(loserId) };
+    applyPvpResult(data, winnerId, loserId);
+    if (data[winnerId]) economy.writePlayer(winnerId, data[winnerId]);
+    if (data[loserId]) economy.writePlayer(loserId, data[loserId]);
+    return { ok: true };
+  });
 }
 
 // Compensation/bansos credit — Kryptonite variant (battle currency). Auto-creates battle data
@@ -773,9 +784,9 @@ function applyGrantKryptonite(data, userId, kry) {
   return { ok: true, kryptonite: b.kryptonite };
 }
 function grantKryptonite(userId, kry) {
-  const data = economy.readEconomy();
+  const data = loadUserDict(userId);
   const r = applyGrantKryptonite(data, userId, kry);
-  economy.writeEconomy(data);
+  saveUserDict(userId, data);
   return r;
 }
 

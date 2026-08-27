@@ -433,6 +433,10 @@ const S = {
   leaderboard: db.prepare('SELECT user_id, username, balance, level, cosmetics FROM players WHERE user_id != ? AND is_admin = 0 ORDER BY balance DESC, rowid ASC LIMIT ?'),
   allPlayers: db.prepare('SELECT * FROM players WHERE user_id != ? ORDER BY balance DESC, rowid ASC'),
   rank: db.prepare(`SELECT COUNT(*) + 1 AS r FROM players WHERE user_id != ? AND is_admin = 0 AND (balance > ? OR (balance = ? AND rowid < (SELECT rowid FROM players WHERE user_id = ?)))`),
+  battleTop: db.prepare('SELECT user_id FROM players WHERE battle_score > 0 ORDER BY best_depth DESC, battle_score DESC, score_achieved_at ASC, rowid ASC LIMIT ?'),
+  battleRankTriple: db.prepare(`SELECT best_depth AS bd, battle_score AS bs, score_achieved_at AS saa FROM players WHERE user_id = ?`),
+  battleRankCount: db.prepare(`SELECT COUNT(*) + 1 AS r FROM players WHERE battle_score > 0 AND (
+    best_depth > :bd OR (best_depth = :bd AND battle_score > :bs) OR (best_depth = :bd AND battle_score = :bs AND score_achieved_at < :saa))`),
 };
 
 // ============================================================
@@ -890,6 +894,37 @@ function backupEconomy() {
   }
 }
 
+// ---- Battle materialized helpers (spec §3.1: global LB + rank read the
+// materialized columns; battle_score > 0 doubles as the has-character marker) ----
+
+function getBattleTopIds(limit) {
+  return S.battleTop.all(limit).map((r) => r.user_id);
+}
+
+function readPlayersByIds(ids) {
+  if (!ids.length) return {};
+  const out = {};
+  const placeholders = ids.map(() => '?').join(',');
+  for (const row of db.prepare(`SELECT * FROM players WHERE user_id IN (${placeholders})`).all(...ids)) {
+    out[row.user_id] = rowToPlayer(row);
+  }
+  return out;
+}
+
+function getAbyssTopRows(limit) {
+  // Materialized (spec §3.1 + plan Step 5): zero-progress players filtered out
+  // to match the legacy zero-skip; NO admin filter (matches legacy).
+  return db.prepare('SELECT user_id, username, abyss_best_floor AS highest, abyss_total_stars AS totalStars FROM players WHERE abyss_best_floor > 0 OR abyss_total_stars > 0 ORDER BY abyss_best_floor DESC, abyss_total_stars DESC, rowid ASC LIMIT ?').all(limit);
+}
+
+function getBattleRank(userId) {
+  // Competition rank over the legacy triple (players strictly better + 1);
+  // full ties share a rank (documented deliberate change, spec §11).
+  const mine = S.battleRankTriple.get(userId);
+  if (!mine || mine.bs === 0) return null;
+  return S.battleRankCount.get({ bd: mine.bd, bs: mine.bs, saa: mine.saa }).r;
+}
+
 function closeDatabase() {
   // SIGTERM/SIGINT hook — checkpoints WAL into the main file so -wal holds
   // nothing committed while the bot rests (plan Step 7).
@@ -926,6 +961,10 @@ module.exports = {
   readAllPlayers,
   withTransaction,
   snapshotTo,
+  getBattleTopIds,
+  readPlayersByIds,
+  getAbyssTopRows,
+  getBattleRank,
   closeDatabase,
   DB_PATH,
 };

@@ -31,8 +31,12 @@ const BATTLE_IDLE_MS = 120000; // auto-extract after this many ms idle (tunable)
 
 // read-only battle-data getter (ensures defaults; does NOT write)
 function getBattle(userId) {
-  const data = economy.readEconomy();
-  const user = battle.ensureUser(data, userId); // auto-register superadmin (in-memory for display)
+  let user = economy.readPlayer(userId);
+  if (!user && economy.isSuperAdmin(userId)) {
+    // auto-register superadmin (in-memory for display only — never written)
+    user = { username: 'Superadmin', balance: 0, level: 1, xp: 0, xpNeeded: 400,
+      totalWins: 0, totalLosses: 0, totalEarned: 0, totalLost: 0, lastDaily: null, registeredAt: new Date().toISOString() };
+  }
   if (!user) return null;
   return { user, b: battle.ensureBattleData(user) };
 }
@@ -536,7 +540,7 @@ function handleGear(context, userId, itemId) {
       sell = unique.sellValue(u);
     } else if (lower.startsWith('ky') && economy.isAdmin(userId)) {
       // Admin/superadmin: search ALL users for this kyID
-      const data = economy.readEconomy();
+      const data = economy.readAllPlayers();
       let found = null, ownerName = null;
       for (const [uid, u] of Object.entries(data)) {
         if (u.battle && u.battle.uniqueItems && u.battle.uniqueItems[lower]) {
@@ -1127,8 +1131,7 @@ async function handlePvp(context, userId, targetId) {
     return context.reply({ content: 'Finish your current battle/duel first.' });
   if (battle.hasActiveRun(targetId) || pvp.isInFight(targetId) || abyss.isInAbyssFight(targetId))
     return context.reply({ content: 'That player is busy right now.' }); // E12 — target mid-Abyss
-  const data = economy.readEconomy();
-  const me = data[userId], foe = data[targetId];
+  const me = economy.readPlayer(userId), foe = economy.readPlayer(targetId);
   const hasChar = (u) => u && u.battle && battle.getActiveChar(battle.ensureBattleData(u));
   if (!hasChar(me)) return context.reply({ content: 'Create a character first: `ky battle`.' });
   if (!hasChar(foe)) return context.reply({ content: 'That player has no character.' });
@@ -1159,13 +1162,12 @@ async function handlePvpButton(interaction) {
     if (battle.hasActiveRun(aId) || battle.hasActiveRun(bId) || pvp.isInFight(aId) || pvp.isInFight(bId)
         || abyss.isInAbyssFight(aId) || abyss.isInAbyssFight(bId)) // E11 — mutual lock with Abyss
       return interaction.update({ embeds: [infoEmbed('', 'Duel cancelled — a player is now busy.')], components: [] });
-    const data = economy.readEconomy();
-    const aU = data[aId], bU = data[bId];
+    const aU = economy.readPlayer(aId), bU = economy.readPlayer(bId);
     const hasChar = (u) => u && u.battle && battle.getActiveChar(battle.ensureBattleData(u));
     if (!hasChar(aU) || !hasChar(bU))
       return interaction.update({ embeds: [infoEmbed('', 'Duel cancelled — a player no longer has a character.')], components: [] });
     const makePlayer = (uid) => {
-      const u = data[uid]; const b = u.battle;
+      const u = (uid === aId ? aU : bU); const b = u.battle;
       const c = battle.getActiveChar(b); const cls = battle.getCharClass(b);
       const stats = computeStats(pvp.pvpEffLevel(c.charLevel), cls, c.equipment, b.uniqueItems || {}); // PvP: dampened level (gear full)
       return { id: uid, username: u.username || 'Player', charName: c.charName, charLevel: c.charLevel, charClass: cls,
@@ -1694,20 +1696,11 @@ async function handleAbyss(context, userId, args) {
 }
 // `ky battle abyss lb` — highest floor, then total stars.
 function handleAbyssLb(context) {
-  const data = economy.readEconomy();
-  const rows = [];
-  for (const [uid, u] of Object.entries(data)) {
-    if (!u || !u.battle) continue;
-    const a = abyss.ensureAbyssData(u.battle);
-    const totalStars = a.stars.reduce((s, x) => s + x, 0);
-    let highest = 0;
-    a.stars.forEach((s, i) => { if (s > 0) highest = i + 1; });
-    if (highest === 0 && totalStars === 0) continue;
-    rows.push({ name: u.username || uid, highest, totalStars });
-  }
+  // Materialized columns (spec §3.1 + plan Step 5): SQL-side zero-skip + sort,
+  // no admin filter — matches legacy handleAbyssLb semantics.
+  const rows = economy.getAbyssTopRows(10).map((r) => ({ name: r.username || r.user_id, highest: r.highest, totalStars: r.totalStars }));
   if (!rows.length) return context.reply({ content: 'No one has cleared an Abyss floor yet. Be the first — `ky battle abyss`!' });
-  rows.sort((x, z) => z.highest - x.highest || z.totalStars - x.totalStars);
-  const lines = rows.slice(0, 10).map((r, i) => {
+  const lines = rows.map((r, i) => {
     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `**${i + 1}.**`;
     return `${medal} **${r.name}** — 🏰 Floor ${r.highest} · ⭐ ${r.totalStars}/${N_FLOORS * 3}`;
   });
