@@ -3843,9 +3843,14 @@ async function _plinkoDropInner(userId, risk, s) {
   let msg = s.msg;
 
   for (let frame = 0; frame <= PLINKO_ROWS; frame++) {
+    // Visual position: ball starts at CENTER (col 4) and drifts ±½ per bounce —
+    // k rights after r rows → col = floor(k - r/2 + 4). At r=0 it sits dead
+    // center (real plinko feel); by r=8 it fans out to its landing slot k.
     const positions = drops.map((d) => {
-      let col = 0;
-      for (let r = 0; r < Math.min(frame, PLINKO_ROWS); r++) if (d.path[r] === 1) col++;
+      let k = 0;
+      const r = Math.min(frame, PLINKO_ROWS);
+      for (let i = 0; i < r; i++) if (d.path[i] === 1) k++;
+      const col = Math.max(0, Math.min(8, Math.floor(k - r / 2 + 4)));
       return { row: Math.min(frame, PLINKO_ROWS - 1), col };
     });
     const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : drops.map((d) => ({ row: PLINKO_ROWS - 1, col: d.slot })), risk);
