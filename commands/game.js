@@ -42,6 +42,7 @@ const pendingTransfers = new Map(); // uniqueId -> { fromId, toId, amount }
 const activeMinesGames = new Map(); // userId -> mines game state
 const activeHiloGames = new Map(); // userId -> hilo game state
 const activeTowerGames = new Map(); // userId -> tower game state
+const activePlinkoGames = new Map(); // userId -> plinko session {bet, risk, balls, msg, idleTimer}
 
 // ============================================================
 // Maintenance mode + bansos (persisted via botState — survive restarts)
@@ -155,6 +156,52 @@ const COOLDOWN_BJ = 5000;    // 5 seconds for blackjack
 const COOLDOWN_CMD = 4000;   // 4 seconds for other commands
 const COOLDOWN_HELP = 1000;  // 1 second for help
 
+// ============================================================
+// PLINKO — 8-row peg board, 9 multiplier slots, 3 risk levels.
+// RTP verified via test/plinko_sim.js (2M spins): Low 98.98% /
+// Medium 97.33% / High 97.66% — all ≤ 99.5%.
+// ============================================================
+
+const PLINKO_ROWS = 8;
+const PLINKO_MULTIPLIERS = {
+  low:    [1.5, 1.3, 1.1, 1.0, 0.8, 1.0, 1.1, 1.3, 1.5],
+  medium: [5,   2,   1.4, 0.9, 0.4, 0.9, 1.4, 2,   5],
+  high:   [26,  5,   1.5, 0.3, 0,   0.3, 1.5, 5,   26],
+};
+
+function simulatePlinkoPath() {
+  const path = [];
+  for (let row = 0; row < PLINKO_ROWS; row++) {
+    path.push(Math.random() < 0.5 ? -1 : 1);
+  }
+  const slot = path.filter((d) => d === 1).length;
+  return { path, slot };
+}
+
+function simulatePlinkoDrop(risk) {
+  const { path, slot } = simulatePlinkoPath();
+  return { path, slot, multiplier: PLINKO_MULTIPLIERS[risk][slot] };
+}
+
+// ballPositions: ARRAY of {row, col} — multi-ball renders all on one board.
+// col = number of rightward bounces so far (ball position after `row` rows).
+function renderPlinkoBoard(ballPositions, risk) {
+  const mults = PLINKO_MULTIPLIERS[risk];
+  const width = 9;
+  const lines = [];
+  for (let row = 0; row < PLINKO_ROWS; row++) {
+    let line = '';
+    for (let col = 0; col < width; col++) {
+      const isBall = ballPositions.some((b) => b.row === row && b.col === col);
+      line += isBall ? ' 🔵' : ' ◆ ';
+    }
+    lines.push(line);
+  }
+  const multLine = mults.map((m) => (m === 0 ? '0x' : `${m}x`).padStart(4)).join('');
+  lines.push(multLine);
+  return '```\n' + lines.join('\n') + '\n```';
+}
+
 /**
  * Normalize command name for cooldown key consistency
  */
@@ -190,7 +237,7 @@ function setCooldown(userId, command) {
   const normalized = normalizeCmdName(command);
   const key = `${userId}_${normalized}`;
   let duration = COOLDOWN_CMD;
-  if (['blackjack', 'crash', 'slots', 'roulette', 'mines', 'hilo', 'tower'].includes(normalized)) duration = COOLDOWN_BJ;
+  if (['blackjack', 'crash', 'slots', 'roulette', 'mines', 'hilo', 'tower', 'plinko', 'poker'].includes(normalized)) duration = COOLDOWN_BJ;
   else if (normalized === 'help') duration = COOLDOWN_HELP;
   cooldowns.set(key, Date.now() + duration);
 
@@ -215,6 +262,24 @@ function attachGameSubcommands(commandBuilder) {
         opt
           .setName('bet')
           .setDescription('Amount to bet (number or "all", default: 1, max: 500,000)')
+          .setRequired(false)
+      )
+  );
+  // /kyriz plinko <bet> [balls]
+  commandBuilder.addSubcommand((sub) =>
+    sub
+      .setName('plinko')
+      .setDescription('Drop balls through the Plinko board')
+      .addStringOption((opt) =>
+        opt
+          .setName('bet')
+          .setDescription('Total bet amount (number or "all", max: 500,000)')
+          .setRequired(true)
+      )
+      .addIntegerOption((opt) =>
+        opt
+          .setName('balls')
+          .setDescription('Number of balls (1-5)')
           .setRequired(false)
       )
   );
@@ -508,7 +573,7 @@ async function execute(interaction) {
   }
 
   // T&C check (skip for superadmin)
-  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory', 'buy', 'use', 'profile', 'battle', 'character', 'bag', 'sell', 'equip', 'buygear', 'gear', 'end'];
+  const requiresRegistration = ['blackjack', 'wallet', 'daily', 'transfer', 'coinflip', 'slots', 'dice', 'crash', 'roulette', 'mines', 'hilo', 'tower', 'help', 'odds', 'leaderboard', 'shop', 'inventory', 'buy', 'use', 'profile', 'battle', 'character', 'bag', 'sell', 'equip', 'buygear', 'gear', 'end', 'plinko', 'poker'];
   if (requiresRegistration.includes(subcommand) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -554,6 +619,8 @@ async function execute(interaction) {
       return handleHilo(interaction, userId);
     case 'tower':
       return handleTower(interaction, userId);
+    case 'plinko':
+      return handlePlinko(interaction, userId);
     case 'help':
       return handleHelp(interaction);
     case 'odds':
@@ -624,7 +691,7 @@ async function handlePrefixCommand(message, command, args) {
   }
 
   // T&C check for commands that require registration
-  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'switch', 'switchclass', 'changeclass', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'patch', 'preset', 'end'];
+  const requiresRegistration = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'help', 'odds', 'lb', 'leaderboard', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'switch', 'switchclass', 'changeclass', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'patch', 'preset', 'end', 'plinko', 'poker'];
   if (requiresRegistration.includes(command) && !isRegistered(userId)) {
     const embed = createTCEmbed();
     const buttons = createTCButtons(userId);
@@ -677,6 +744,8 @@ async function handlePrefixCommand(message, command, args) {
     case 'tw':
     case 'tower':
       return handleTowerPrefix(message, userId, args);
+    case 'plinko':
+      return handlePlinkoPrefix(message, userId, args);
     case 'help':
       if (args.length > 0) return;
       return handleHelpPrefix(message);
@@ -3276,6 +3345,239 @@ function calculateTowerMultiplier(difficulty, floorsCleared) {
   return parseFloat(raw.toFixed(2));
 }
 
+// ============================================================
+// PLINKO — game flow (risk select → animation → result → replay)
+// ============================================================
+
+function createPlinkoRiskButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('plinko_risk_low').setLabel('Low').setEmoji('🟢').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('plinko_risk_medium').setLabel('Medium').setEmoji('🟡').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('plinko_risk_high').setLabel('High').setEmoji('🔴').setStyle(ButtonStyle.Danger),
+  );
+}
+
+function createPlinkoReplayButtons(disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('plinko_again').setLabel('Again').setEmoji('🔵').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('plinko_b1').setLabel('×1').setEmoji('1️⃣').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('plinko_b3').setLabel('×3').setEmoji('3️⃣').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('plinko_b5').setLabel('×5').setEmoji('5️⃣').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('plinko_stop').setLabel('Stop').setEmoji('❌').setStyle(ButtonStyle.Danger).setDisabled(disabled),
+  );
+}
+
+function _plinkoLocked(userId) {
+  const t = processing.get('plinko_' + userId);
+  return t === true;
+}
+
+async function playPlinko(context, userId, betStr, ballsRaw, source) {
+  if (activePlinkoGames.has(userId)) {
+    return context.reply({ content: 'You already have an active Plinko session. Finish or let it expire first.' });
+  }
+  if (_plinkoLocked(userId)) {
+    return context.reply({ content: 'Hold on — your previous drop is still resolving.' });
+  }
+
+  const bet = parseBet(betStr, userId);
+  if (bet === null) {
+    return context.reply({ content: 'Invalid bet. Usage: `ky plinko <bet> [balls]` (min 100 per ball, max 500,000).' });
+  }
+  let balls = parseInt(ballsRaw);
+  if (isNaN(balls)) balls = 1;
+  if (balls < 1 || balls > 5) {
+    return context.reply({ content: 'Balls must be 1-5. Usage: `ky plinko <bet> [balls]`' });
+  }
+  const perBall = Math.floor(bet / balls);
+  if (perBall < 100) {
+    return context.reply({ content: `Minimum bet is 💎 100 per ball (${balls} ball(s) needs ≥ ${100 * balls}).` });
+  }
+  const totalBet = perBall * balls;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('🔵 PLINKO')
+    .setDescription(
+      `Bet: 💎 ${totalBet.toLocaleString()} Kryztal (${balls} ball${balls > 1 ? 's' : ''}, 💎 ${perBall.toLocaleString()}/ball)\n\n` +
+      'Select your risk level:\n🟢 Low — Safe, small wins\n🟡 Medium — Balanced\n🔴 High — Volatile, big wins'
+    )
+    .setFooter({ text: 'Auto-cancel in 30s' });
+
+  const msg = await context.reply({ embeds: [embed], components: [createPlinkoRiskButtons()], fetchReply: true });
+
+  // Risk-select state (pre-deduction: no money has moved yet)
+  activePlinkoGames.set(userId, { phase: 'risk', bet: totalBet, perBall, balls, msg });
+  const riskTimer = setTimeout(() => {
+    const s = activePlinkoGames.get(userId);
+    if (s && s.phase === 'risk' && s.msg.id === msg.id) {
+      activePlinkoGames.delete(userId);
+      try {
+        msg.edit({ content: '⌛ Risk selection expired — no bet was placed.', components: [] });
+      } catch { /* stale */ }
+    }
+  }, 30_000);
+  activePlinkoGames.get(userId).riskTimer = riskTimer;
+}
+
+async function handlePlinko(interaction, userId) {
+  const betStr = interaction.options.getString('bet');
+  const balls = interaction.options.getInteger('balls') || undefined;
+  return playPlinko(interaction, userId, betStr, balls, 'slash');
+}
+
+async function handlePlinkoPrefix(message, userId, args) {
+  return playPlinko(message, userId, args[0], args[1], 'prefix');
+}
+
+// Run one full drop (deduct already done), animate, pay out, arm replay buttons.
+async function plinkoDrop(userId, risk) {
+  const s = activePlinkoGames.get(userId);
+  if (!s || s.phase !== 'risk') return;
+  clearTimeout(s.riskTimer);
+  processing.set('plinko_' + userId, true);
+
+  const perBall = s.perBall;
+  const balls = s.balls;
+
+  // Pre-compute all paths, then animate frame by frame
+  const drops = [];
+  for (let i = 0; i < balls; i++) drops.push(simulatePlinkoDrop(risk));
+
+  const mults = PLINKO_MULTIPLIERS[risk];
+  const riskLabel = risk.charAt(0).toUpperCase() + risk.slice(1);
+  let msg = s.msg;
+
+  for (let frame = 0; frame <= PLINKO_ROWS; frame++) {
+    const positions = drops.map((d) => {
+      let col = 0;
+      for (let r = 0; r < Math.min(frame, PLINKO_ROWS); r++) if (d.path[r] === 1) col++;
+      return { row: Math.min(frame, PLINKO_ROWS - 1), col };
+    });
+    const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : drops.map(() => ({ row: PLINKO_ROWS - 1, col: 0 })).map((p, i) => ({ row: PLINKO_ROWS - 1, col: drops[i].slot })));
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(`🔵 PLINKO — ${riskLabel} Risk${balls > 1 ? ` × ${balls} Balls` : ''}`)
+      .setDescription(board + `\n💎 ${perBall.toLocaleString()}${balls > 1 ? ` × ${balls} balls` : ''} — dropping...`);
+    try { msg = await msg.edit({ embeds: [embed], components: [] }); } catch { break; }
+    if (frame < PLINKO_ROWS) await new Promise((r) => setTimeout(r, 600));
+  }
+
+  // Payout per ball (floor), total return
+  const results = drops.map((d) => ({ slot: d.slot, multiplier: mults[d.slot], payout: Math.floor(perBall * mults[d.slot]) }));
+  const totalReturn = results.reduce((sum, r) => sum + r.payout, 0);
+  const totalBet = perBall * balls;
+  const profit = totalReturn - totalBet;
+
+  // Money: winnings credited (bet already deducted before replay/first drop)
+  if (totalReturn > 0) addBalance(userId, totalReturn);
+
+  // XP + stats: ONE award per drop, net-based (spec §1.5)
+  const netPositive = profit > 0;
+  const xpResult = addXP(userId, calculateXP(netPositive ? 20 : 5, totalBet));
+  if (netPositive) recordWin(userId); else recordLoss(userId);
+
+  // Result embed
+  let lines = '';
+  if (balls === 1) {
+    lines = `💎 Result: ${results[0].multiplier}x → ${results[0].payout.toLocaleString()}`;
+  } else {
+    lines = results.map((r, i) => `🔵 → ${r.multiplier}x  💎 ${r.payout.toLocaleString()}`).join('\n');
+  }
+  const profitLine = profit >= 0
+    ? `📈 Profit: +${profit.toLocaleString()} Kryztal${balls > 1 && profit > 0 ? ' 🎉' : ''}`
+    : `📉 Loss: ${(-profit).toLocaleString()} Kryztal`;
+
+  const user = getUser(userId);
+  const embed = new EmbedBuilder()
+    .setColor(profit >= 0 ? 0x57f287 : 0xed4245)
+    .setTitle(`🔵 PLINKO — ${riskLabel} Risk${balls > 1 ? ` × ${balls} Balls` : ''}`)
+    .setDescription(`${lines}\n\nBet: 💎 ${totalBet.toLocaleString()}   Return: 💎 ${totalReturn.toLocaleString()}\n${profitLine}`)
+    .setFooter({ text: `Balance: 💎 ${(getBalance(userId) || 0).toLocaleString()} · Session ends after 60s idle` });
+
+  s.phase = 'result';
+  s.risk = risk;
+  s.msg = msg;
+  try { s.msg = await msg.edit({ embeds: [embed], components: [createPlinkoReplayButtons()] }); } catch { /* stale — session still payable */ }
+
+  processing.delete('plinko_' + userId);
+
+  // Idle expiry: reset on every drop (spec §1.4) — disable buttons + clear session
+  clearTimeout(s.idleTimer);
+  s.idleTimer = setTimeout(async () => {
+    const cur = activePlinkoGames.get(userId);
+    if (!cur || cur.msg.id !== s.msg.id) return;
+    activePlinkoGames.delete(userId);
+    try {
+      const e = EmbedBuilder.from(cur.msg.embeds[0]);
+      e.setDescription(e.data.description + '\n\n*Session ended — idle 60s*');
+      await cur.msg.edit({ embeds: [e], components: [createPlinkoReplayButtons(true)] });
+    } catch { /* stale */ }
+  }, 60_000);
+}
+
+async function handlePlinkoButton(interaction) {
+  const userId = interaction.user.id;
+  const customId = interaction.customId;
+
+  // Risk selection
+  if (customId.startsWith('plinko_risk_')) {
+    const risk = customId.replace('plinko_risk_', '');
+    if (!['low', 'medium', 'high'].includes(risk)) return;
+    const s = activePlinkoGames.get(userId);
+    if (!s || s.phase !== 'risk') {
+      return interaction.reply({ content: '⌛ This Plinko panel expired — start a new one with `ky plinko`.', ephemeral: true });
+    }
+    if (s.msg.id !== interaction.message.id) {
+      return interaction.reply({ content: '⌛ This Plinko panel expired — your newest panel is the active one.', ephemeral: true });
+    }
+    // Deduct at risk selection (single money moment before payout)
+    const res = removeBalance(userId, s.perBall * s.balls);
+    if (!res.success) {
+      clearTimeout(s.riskTimer);
+      activePlinkoGames.delete(userId);
+      return interaction.update({ content: `❌ ${res.message}`, components: [] });
+    }
+    await interaction.deferUpdate();
+    return plinkoDrop(userId, risk);
+  }
+
+  const s = activePlinkoGames.get(userId);
+  if (!s || s.phase !== 'result') {
+    return interaction.reply({ content: '⌛ This Plinko session has ended — start a new one with `ky plinko`.', ephemeral: true });
+  }
+  if (s.msg.id !== interaction.message.id) {
+    return interaction.reply({ content: '⌛ This Plinko panel expired — your newest panel is the active one.', ephemeral: true });
+  }
+  if (_plinkoLocked(userId)) {
+    return interaction.reply({ content: 'Hold on — your previous drop is still resolving.', ephemeral: true });
+  }
+
+  if (customId === 'plinko_stop') {
+    clearTimeout(s.idleTimer);
+    activePlinkoGames.delete(userId);
+    return interaction.update({ components: [createPlinkoReplayButtons(true)] });
+  }
+
+  // Again / ball-count switch: re-validate money BEFORE deducting
+  let balls = s.balls;
+  if (customId === 'plinko_b1') balls = 1;
+  if (customId === 'plinko_b3') balls = 3;
+  if (customId === 'plinko_b5') balls = 5;
+  const perBall = Math.floor(s.bet / balls);
+  if (perBall < 100) {
+    return interaction.reply({ content: `💎 ${s.bet.toLocaleString()} split by ${balls} balls is below the 100/ball minimum.`, ephemeral: true });
+  }
+  const res = removeBalance(userId, perBall * balls);
+  if (!res.success) {
+    return interaction.reply({ content: `❌ ${res.message}`, ephemeral: true });
+  }
+  s.perBall = perBall;
+  s.balls = balls;
+  await interaction.deferUpdate();
+  return plinkoDrop(userId, s.risk);
+}
+
 async function handleTower(interaction, userId) {
   const betStr = interaction.options.getString('bet');
   const difficulty = interaction.options.getString('difficulty') || 'easy';
@@ -3681,6 +3983,9 @@ async function handleButton(interaction) {
 
   // Battle mode buttons (per-user locked inside battleCmd.handleButton)
   if (customId.startsWith('battle_') || customId.startsWith('pvp_')) return battleCmd.handleButton(interaction);
+
+  // Plinko (owner verified inside handler; turn-free single-player)
+  if (customId.startsWith('plinko_')) return handlePlinkoButton(interaction);
 
   // Maintenance: block shop buy/pagination for non-admins on an already-open shop embed
   // (the command-level guard covers /shop & /buy; game buttons are left alone so in-progress
@@ -4561,7 +4866,9 @@ function createHelpEmbed() {
     .setDescription(
       'Prefix every command with `ky`.   `[optional]` · `<required>`\n\n' +
       '🃏 **Games**\n' +
-      '`bj [bet]` · `cf [bet] [h/t]` · `slots [bet]` · `dice [bet] [1-6/e/o]` · `crash [bet]` · `rl [bet] [red/black/0-36]` · `mines [bet]` · `hl [bet]` · `tw [bet]`\n\n' +
+      '`bj [bet]` · `cf [bet] [h/t]` · `slots [bet]` · `dice [bet] [1-6/e/o]` · `crash [bet]` · `rl [bet] [red/black/0-36]` · `mines [bet]` · `hl [bet]` · `tw [bet]` · `plinko [bet] [balls]`\n\n' +
+      '🃏 **Poker** _— Texas Hold\'em vs players_\n' +
+      '`poker <buy-in>` — host a table (2-5 players, prefix-only)\n\n' +
       '⚔️ **Battle** _— Kryptonite RPG_\n' +
       '`battle [@user]` · `battle abyss` · `battle help` · `char [name <nama>|page]` · `switch <class>` · `bag` · `gear [id]` · `sell [all|code n]` · `buygear <code>` · `equip <id>` · `unequip <slot>` · `sellgear <id> | <rarity> all` · `preset [n|save n|delete n|buy slot]` · `shop gear [tier|rates]` · `lb battle [all]`\n\n' +
       '💰 **Economy**\n' +
@@ -4594,6 +4901,15 @@ function createOddsPage(page) {
       .setTitle('📊 Kyriz | Game Odds & Rates')
       .setDescription(
         '**Payouts for all games.**\n\n' +
+
+        '🔵 **Plinko** _— 8 rows, 9 slots (8 rows = binomial)_\n' +
+        '```\n' +
+        'Risk   Slots (0→8, center = middle)\n' +
+        'Low    1.5x 1.3x 1.1x 1.0x 0.8x 1.0x 1.1x 1.3x 1.5x\n' +
+        'Medium 5.0x 2.0x 1.4x 0.9x 0.4x 0.9x 1.4x 2.0x 5.0x\n' +
+        'High   26.x 5.0x 1.5x 0.3x 0.0x 0.3x 1.5x 5.0x 26.x\n' +
+        'RTP: Low ~98.98% | Medium ~97.33% | High ~97.66%\n' +
+        '```\n\n' +
 
         '🪙 **Coinflip**\n' +
         '```\n' +
