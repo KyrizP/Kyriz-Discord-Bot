@@ -193,6 +193,9 @@ function simulatePlinkoDrop(risk) {
 
 // ballPositions: ARRAY of {row, col} — multi-ball renders all on one board.
 // col = number of rightward bounces so far (ball position after `row` rows).
+// Board = staggered pegboard: pegs alternate parity per row (brick pattern),
+// creating diagonal channels — the ball rides IN a channel, never "through"
+// a peg. Cells: peg '◆', channel '·', ball '🔵' overlays its channel cell.
 function renderPlinkoBoard(ballPositions, risk) {
   const mults = PLINKO_MULTIPLIERS[risk];
   const width = 9;
@@ -201,11 +204,20 @@ function renderPlinkoBoard(ballPositions, risk) {
     let line = '';
     for (let col = 0; col < width; col++) {
       const isBall = ballPositions.some((b) => b.row === row && b.col === col);
-      line += isBall ? ' 🔵' : ' ◆ ';
+      if (isBall) line += ' 🔵';
+      else line += (col + row) % 2 === 0 ? ' ◆ ' : ' · ';
     }
     lines.push(line);
   }
-  const multLine = mults.map((m) => (m === 0 ? '0x' : `${m}x`).padStart(4)).join('');
+  // Multiplier row: center each label in a 5-char cell under its slot
+  const multLine = mults
+    .map((m) => {
+      const s = m === 0 ? '0x' : `${m}x`;
+      const pad = Math.max(0, 5 - s.length);
+      const left = Math.floor(pad / 2);
+      return ' '.repeat(left) + s + ' '.repeat(pad - left);
+    })
+    .join('');
   lines.push(multLine);
   return '```\n' + lines.join('\n') + '\n```';
 }
