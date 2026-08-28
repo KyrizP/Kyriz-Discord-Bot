@@ -960,7 +960,11 @@ function pokerJoinTransaction(gameId, userId, buyIn) {
 
 function pokerSettleTransaction(gameId, payouts) {
   const tx = db.transaction(() => {
-    S.deleteEscrow.run(gameId);
+    // Double-settle guard: deleteEscrow returns the number of rows removed —
+    // 0 means this game was already settled (or never existed). A second
+    // settlement would double-credit every player; refuse instead.
+    const removed = S.deleteEscrow.run(gameId).changes; // .run() returns {changes, lastInsertRowid}
+    if (removed === 0) throw new Error('poker settle: escrow already settled for ' + gameId);
     for (const [userId, amount] of payouts) {
       if (amount > 0) {
         // Verify-or-throw: addBalance returns {success:false} SILENTLY on an

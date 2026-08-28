@@ -3494,8 +3494,15 @@ function _settleAndCleanup(session, payouts) {
   clearTimeout(session.afkTimer);
   clearTimeout(session.gameTimer);
   const entries = Object.entries(payouts).map(([id, amt]) => [id, amt]);
-  economyManager.pokerSettleTransaction(session.game.gameId, entries);
-  activePokerGames.delete(session.game.gameId);
+  try {
+    economyManager.pokerSettleTransaction(session.game.gameId, entries);
+  } catch (e) {
+    // Settle rolled back → escrow row SURVIVES → boot recovery refunds on next
+    // start. Never leave the session in the map (locks every player out).
+    console.error('[POKER] settle deferred to boot recovery:', e.message);
+  } finally {
+    activePokerGames.delete(session.game.gameId);
+  }
 }
 
 async function handlePokerPrefix(message, userId) {
@@ -3826,9 +3833,14 @@ async function plinkoDrop(userId, risk) {
   // try/finally: a mid-drop throw (e.g. SQLITE_FULL on payout) must NEVER leak
   // the processing lock — that would lock the player out of plinko until restart.
   try {
-  await _plinkoDropInner(userId, risk, s);
+    await _plinkoDropInner(userId, risk, s);
+  } catch (err) {
+    activePlinkoGames.delete(userId);
+    try { addBalance(userId, s.perBall * s.balls); } catch { /* refund best-effort */ }
+    console.error('[PLINKO] drop failed mid-flight — bet refunded:', err.message);
+    throw err; // index.js shows the storage message to the player
   } finally {
-  processing.delete('plinko_' + userId);
+    processing.delete('plinko_' + userId);
   }
 }
 
@@ -3850,7 +3862,7 @@ async function _plinkoDropInner(userId, risk, s) {
       for (let r = 0; r < Math.min(frame, PLINKO_ROWS); r++) if (d.path[r] === 1) col++;
       return { row: Math.min(frame, PLINKO_ROWS - 1), col };
     });
-    const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : drops.map(() => ({ row: PLINKO_ROWS - 1, col: 0 })).map((p, i) => ({ row: PLINKO_ROWS - 1, col: drops[i].slot })));
+    const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : drops.map((d) => ({ row: PLINKO_ROWS - 1, col: d.slot })));
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
       .setTitle(`🔵 PLINKO — ${riskLabel} Risk${balls > 1 ? ` × ${balls} Balls` : ''}`)
@@ -3872,6 +3884,7 @@ async function _plinkoDropInner(userId, risk, s) {
   const netPositive = profit > 0;
   const xpResult = addXP(userId, calculateXP(netPositive ? 20 : 5, totalBet));
   if (netPositive) recordWin(userId); else recordLoss(userId);
+  const levelUpText = xpResult && xpResult.leveledUp ? `\n🎉 **LEVEL UP!** You are now Level ${xpResult.newLevel}!` : '';
 
   // Result embed
   let lines = '';
@@ -3884,11 +3897,10 @@ async function _plinkoDropInner(userId, risk, s) {
     ? `📈 Profit: +${profit.toLocaleString()} Kryztal${balls > 1 && profit > 0 ? ' 🎉' : ''}`
     : `📉 Loss: ${(-profit).toLocaleString()} Kryztal`;
 
-  const user = getUser(userId);
   const embed = new EmbedBuilder()
     .setColor(profit >= 0 ? 0x57f287 : 0xed4245)
     .setTitle(`🔵 PLINKO — ${riskLabel} Risk${balls > 1 ? ` × ${balls} Balls` : ''}`)
-    .setDescription(`${lines}\n\nBet: 💎 ${totalBet.toLocaleString()}   Return: 💎 ${totalReturn.toLocaleString()}\n${profitLine}`)
+    .setDescription(`${lines}\n\nBet: 💎 ${totalBet.toLocaleString()}   Return: 💎 ${totalReturn.toLocaleString()}\n${profitLine}${levelUpText}`)
     .setFooter({ text: `Balance: 💎 ${(getBalance(userId) || 0).toLocaleString()} · Session ends after 60s idle` });
 
   s.phase = 'result';
@@ -3925,6 +3937,9 @@ async function handlePlinkoButton(interaction) {
     if (s.msg.id !== interaction.message.id) {
       return interaction.reply({ content: '⌛ This Plinko panel expired — your newest panel is the active one.', ephemeral: true });
     }
+    if (_plinkoLocked(userId)) {
+      return interaction.reply({ content: 'Hold on — your previous drop is still resolving.', ephemeral: true });
+    }
     // Deduct at risk selection (single money moment before payout)
     const res = removeBalance(userId, s.perBall * s.balls);
     if (!res.success) {
@@ -3932,6 +3947,7 @@ async function handlePlinkoButton(interaction) {
       activePlinkoGames.delete(userId);
       return interaction.update({ content: `❌ ${res.message}`, components: [] });
     }
+    clearTimeout(s.riskTimer); // before the await — 30s expiry must not delete the session mid-deduct
     await interaction.deferUpdate();
     return plinkoDrop(userId, risk);
   }
@@ -3962,10 +3978,15 @@ async function handlePlinkoButton(interaction) {
   if (perBall < 100) {
     return interaction.reply({ content: `💎 ${s.bet.toLocaleString()} split by ${balls} balls is below the 100/ball minimum.`, ephemeral: true });
   }
+  if (_plinkoLocked(userId)) {
+    return interaction.reply({ content: 'Hold on — your previous drop is still resolving.', ephemeral: true });
+  }
   const res = removeBalance(userId, perBall * balls);
   if (!res.success) {
     return interaction.reply({ content: `❌ ${res.message}`, ephemeral: true });
   }
+  clearTimeout(s.idleTimer); // before ANY await — the 60s expiry must not fire between deduct and drop
+  s.phase = 'risk';          // plinkoDrop requires 'risk' — without this the bet is eaten silently
   s.perBall = perBall;
   s.balls = balls;
   await interaction.deferUpdate();
@@ -4383,6 +4404,13 @@ async function handleButton(interaction) {
 
   // Poker (buttons are GENERIC — turn resolved from game state, never customId: spec §2.5)
   if (customId.startsWith('poker_')) return handlePokerButton(interaction);
+
+  // Maintenance: block NEW wagers from stale panels (plinko replay / poker lobby
+  // join) — in-progress rounds still finish (convention), but 'Again'/'Join' start
+  // a NEW bet and must respect maintenance.
+  if ((customId.startsWith('plinko_again') || customId.startsWith('plinko_b') || customId === 'poker_join') && maintenanceMode.active && !isSuperAdmin(interaction.user.id) && !isAdmin(interaction.user.id)) {
+    return interaction.reply({ content: `🛠️ ${maintenanceMode.message}`, ephemeral: true });
+  }
 
   // Maintenance: block shop buy/pagination for non-admins on an already-open shop embed
   // (the command-level guard covers /shop & /buy; game buttons are left alone so in-progress
@@ -5246,7 +5274,7 @@ async function autoStandButton(interaction, game) {
 // Valid prefix commands list
 // ============================================================
 
-const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'patch', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'switch', 'switchclass', 'changeclass', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'preset', 'end'];
+const VALID_PREFIX_COMMANDS = ['bj', 'blackjack', 'wallet', 'daily', 'transfer', 'tf', 'lb', 'leaderboard', 'help', 'odds', 'maintenance', 'bansos', 'backup', 'patch', 'cf', 'coinflip', 'slots', 'dice', 'crash', 'rl', 'roulette', 'mines', 'hl', 'hilo', 'tw', 'tower', 'players', 'shop', 'inventory', 'inv', 'buy', 'use', 'profile', 'battle', 'char', 'character', 'switch', 'switchclass', 'changeclass', 'bag', 'sell', 'sellgear', 'equip', 'unequip', 'buygear', 'gear', 'preset', 'end', 'plinko', 'poker'];
 
 function isValidPrefixCommand(command) {
   return VALID_PREFIX_COMMANDS.includes(command.toLowerCase());

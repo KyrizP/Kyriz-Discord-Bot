@@ -59,6 +59,7 @@ function _nextActor(game, fromIndex) {
 }
 
 function startGame(game) {
+  if (game.phase !== 'lobby') return { ok: false, error: 'Already started.' }; // double-start race guard
   if (game.players.length < 2) return { ok: false, error: 'Need at least 2 players.' };
   game.dealerIndex = Math.floor(Math.random() * game.players.length);
   game.deck = createDeck();
