@@ -49,6 +49,7 @@ const activeMinesGames = new Map(); // userId -> mines game state
 const activeHiloGames = new Map(); // userId -> hilo game state
 const activeTowerGames = new Map(); // userId -> tower game state
 const activePlinkoGames = new Map(); // userId -> plinko session {bet, risk, balls, msg, idleTimer}
+const plinkoLocks = new Map(); // userId -> true while a drop animates (anti double-click)
 const activePokerGames = new Map(); // gameId -> poker session {game, msg, afkTimer, gameTimer}
 
 // ============================================================
@@ -3357,8 +3358,7 @@ function createPlinkoReplayButtons(disabled = false) {
 }
 
 function _plinkoLocked(userId) {
-  const t = processing.get('plinko_' + userId);
-  return t === true;
+  return plinkoLocks.get(userId) === true;
 }
 
 async function playPlinko(context, userId, betStr, ballsRaw, source) {
@@ -3803,7 +3803,7 @@ async function plinkoDrop(userId, risk) {
   const s = activePlinkoGames.get(userId);
   if (!s || s.phase !== 'risk') return;
   clearTimeout(s.riskTimer);
-  processing.set('plinko_' + userId, true);
+  plinkoLocks.set(userId, true);
   // try/finally: a mid-drop throw (e.g. SQLITE_FULL on payout) must NEVER leak
   // the processing lock — that would lock the player out of plinko until restart.
   try {
@@ -3814,7 +3814,7 @@ async function plinkoDrop(userId, risk) {
     console.error('[PLINKO] drop failed mid-flight — bet refunded:', err.message);
     throw err; // index.js shows the storage message to the player
   } finally {
-    processing.delete('plinko_' + userId);
+    plinkoLocks.delete(userId);
   }
 }
 
@@ -3836,7 +3836,7 @@ async function _plinkoDropInner(userId, risk, s) {
       for (let r = 0; r < Math.min(frame, PLINKO_ROWS); r++) if (d.path[r] === 1) col++;
       return { row: Math.min(frame, PLINKO_ROWS - 1), col };
     });
-    const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : drops.map((d) => ({ row: PLINKO_ROWS - 1, col: d.slot })));
+    const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : drops.map((d) => ({ row: PLINKO_ROWS - 1, col: d.slot })), risk);
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
       .setTitle(`🔵 PLINKO — ${riskLabel} Risk${balls > 1 ? ` × ${balls} Balls` : ''}`)
