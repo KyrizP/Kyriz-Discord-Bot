@@ -272,24 +272,6 @@ function attachGameSubcommands(commandBuilder) {
           .setRequired(false)
       )
   );
-  // /kyriz plinko <bet> [balls]
-  commandBuilder.addSubcommand((sub) =>
-    sub
-      .setName('plinko')
-      .setDescription('Drop balls through the Plinko board')
-      .addStringOption((opt) =>
-        opt
-          .setName('bet')
-          .setDescription('Total bet amount (number or "all", max: 500,000)')
-          .setRequired(true)
-      )
-      .addIntegerOption((opt) =>
-        opt
-          .setName('balls')
-          .setDescription('Number of balls (1-5)')
-          .setRequired(false)
-      )
-  );
   // /kyriz wallet [user] [userid]
   commandBuilder.addSubcommand((sub) =>
     sub
@@ -626,8 +608,6 @@ async function execute(interaction) {
       return handleHilo(interaction, userId);
     case 'tower':
       return handleTower(interaction, userId);
-    case 'plinko':
-      return handlePlinko(interaction, userId);
     case 'help':
       return handleHelp(interaction);
     case 'odds':
@@ -3812,12 +3792,6 @@ async function handlePokerModal(interaction) {
     return _renderPokerState(session, null);
   }
   return _afterAction(session, r, `💰 ${player.username || userId} raises to ${amount.toLocaleString()}`);
-}
-
-async function handlePlinko(interaction, userId) {
-  const betStr = interaction.options.getString('bet');
-  const balls = interaction.options.getInteger('balls') || undefined;
-  return playPlinko(interaction, userId, betStr, balls, 'slash');
 }
 
 async function handlePlinkoPrefix(message, userId, args) {
