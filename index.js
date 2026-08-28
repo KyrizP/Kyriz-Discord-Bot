@@ -58,6 +58,24 @@ client.once('ready', () => {
     if (r.migrated > 0) console.log(`║   Battle data migrated: ${String(r.migrated).padEnd(25)} ║`);
   } catch (e) { console.error('[migrate] battle sweep failed:', e.message); }
 
+  // Poker escrow recovery: any rows = a game died mid-hand → transactional per-group refund
+  try {
+    const escrows = economyManager.getActivePokerEscrows();
+    if (escrows.length > 0) {
+      const grouped = {};
+      for (const row of escrows) {
+        if (!grouped[row.game_id]) grouped[row.game_id] = [];
+        grouped[row.game_id].push(row);
+      }
+      let games = 0, players = 0;
+      for (const [gid, rows] of Object.entries(grouped)) {
+        economyManager.pokerSettleTransaction(gid, rows.map((r) => [r.user_id, r.buy_in]));
+        games++; players += rows.length;
+      }
+      if (games > 0) console.log(`║   [POKER] Recovered ${games} game(s), refunded ${players} player(s) ║`);
+    }
+  } catch (e) { console.error('[POKER] Recovery failed:', e.message); }
+
   // DATA SAFETY: rolling local backup at boot + every 6h (data/backups/, keep 14).
   // The 2026-07-17-style corrupt-file wipe can never happen again: readJSON preserves
   // corrupt bytes instead of silently running empty, and these snapshots cap ANY loss at 6h.
@@ -186,6 +204,24 @@ client.on('interactionCreate', async (interaction) => {
           ephemeral: true,
         });
       }
+    }
+    return;
+  }
+
+  // Handle modal submissions (poker raise — the bot's first modal)
+  if (interaction.isModalSubmit()) {
+    try {
+      await gameCommand.handlePokerModal(interaction);
+    } catch (error) {
+      console.error('Error handling modal:', error);
+      const content = error && (error.code === 'ENOSPC' || error.code === 'SQLITE_FULL')
+        ? '⚠️ Storage is momentarily unavailable — please try again in a few seconds.'
+        : 'An error occurred. Please try again.';
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content, ephemeral: true });
+        }
+      } catch { /* stale */ }
     }
     return;
   }

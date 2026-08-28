@@ -1,6 +1,9 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, StringSelectMenuBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const fs = require('fs');
 const zlib = require('zlib'); // gzip backup (spec §6)
+const pokerEngine = require('../utils/pokerEngine');
+const pokerHand = require('../utils/pokerHand');
+const { formatCard } = require('../utils/cardDeck');
 const path = require('path');
 const {
   isSuperAdmin,
@@ -26,6 +29,7 @@ const {
   isAdmin,
   snapshotTo,
 } = require('../utils/economyManager');
+const economyManager = require('../utils/economyManager'); // namespace for poker escrow helpers
 const { createDeck, drawCard, calculateHand, formatHand, isBlackjack } = require('../utils/cardDeck');
 const { listBuyable, getItem } = require('../utils/shopItems');
 const shopManager = require('../utils/shopManager');
@@ -43,6 +47,7 @@ const activeMinesGames = new Map(); // userId -> mines game state
 const activeHiloGames = new Map(); // userId -> hilo game state
 const activeTowerGames = new Map(); // userId -> tower game state
 const activePlinkoGames = new Map(); // userId -> plinko session {bet, risk, balls, msg, idleTimer}
+const activePokerGames = new Map(); // gameId -> poker session {game, msg, afkTimer, gameTimer}
 
 // ============================================================
 // Maintenance mode + bansos (persisted via botState — survive restarts)
@@ -746,6 +751,8 @@ async function handlePrefixCommand(message, command, args) {
       return handleTowerPrefix(message, userId, args);
     case 'plinko':
       return handlePlinkoPrefix(message, userId, args);
+    case 'poker':
+      return handlePokerPrefix(message, userId);
     case 'help':
       if (args.length > 0) return;
       return handleHelpPrefix(message);
@@ -3420,6 +3427,384 @@ async function playPlinko(context, userId, betStr, ballsRaw, source) {
   activePlinkoGames.get(userId).riskTimer = riskTimer;
 }
 
+// ============================================================
+// POKER — multiplayer Texas Hold'em (single hand), prefix-only.
+// Buttons are GENERIC (customId carries gameId only): turn comes
+// from game state at click time — stale embeds can never wedge a
+// turn (spec §2.5). Money: escrow join/settle via economyManager.
+// ============================================================
+
+function _pokerGameId(hostId) {
+  return 'poker_' + hostId + '_' + Date.now().toString(36);
+}
+
+function _userInPokerGame(userId) {
+  for (const s of activePokerGames.values()) {
+    if (s.game.players.some((p) => p.id === userId)) return s;
+  }
+  return null;
+}
+
+function _pokerLobbyButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('poker_join').setLabel('Join').setEmoji('💰').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('poker_start').setLabel('Start').setEmoji('▶️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('poker_cancel').setLabel('Cancel').setEmoji('❌').setStyle(ButtonStyle.Danger),
+  );
+}
+
+function _pokerActionButtons(game) {
+  const cur = game.players[game.currentTurnIndex];
+  const toCall = cur ? game.currentBet - cur.currentBet : 0;
+  const callLabel = toCall <= 0 ? 'Check' : (cur && toCall >= cur.chips ? `All-in ${cur.chips.toLocaleString()}` : `Call ${toCall.toLocaleString()}`);
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('poker_viewhand').setLabel('View Hand').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('poker_call').setLabel(callLabel).setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('poker_raise').setLabel('Raise').setEmoji('💰').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('poker_allin').setLabel('All-in').setEmoji('💎').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('poker_fold').setLabel('Fold').setEmoji('🏳️').setStyle(ButtonStyle.Secondary),
+  );
+}
+
+function _boardLine(game) {
+  const hidden = '🂠';
+  const shown = game.community.map((card) => formatCard(card)).join(' ');
+  const missing = 5 - game.community.length;
+  return shown + (' ' + hidden).repeat(Math.max(0, missing)).trim();
+}
+
+function _pokerEmbed(game, extra) {
+  const embed = new EmbedBuilder().setColor(0x1e6f5c).setTitle('🃏 POKER TABLE');
+  embed.setDescription('`' + _boardLine(game) + '`');
+  const lines = [];
+  for (let i = 0; i < game.players.length; i++) {
+    const p = game.players[i];
+    const tag = i === game.dealerIndex ? 'D ' : i === game.sbIndex ? 'SB ' : i === game.bbIndex ? 'BB ' : '   ';
+    const state = p.folded ? '🏳️ folded' : p.allIn ? '💎 all-in' : (game.players[game.currentTurnIndex] === p ? '👉 **YOUR TURN**' : 'waiting');
+    lines.push(`${tag} **${p.id === game.hostId ? 'Host' : p.username || p.id}** — 💎 ${p.chips.toLocaleString()} · ${state}`);
+  }
+  embed.addFields({ name: `Pot: 💎 ${game.pot.toLocaleString()}`, value: lines.join('\n') + (extra ? '\n\n' + extra : '') });
+  return embed;
+}
+
+function _settleAndCleanup(session, payouts) {
+  // Clear BOTH timers BEFORE map delete — a leaked gameTimer would force-end a dead object.
+  clearTimeout(session.afkTimer);
+  clearTimeout(session.gameTimer);
+  const entries = Object.entries(payouts).map(([id, amt]) => [id, amt]);
+  economyManager.pokerSettleTransaction(session.game.gameId, entries);
+  activePokerGames.delete(session.game.gameId);
+}
+
+async function handlePokerPrefix(message, userId) {
+  const rawBet = (message.content.trim().split(/\s+/)[2] || '');
+  if (!rawBet) {
+    return message.reply('Usage: `ky poker <buy-in>` — host a Texas Hold\'em table (2-5 players). Blinds 2.5%/5%.');
+  }
+  const rawNum = parseInt(rawBet);
+  if (!isNaN(rawNum) && rawNum > MAX_BET) {
+    return message.reply('❌ Maximum buy-in is 💎 500,000.');
+  }
+  const buyIn = parseBet(rawBet, userId);
+  if (buyIn === null || buyIn < 1000) {
+    return message.reply('❌ Minimum buy-in is 💎 1,000. Usage: `ky poker <buy-in>`');
+  }
+  if (_userInPokerGame(userId)) {
+    return message.reply("You're already in a poker game.");
+  }
+  if (battleManager.hasActiveRun(userId)) {
+    return message.reply("You're in an active game. Finish it first.");
+  }
+
+  const gameId = _pokerGameId(userId);
+  // Host auto-joins at command time: escrow deduct + row in ONE tx (insufficient → throws → no lobby)
+  try {
+    economyManager.pokerJoinTransaction(gameId, userId, buyIn);
+  } catch (e) {
+    return message.reply(`❌ ${e.message}`);
+  }
+
+  const game = pokerEngine.createPokerGame(gameId, userId, buyIn);
+  const username = message.author.username;
+  game.players.push({ id: userId, username, chips: buyIn, holeCards: [], folded: false, allIn: false, contributed: 0, currentBet: 0, hasActedThisRound: false });
+
+  const sb = pokerEngine.sbForBuyIn(buyIn);
+  const embed = new EmbedBuilder()
+    .setColor(0x1e6f5c)
+    .setTitle('🃏 POKER TABLE')
+    .setDescription(`Buy-in: 💎 ${buyIn.toLocaleString()} | Blinds: ${sb.toLocaleString()} / ${(sb * 2).toLocaleString()}\n\nPlayers (1/5):\n1. ${username} ✅ (host)\n\nWaiting for players...`)
+    .setFooter({ text: 'Auto-start in 30s with 2+ players · ky poker to learn more' });
+
+  const msg = await message.channel.send({ embeds: [embed], components: [_pokerLobbyButtons()] });
+  const session = { game, msg, afkTimer: null, gameTimer: null };
+  activePokerGames.set(gameId, session);
+
+  // Lobby timeout: 30s — ≥2 players start, else refund-all
+  session.lobbyTimer = setTimeout(() => {
+    const s = activePokerGames.get(gameId);
+    if (!s || s.game.phase !== 'lobby') return;
+    if (s.game.players.length >= 2) {
+      _startPokerHand(s);
+    } else {
+      _settleAndCleanup(s, Object.fromEntries(s.game.players.map((p) => [p.id, p.buyIn ?? s.game.buyIn])));
+      try { s.msg.edit({ content: '⌛ Not enough players — buy-ins refunded.', components: [] }); } catch { /* stale */ }
+    }
+  }, 30_000);
+}
+
+function _startPokerHand(session) {
+  clearTimeout(session.lobbyTimer);
+  const game = session.game;
+  const r = pokerEngine.startGame(game);
+  if (!r.ok) {
+    _settleAndCleanup(session, Object.fromEntries(game.players.map((p) => [p.id, game.buyIn])));
+    return;
+  }
+  _armAfk(session);
+  session.gameTimer = setTimeout(() => _forceEnd(session), 15 * 60_000);
+  _renderPokerState(session, 'Cards dealt! Blinds posted.');
+}
+
+function _armAfk(session) {
+  clearTimeout(session.afkTimer);
+  session.afkTimer = setTimeout(() => {
+    const game = session.game;
+    if (['settled', 'showdown', 'runout'].includes(game.phase)) return;
+    const id = pokerEngine.currentPlayerId(game);
+    if (!id) return;
+    const p = game.players[game.currentTurnIndex];
+    const owed = game.currentBet - p.currentBet;
+    const r = pokerEngine.autoAction(game);
+    if (r.ok) {
+      _afterAction(session, r, `⏰ ${p.username || id} auto-${owed > 0 ? 'folded' : 'checked'} (AFK 30s)`);
+    }
+  }, 30_000);
+}
+
+function _forceEnd(session) {
+  const game = session.game;
+  if (game.phase === 'settled') return;
+  const payouts = pokerEngine.forceEndGame(game);
+  _settleAndCleanup(session, payouts);
+  try {
+    session.msg.edit({ content: '⏱️ Game timed out (15 min) — all contributions refunded.', embeds: [session.msg.embeds[0]], components: [] });
+  } catch { /* stale */ }
+}
+
+async function _renderPokerState(session, note) {
+  const game = session.game;
+  let embed = _pokerEmbed(game, note || '');
+  let components = [];
+  if (game.phase === 'lobby') {
+    components = [_pokerLobbyButtons()];
+  } else if (['settled'].includes(game.phase)) {
+    components = [];
+  } else if (game.phase === 'runout' || game.phase === 'showdown') {
+    components = [];
+  } else {
+    components = [_pokerActionButtons(game)];
+  }
+
+  if (game.phase === 'showdown' || game.phase === 'runout') {
+    // Deal remaining streets with animation, then settle
+    await _runoutAndSettle(session);
+    return;
+  }
+  if (game.phase === 'settled') {
+    await _showSettlement(session);
+    return;
+  }
+
+  try {
+    session.msg = await session.msg.edit({ embeds: [embed], components });
+  } catch { /* stale — game state still valid; AFK chain resolves */ }
+  if (!['settled'].includes(game.phase)) _armAfk(session);
+}
+
+async function _runoutAndSettle(session) {
+  const game = session.game;
+  // Deal to 5 community with small animation
+  while (game.community.length < 5) {
+    if (game.community.length === 0) { game.phase = 'flop'; pokerEngine.dealStreet(game); }
+    else if (game.community.length === 3) { game.phase = 'turn'; pokerEngine.dealStreet(game); }
+    else if (game.community.length === 4) { game.phase = 'river'; pokerEngine.dealStreet(game); }
+    else break;
+    try { session.msg = await session.msg.edit({ embeds: [_pokerEmbed(game, game.community.length < 5 ? 'ALL-IN! Running the board...' : '')], components: [] }); } catch { /* stale */ }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  game.phase = 'showdown';
+  await _showSettlement(session);
+}
+
+async function _showSettlement(session) {
+  const game = session.game;
+  let payouts;
+  try {
+    payouts = pokerEngine.getPayouts(game);
+  } catch (e) {
+    payouts = pokerEngine.forceEndGame(game);
+  }
+  // Reveal hands at showdown
+  const lines = [];
+  if (game.handResults && game.handResults.type === 'showdown') {
+    for (const p of game.players) {
+      if (p.folded) { lines.push(`🏳️ **${p.username || p.id}** folded`); continue; }
+      const disp = pokerHand.getHandDisplay(p.holeCards, game.community);
+      lines.push(`🂠 **${p.username || p.id}** ${p.holeCards.map((c) => formatCard(c)).join(' ')} → ${disp}`);
+    }
+  } else if (game.handResults && game.handResults.type === 'fold-win') {
+    lines.push(`🏆 **${game.players.find((p) => p.id === game.handResults.winnerId)?.username || game.handResults.winnerId}** wins 💎 ${game.handResults.amount.toLocaleString()} — everyone folded`);
+  } else if (game.handResults && game.handResults.type === 'force-end') {
+    lines.push('⏱️ Force-ended — contributions refunded.');
+  }
+  // Payout summary
+  const payLines = [];
+  for (const p of game.players) {
+    const got = payouts[p.id] || 0;
+    const net = got - game.buyIn;
+    payLines.push(`${net >= 0 ? '📈' : '📉'} **${p.username || p.id}**: ${net >= 0 ? '+' : ''}${net.toLocaleString()} (💎 ${got.toLocaleString()} returned)`);
+  }
+  const embed = _pokerEmbed(game, lines.join('\n') + '\n\n' + payLines.join('\n'));
+  try { await session.msg.edit({ embeds: [embed], components: [] }); } catch { /* stale */ }
+  _settleAndCleanup(session, payouts);
+}
+
+function _afterAction(session, result, note) {
+  const game = session.game;
+  if (result.gameOver || game.phase === 'settled') {
+    return _showSettlement(session);
+  }
+  if (game.phase === 'runout' || game.phase === 'showdown') {
+    return _runoutAndSettle(session);
+  }
+  if (result.phaseChanged && ['flop', 'turn', 'river'].includes(game.phase)) {
+    pokerEngine.dealStreet(game);
+    return _renderPokerState(session, `${game.phase.toUpperCase()}!` + (game.community.length === 3 ? ` ${game.community.map((c) => formatCard(c)).join(' ')}` : ' ' + game.community.map((c) => formatCard(c)).join(' ')));
+  }
+  return _renderPokerState(session, note);
+}
+
+async function handlePokerButton(interaction) {
+  const userId = interaction.user.id;
+  const customId = interaction.customId;
+  const action = customId.replace('poker_', '').split('_')[0]; // robust to suffixed ids
+
+  // Find the game whose panel this is (buttons are generic — resolve from state)
+  let session = null;
+  if (interaction.message && interaction.message.id) {
+    for (const s of activePokerGames.values()) {
+      if (s.msg && s.msg.id === interaction.message.id) { session = s; break; }
+    }
+  }
+  if (!session) {
+    // fallback: user's own game
+    session = _userInPokerGame(userId);
+  }
+  if (!session) {
+    return interaction.reply({ content: '⌛ This poker table has ended.', ephemeral: true });
+  }
+  const game = session.game;
+  const player = game.players.find((p) => p.id === userId);
+
+  // ---- LOBBY ----
+  if (game.phase === 'lobby') {
+    if (action === 'join') {
+      if (player) return interaction.reply({ content: "You're already in this game.", ephemeral: true });
+      if (game.players.length >= 5) return interaction.reply({ content: 'Table is full (5 players).', ephemeral: true });
+      if (_userInPokerGame(userId) && _userInPokerGame(userId) !== session) {
+        return interaction.reply({ content: "You're already in another poker game.", ephemeral: true });
+      }
+      try {
+        economyManager.pokerJoinTransaction(game.gameId, userId, game.buyIn);
+      } catch (e) {
+        return interaction.reply({ content: `❌ ${e.message} Buy-in is 💎 ${game.buyIn.toLocaleString()}.`, ephemeral: true });
+      }
+      game.players.push({ id: userId, username: interaction.user.username, chips: game.buyIn, holeCards: [], folded: false, allIn: false, contributed: 0, currentBet: 0, hasActedThisRound: false });
+      const list = game.players.map((p, i) => `${i + 1}. ${p.username || p.id} ✅`).join('\n');
+      try {
+        session.msg = await interaction.update({ embeds: [new EmbedBuilder().setColor(0x1e6f5c).setTitle('🃏 POKER TABLE').setDescription(`Buy-in: 💎 ${game.buyIn.toLocaleString()} | Blinds: ${pokerEngine.sbForBuyIn(game.buyIn).toLocaleString()} / ${(pokerEngine.sbForBuyIn(game.buyIn) * 2).toLocaleString()}\n\nPlayers (${game.players.length}/5):\n${list}\n\nHost [▶️ Start] when ready, or auto-start in 30s.`)], components: [_pokerLobbyButtons()], fetchReply: true });
+      } catch { /* stale */ }
+      return;
+    }
+    if (action === 'start') {
+      if (userId !== game.hostId) return interaction.reply({ content: 'Only the host can start.', ephemeral: true });
+      if (game.players.length < 2) return interaction.reply({ content: 'Need at least 2 players.', ephemeral: true });
+      await interaction.deferUpdate();
+      return _startPokerHand(session);
+    }
+    if (action === 'cancel') {
+      if (userId !== game.hostId) return interaction.reply({ content: 'Only the host can cancel.', ephemeral: true });
+      _settleAndCleanup(session, Object.fromEntries(game.players.map((p) => [p.id, game.buyIn])));
+      return interaction.update({ content: '❌ Table cancelled — all buy-ins refunded.', components: [] });
+    }
+    return interaction.reply({ content: 'Unknown lobby action.', ephemeral: true });
+  }
+
+  // ---- IN-HAND ----
+  if (action === 'viewhand') {
+    if (!player) return interaction.reply({ content: "You're not in this game.", ephemeral: true });
+    if (game.phase === 'lobby') return interaction.reply({ content: "Cards haven't been dealt yet.", ephemeral: true });
+    if (player.folded) return interaction.reply({ content: 'You have folded.', ephemeral: true });
+    const disp = pokerHand.getHandDisplay(player.holeCards, game.community);
+    return interaction.reply({ content: `(Only you can see this)\nYour Hand: ${player.holeCards.map((c) => formatCard(c)).join(' ')}\n${disp}`, ephemeral: true });
+  }
+
+  if (!player) return interaction.reply({ content: "You're not in this game.", ephemeral: true });
+  const curId = pokerEngine.currentPlayerId(game);
+  if (curId !== userId) return interaction.reply({ content: "It's not your turn.", ephemeral: true });
+
+  if (action === 'raise') {
+    // Show modal (raise-TO semantics)
+    const modal = new ModalBuilder().setCustomId('poker_raise_modal').setTitle('Raise To');
+    const min = pokerEngine.minRaiseTo(game);
+    const max = player.chips + player.currentBet;
+    modal.addComponents(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('amount').setLabel(`Raise TO total (min ${min.toLocaleString()}, max ${max.toLocaleString()})`).setStyle(TextInputStyle.Short).setRequired(true)
+    ));
+    session.pendingRaiseUser = userId;
+    return interaction.showModal(modal);
+  }
+
+  // Sync-clear AFK BEFORE any await (PvP lesson)
+  clearTimeout(session.afkTimer);
+
+  const engineAction = action === 'call' ? 'call' : action === 'allin' ? 'allin' : action === 'fold' ? 'fold' : null;
+  if (!engineAction) return interaction.reply({ content: 'Unknown action.', ephemeral: true });
+
+  const r = pokerEngine.playerAction(game, userId, engineAction);
+  if (!r.ok) return interaction.reply({ content: `❌ ${r.error}`, ephemeral: true });
+  await interaction.deferUpdate();
+  const who = player.username || userId;
+  return _afterAction(session, r, r.events && r.events[0] && r.events[0].type === 'raise'
+    ? `💰 ${who} raises to ${r.events[0].toAmount.toLocaleString()}${r.events[0].allIn ? ' — ALL-IN!' : ''}`
+    : `${who} ${engineAction === 'call' ? 'calls' : engineAction === 'allin' ? 'goes ALL-IN 💎' : 'folds'}`);
+}
+
+async function handlePokerModal(interaction) {
+  const userId = interaction.user.id;
+  const session = _userInPokerGame(userId);
+  if (!session) return interaction.reply({ content: '⌛ Game not found.', ephemeral: true });
+  const game = session.game;
+  const player = game.players.find((p) => p.id === userId);
+  const curId = pokerEngine.currentPlayerId(game);
+  if (curId !== userId || !player) return interaction.reply({ content: "It's not your turn.", ephemeral: true });
+
+  const raw = interaction.fields.getTextInputValue('amount');
+  const amount = parseInt(raw);
+  if (isNaN(amount) || amount <= 0) {
+    return interaction.reply({ content: 'Please enter a valid number.', ephemeral: true });
+  }
+  await interaction.deferUpdate();
+  clearTimeout(session.afkTimer);
+  const r = pokerEngine.playerAction(game, userId, 'raise', amount);
+  if (!r.ok) {
+    // re-render current state + ephemeral-style note via followUp on the panel
+    await interaction.followUp({ content: `❌ ${r.error}`, ephemeral: true }).catch(() => {});
+    return _renderPokerState(session, null);
+  }
+  return _afterAction(session, r, `💰 ${player.username || userId} raises to ${amount.toLocaleString()}`);
+}
+
 async function handlePlinko(interaction, userId) {
   const betStr = interaction.options.getString('bet');
   const balls = interaction.options.getInteger('balls') || undefined;
@@ -3986,6 +4371,9 @@ async function handleButton(interaction) {
 
   // Plinko (owner verified inside handler; turn-free single-player)
   if (customId.startsWith('plinko_')) return handlePlinkoButton(interaction);
+
+  // Poker (buttons are GENERIC — turn resolved from game state, never customId: spec §2.5)
+  if (customId.startsWith('poker_')) return handlePokerButton(interaction);
 
   // Maintenance: block shop buy/pagination for non-admins on an already-open shop embed
   // (the command-level guard covers /shop & /buy; game buttons are left alone so in-progress
@@ -5136,6 +5524,7 @@ module.exports = {
   execute,
   handlePrefixCommand,
   handleButton,
+  handlePokerModal,
   sendBackupDM,
   handleSelectMenu,
   handleShop,

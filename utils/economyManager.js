@@ -254,6 +254,11 @@ function initDb() {
       if (fs.existsSync(JSON_SRC)) {
         console.warn('[economy] economy.json present next to a populated economy.db — the JSON is IGNORED (restore ≠ merge). Remove it, or follow the rollback runbook if you meant to roll back.');
       }
+      // Idempotent schema apply on EVERY boot of an existing db — CREATE TABLE
+      // IF NOT EXISTS makes this a no-op for current tables, and it is how NEW
+      // tables (e.g. poker_escrow, added after this db was born) get created.
+      // Without this, adding a table later crashes every existing db at boot.
+      db.exec(SCHEMA_SQL);
       logReady(db, count);
       return db;
     }
