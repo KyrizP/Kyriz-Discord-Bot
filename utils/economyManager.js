@@ -87,6 +87,13 @@ CREATE INDEX IF NOT EXISTS idx_balance ON players(balance DESC);
 CREATE INDEX IF NOT EXISTS idx_level ON players(level DESC);
 CREATE INDEX IF NOT EXISTS idx_battle_rank ON players(best_depth DESC, battle_score DESC, score_achieved_at ASC);
 CREATE INDEX IF NOT EXISTS idx_abyss_rank ON players(abyss_best_floor DESC, abyss_total_stars DESC);
+CREATE TABLE IF NOT EXISTS poker_escrow (
+  game_id   TEXT NOT NULL,
+  user_id   TEXT NOT NULL,
+  buy_in    INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (game_id, user_id)
+);
 `;
 
 // camelCase ↔ snake_col mapping. is_admin coerces back to boolean on read.
@@ -434,6 +441,9 @@ const S = {
   allPlayers: db.prepare('SELECT * FROM players WHERE user_id != ? ORDER BY balance DESC, rowid ASC'),
   rank: db.prepare(`SELECT COUNT(*) + 1 AS r FROM players WHERE user_id != ? AND is_admin = 0 AND (balance > ? OR (balance = ? AND rowid < (SELECT rowid FROM players WHERE user_id = ?)))`),
   battleTop: db.prepare('SELECT user_id FROM players WHERE battle_score > 0 ORDER BY best_depth DESC, battle_score DESC, score_achieved_at ASC, rowid ASC LIMIT ?'),
+  insertEscrow: db.prepare('INSERT INTO poker_escrow (game_id, user_id, buy_in) VALUES (?, ?, ?)'),
+  deleteEscrow: db.prepare('DELETE FROM poker_escrow WHERE game_id = ?'),
+  selectEscrows: db.prepare('SELECT game_id, user_id, buy_in FROM poker_escrow'),
   win: db.prepare('UPDATE players SET total_wins = total_wins + 1 WHERE user_id = ?'),
   loss: db.prepare('UPDATE players SET total_losses = total_losses + 1 WHERE user_id = ?'),
   allRows: db.prepare('SELECT * FROM players'),
@@ -929,6 +939,41 @@ function getBattleRank(userId) {
   return S.battleRankCount.get({ bd: mine.bd, bs: mine.bs, saa: mine.saa }).r;
 }
 
+// ---- Poker escrow (spec §2.6): atomic join/settle on THIS connection ----
+// removeBalance RETURNS {success:false} on insufficient — it does NOT throw.
+// The join tx must check and throw manually or the rollback never fires and a
+// player joins without paying. (verified economyManager:584-588)
+
+function pokerJoinTransaction(gameId, userId, buyIn) {
+  const tx = db.transaction(() => {
+    const result = removeBalance(userId, buyIn);
+    if (!result.success) throw new Error(result.message || 'Insufficient balance.');
+    S.insertEscrow.run(gameId, userId, buyIn);
+  });
+  tx();
+}
+
+function pokerSettleTransaction(gameId, payouts) {
+  const tx = db.transaction(() => {
+    S.deleteEscrow.run(gameId);
+    for (const [userId, amount] of payouts) {
+      if (amount > 0) {
+        // Verify-or-throw: addBalance returns {success:false} SILENTLY on an
+        // unregistered id. In a money-critical settle, a silent fail would eat
+        // chips — rollback keeps escrow alive → boot recovery retries later.
+        // Superadmin is unaffected (early-return success).
+        const r = addBalance(userId, amount);
+        if (!r.success) throw new Error('poker settle: credit failed for ' + userId);
+      }
+    }
+  });
+  tx();
+}
+
+function getActivePokerEscrows() {
+  return S.selectEscrows.all();
+}
+
 function closeDatabase() {
   // SIGTERM/SIGINT hook — checkpoints WAL into the main file so -wal holds
   // nothing committed while the bot rests (plan Step 7).
@@ -966,6 +1011,9 @@ module.exports = {
   withTransaction,
   snapshotTo,
   getBattleTopIds,
+  pokerJoinTransaction,
+  pokerSettleTransaction,
+  getActivePokerEscrows,
   readPlayersByIds,
   getAbyssTopRows,
   getBattleRank,
