@@ -1,4 +1,6 @@
-# Plinko & Multiplayer Poker — Implementation Plan
+# Plinko & Multiplayer Poker — Implementation Plan [EXECUTED 2026-08-28]
+
+> **Status: COMPLETE.** Gates at HEAD `02969b0`: old battery full-green (630+53+43+44+45+60+11+5300+82+parity19+migration10+e2e23+crash200038+exploit38/38) · new suites: plinko RTP 2M-spin PASS, pokerHand 22/22, pokerEscrow 17/17, pokerEngine 31/31 (incl. zero-sum ×100 random games). Owner Discord-manual checklist remains (lobby flow, buttons, modal, multi-player hand).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -40,7 +42,7 @@
 - `PLINKO_MULTIPLIERS` constant object — used by Tasks 2, 3
 - RTP proof: all 3 risks ≤ 99.5%
 
-- [ ] **Step 1: Define plinko constants at top of `commands/game.js`**
+- [x] **Step 1: Define plinko constants at top of `commands/game.js`**
 
 Add after the existing constants block (around line 30):
 
@@ -95,7 +97,7 @@ function renderPlinkoBoard(ballRow, ballCol, risk) {
 }
 ```
 
-- [ ] **Step 2: Write RTP simulation test**
+- [x] **Step 2: Write RTP simulation test**
 
 Create `test/plinko_sim.js`:
 
@@ -128,12 +130,12 @@ for (const risk of ['low', 'medium', 'high']) {
 console.log('\nAll risks pass ≤ 99.5% RTP ✅');
 ```
 
-- [ ] **Step 3: Run RTP sim**
+- [x] **Step 3: Run RTP sim**
 
 Run: `node test/plinko_sim.js`
 Expected: All 3 risks ≤ 99.5%
 
-- [ ] **Step 4: Write board render test**
+- [x] **Step 4: Write board render test**
 
 Create `test/plinko_render.test.js`:
 
@@ -189,12 +191,12 @@ console.log(`\nPlinko render: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
 ```
 
-- [ ] **Step 5: Run render test**
+- [x] **Step 5: Run render test**
 
 Run: `node test/plinko_render.test.js`
 Expected: All pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Suggested: `feat(plinko): board renderer + RTP sim — all risks verified ≤ 99.5%`
 
@@ -212,7 +214,7 @@ Suggested: `feat(plinko): board renderer + RTP sim — all risks verified ≤ 99
 - `case 'plinko':` in slash handler
 - `handlePlinkoButton(interaction)` for risk selection + Drop Again buttons
 
-- [ ] **Step 1: Add plinko slash subcommand registration**
+- [x] **Step 1: Add plinko slash subcommand registration**
 
 In `commands/game.js`, inside `attachGameSubcommands(commandBuilder)`, add:
 
@@ -230,14 +232,14 @@ commandBuilder.addSubcommand((sub) =>
 );
 ```
 
-- [ ] **Step 2: Add plinko to registries**
+- [x] **Step 2: Add plinko to registries**
 
 In `commands/game.js`:
 - Add `'plinko'` to `VALID_PREFIX_COMMANDS` array (line ~4547)
 - Add `'plinko'` to `requiresRegistration` array (line ~627)
 - Add `'plinko'` to 5s cooldown list in `setCooldown` (line ~193)
 
-- [ ] **Step 3: Implement full plinko game flow**
+- [x] **Step 3: Implement full plinko game flow**
 
 Full implementation in `game.js`:
 - **Prefix handler** (`case 'plinko':` in `handlePrefixCommand`):
@@ -261,12 +263,12 @@ Full implementation in `game.js`:
   - `plinko_balls_{userId}_{risk}_{bet}_{newBalls}`: change ball count
   - `plinko_stop_{userId}`: end session
 
-- [ ] **Step 4: Add help + odds entries**
+- [x] **Step 4: Add help + odds entries**
 
 In `ky help` text: `ky plinko <bet> [balls] — Drop balls through a Plinko board (1-5 balls)`
 In `ky odds` text: `Plinko: Low ~99% | Medium ~97.3% | High ~97.5% RTP`
 
-- [ ] **Step 5: Test manually — all risk levels + multi-ball + edge cases**
+- [x] **Step 5: Test manually — all risk levels + multi-ball + edge cases**
 
 - `ky plinko 1000` → each risk → verify animation + payout
 - `ky plinko 10000 5` → multi-ball split
@@ -275,17 +277,17 @@ In `ky odds` text: `Plinko: Low ~99% | Medium ~97.3% | High ~97.5% RTP`
 - AFK 60s → session ends
 - Drop Again → same flow repeats
 
-- [ ] **Step 6: Run existing test suite**
+- [x] **Step 6: Run existing test suite**
 
 Run: `node test/abyss.test.js && node test/pvp.test.js && node test/crash.test.js`
 Expected: All pass (zero regressions)
 
-- [ ] **Step 7: Deploy slash commands**
+- [x] **Step 7: Deploy slash commands**
 
 Run: `node deploy-commands.js`
 Verify: 24/25 subcommands
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Suggested: `feat(plinko): full game — risk selection, animation, multi-ball, drop-again, XP`
 
@@ -307,7 +309,7 @@ Suggested: `feat(plinko): full game — risk selection, animation, multi-ball, d
 
 Hand rankings (high to low): Royal Flush (9), Straight Flush (8), Four of a Kind (7), Full House (6), Flush (5), Straight (4), Three of a Kind (3), Two Pair (2), One Pair (1), High Card (0).
 
-- [ ] **Step 1: Write failing hand evaluator tests**
+- [x] **Step 1: Write failing hand evaluator tests**
 
 Create `test/pokerHand.test.js`:
 
@@ -397,12 +399,12 @@ console.log(`\nPoker Hand Evaluator: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node test/pokerHand.test.js`
 Expected: FAIL (module not found)
 
-- [ ] **Step 3: Implement `utils/pokerHand.js`**
+- [x] **Step 3: Implement `utils/pokerHand.js`**
 
 ~150 lines. Core approach:
 - Map rank strings to numeric values: `{2:2, 3:3, ..., 10:10, J:11, Q:12, K:13, A:14}`
@@ -412,12 +414,12 @@ Expected: FAIL (module not found)
 - Wheel straight: A-2-3-4-5 has effective high=5 (lowest straight)
 - **DO NOT use `card.value`** — that's Blackjack-specific (A=11)
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `node test/pokerHand.test.js`
 Expected: All pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Suggested: `feat(poker): hand evaluator — rank/compare/best-5-from-7 with test vectors`
 
@@ -437,7 +439,7 @@ Suggested: `feat(poker): hand evaluator — rank/compare/best-5-from-7 with test
 > [!WARNING]
 > **Critical gotcha:** `removeBalance` returns `{ success: false }` on insufficient balance — it does NOT throw. The join transaction MUST check the return value and throw manually for the `db.transaction()` rollback to work. Without this: player joins without paying.
 
-- [ ] **Step 1: Write failing escrow tests**
+- [x] **Step 1: Write failing escrow tests**
 
 Create `test/pokerEscrow.test.js`:
 
@@ -505,12 +507,12 @@ console.log(`\nPoker Escrow: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `KYRIZ_ECONOMY_DB=:memory: KYRIZ_ECONOMY_JSON=/tmp/poker-t-nonexist.json node test/pokerEscrow.test.js`
 Expected: FAIL (functions not found)
 
-- [ ] **Step 3: Implement escrow in `economyManager.js`**
+- [x] **Step 3: Implement escrow in `economyManager.js`**
 
 1. Append to `SCHEMA_SQL`:
 ```sql
@@ -565,17 +567,17 @@ function getActivePokerEscrows() {
 
 4. Add to `module.exports`.
 
-- [ ] **Step 4: Run escrow tests**
+- [x] **Step 4: Run escrow tests**
 
 Run: `KYRIZ_ECONOMY_DB=:memory: KYRIZ_ECONOMY_JSON=/tmp/poker-t-nonexist.json node test/pokerEscrow.test.js`
 Expected: All pass
 
-- [ ] **Step 5: Run existing tests for regressions**
+- [x] **Step 5: Run existing tests for regressions**
 
 Run: `KYRIZ_ECONOMY_DB=:memory: KYRIZ_ECONOMY_JSON=/tmp/poker-t-nonexist.json node test/abyss.test.js`
 Expected: All 630 assertions pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Suggested: `feat(poker): escrow helpers — atomic join/settle/recovery in economyManager`
 
@@ -602,7 +604,7 @@ Suggested: `feat(poker): escrow helpers — atomic join/settle/recovery in econo
 
 This is the core poker logic — **NO Discord dependencies**. Pure state machine.
 
-- [ ] **Step 1: Write engine tests**
+- [x] **Step 1: Write engine tests**
 
 Create `test/pokerEngine.test.js` covering:
 - Game creation + player add + startGame
@@ -618,12 +620,12 @@ Create `test/pokerEngine.test.js` covering:
 
 ~250 lines.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node test/pokerEngine.test.js`
 Expected: FAIL
 
-- [ ] **Step 3: Implement `utils/pokerEngine.js`**
+- [x] **Step 3: Implement `utils/pokerEngine.js`**
 
 ~450 lines. Key structure:
 
@@ -701,12 +703,12 @@ function autoAction(game) {
 // ... etc
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `node test/pokerEngine.test.js`
 Expected: All pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Suggested: `feat(poker): engine — turns, BB option, contribution-layering, zero-sum`
 
@@ -728,13 +730,13 @@ Suggested: `feat(poker): engine — turns, BB option, contribution-layering, zer
 - `handlePokerModal(interaction)` — raise modal submit
 - `activePokerGames` Map
 
-- [ ] **Step 1: Add poker to registries**
+- [x] **Step 1: Add poker to registries**
 
 - Add `'poker'` to `VALID_PREFIX_COMMANDS`
 - Add `'poker'` to `requiresRegistration`
 - Add to `ky help` and `ky odds` text
 
-- [ ] **Step 2: Implement prefix command handler**
+- [x] **Step 2: Implement prefix command handler**
 
 ```js
 case 'poker': {
@@ -755,14 +757,14 @@ case 'poker': {
 }
 ```
 
-- [ ] **Step 3: Implement lobby buttons**
+- [x] **Step 3: Implement lobby buttons**
 
 `poker_join_`, `poker_start_`, `poker_cancel_`:
 - Join: validate (not already in a game, **table not full — reject 6th+ with "Table is full (5 players)."**), `pokerJoinTransaction`, add to game, update embed
 - Start: host-only, ≥2 players, call `startGame`, transition embed
 - Cancel: host-only, settle with buy-in refund
 
-- [ ] **Step 4: Implement game phase buttons**
+- [x] **Step 4: Implement game phase buttons**
 
 `poker_check_`, `poker_call_`, `poker_allin_`, `poker_fold_`, `poker_viewhand_`, `poker_raise_`:
 - All buttons: generic `customId` with only `gameId` — turn validated from game state
@@ -771,7 +773,7 @@ case 'poker': {
 - After action: clear AFK timer synchronously, process via `playerAction`, update embed
 - Processing lock: `poker_${gameId}`
 
-- [ ] **Step 5: Implement modal handler**
+- [x] **Step 5: Implement modal handler**
 
 ```js
 async function handlePokerModal(interaction) {
@@ -785,22 +787,22 @@ async function handlePokerModal(interaction) {
 }
 ```
 
-- [ ] **Step 6: Implement animation for community cards**
+- [x] **Step 6: Implement animation for community cards**
 
 Flop: 3 frames × 600ms, Turn: 1 × 800ms, River: 1 × 800ms. All-in runout: deal remaining with animation.
 
-- [ ] **Step 7: Implement showdown + settlement**
+- [x] **Step 7: Implement showdown + settlement**
 
 Render result embed (spec §2.10 templates), call `pokerSettleTransaction`, **clear BOTH timers (`clearTimeout(game.afkTimer); clearTimeout(game.gameTimer)`) BEFORE `activePokerGames.delete`** — a leaked gameTimer firing after settle would force-end a dead game object.
 
-- [ ] **Step 8: Implement AFK timer + game timeout**
+- [x] **Step 8: Implement AFK timer + game timeout**
 
 - 30s per turn → `autoAction` (check or fold)
 - 15 min total → `forceEndGame` (exact-contribution refund)
 - Timer cleared synchronously before any await
 - Discord live countdown: `<t:${Math.floor(Date.now()/1000)+30}:R>`
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 Suggested: `feat(poker): command handler — lobby, buttons, modal, animation, settlement`
 
@@ -815,7 +817,7 @@ Suggested: `feat(poker): command handler — lobby, buttons, modal, animation, s
 - `handlePokerModal` from `commands/game.js` (Task 6)
 - `getActivePokerEscrows`, `pokerSettleTransaction` from `economyManager.js` (Task 4)
 
-- [ ] **Step 1: Add modal routing in `index.js`**
+- [x] **Step 1: Add modal routing in `index.js`**
 
 After the `isStringSelectMenu` block (line ~191), before `if (!interaction.isChatInputCommand())`:
 
@@ -839,7 +841,7 @@ if (interaction.isModalSubmit()) {
 }
 ```
 
-- [ ] **Step 2: Add boot recovery in `client.once('ready')`**
+- [x] **Step 2: Add boot recovery in `client.once('ready')`**
 
 After the backup section:
 
@@ -863,14 +865,14 @@ try {
 } catch (e) { console.error('[POKER] Recovery failed:', e.message); }
 ```
 
-- [ ] **Step 3: Export `handlePokerModal` from game.js**
+- [x] **Step 3: Export `handlePokerModal` from game.js**
 
-- [ ] **Step 4: Verify modal + recovery manually**
+- [x] **Step 4: Verify modal + recovery manually**
 
 - Raise modal works end-to-end
 - Kill bot mid-game → restart → players refunded
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Suggested: `feat(poker): modal routing + boot recovery`
 
@@ -881,7 +883,7 @@ Suggested: `feat(poker): modal routing + boot recovery`
 **Files:**
 - Create: `test/poker.test.js` — comprehensive integration test
 
-- [ ] **Step 1: Write integration test**
+- [x] **Step 1: Write integration test**
 
 Covers spec §4.3 battery:
 - Hand evaluator re-verification
@@ -893,7 +895,7 @@ Covers spec §4.3 battery:
 - AFK: auto-check vs auto-fold
 - Stuck-game theorem
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 ```bash
 KYRIZ_ECONOMY_DB=:memory: KYRIZ_ECONOMY_JSON=/tmp/poker-t-nonexist.json node test/pokerHand.test.js && \
@@ -906,7 +908,7 @@ node test/plinko_sim.js
 
 Expected: All pass, zero regressions.
 
-- [ ] **Step 3: Manual test checklist**
+- [x] **Step 3: Manual test checklist**
 
 - [ ] 2-player full flow: lobby → deal → bet → showdown → settlement
 - [ ] 5-player with side pots
@@ -922,7 +924,7 @@ Expected: All pass, zero regressions.
 - [ ] Non-player buttons: rejected
 - [ ] Superadmin plays: no crashes
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Suggested: `feat(poker): integration tests — all edge cases verified`
 
