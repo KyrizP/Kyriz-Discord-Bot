@@ -35,6 +35,8 @@ const { listBuyable, getItem } = require('../utils/shopItems');
 const shopManager = require('../utils/shopManager');
 const battleCmd = require('../utils/battleCommands');
 const battleManager = require('../utils/battleManager');
+const pvpManager = require('../utils/pvpManager');
+const abyssManager = require('../utils/abyssManager');
 const botState = require('../utils/botState');
 
 // ============================================================
@@ -3512,8 +3514,8 @@ async function handlePokerPrefix(message, userId) {
   if (_userInPokerGame(userId)) {
     return message.reply("You're already in a poker game.");
   }
-  if (battleManager.hasActiveRun(userId)) {
-    return message.reply("You're in an active game. Finish it first.");
+  if (battleManager.hasActiveRun(userId) || pvpManager.isInFight(userId) || abyssManager.isInAbyssFight(userId)) {
+    return message.reply("You're in an active game (delve/duel/abyss). Finish it first.");
   }
 
   const gameId = _pokerGameId(userId);
@@ -3821,7 +3823,16 @@ async function plinkoDrop(userId, risk) {
   if (!s || s.phase !== 'risk') return;
   clearTimeout(s.riskTimer);
   processing.set('plinko_' + userId, true);
+  // try/finally: a mid-drop throw (e.g. SQLITE_FULL on payout) must NEVER leak
+  // the processing lock — that would lock the player out of plinko until restart.
+  try {
+  await _plinkoDropInner(userId, risk, s);
+  } finally {
+  processing.delete('plinko_' + userId);
+  }
+}
 
+async function _plinkoDropInner(userId, risk, s) {
   const perBall = s.perBall;
   const balls = s.balls;
 
@@ -3884,8 +3895,6 @@ async function plinkoDrop(userId, risk) {
   s.risk = risk;
   s.msg = msg;
   try { s.msg = await msg.edit({ embeds: [embed], components: [createPlinkoReplayButtons()] }); } catch { /* stale — session still payable */ }
-
-  processing.delete('plinko_' + userId);
 
   // Idle expiry: reset on every drop (spec §1.4) — disable buttons + clear session
   clearTimeout(s.idleTimer);
