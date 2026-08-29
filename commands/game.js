@@ -3496,7 +3496,10 @@ function _boardLine(game) {
 
 function _pokerEmbed(game, extra) {
   const embed = new EmbedBuilder().setColor(0x1e6f5c).setTitle('🃏 POKER TABLE');
-  embed.setDescription('`' + _boardLine(game) + '`');
+  const betting = !['lobby', 'runout', 'showdown', 'settled'].includes(game.phase);
+  const countdown = betting && game.turnDeadline && game.turnDeadline > Date.now()
+    ? `\n⏳ Turn ends <t:${Math.floor(game.turnDeadline / 1000)}:R>` : '';
+  embed.setDescription('`' + _boardLine(game) + '`' + countdown);
   const lines = [];
   for (let i = 0; i < game.players.length; i++) {
     const p = game.players[i];
@@ -3595,6 +3598,7 @@ function _startPokerHand(session) {
 
 function _armAfk(session) {
   clearTimeout(session.afkTimer);
+  session.game.turnDeadline = Date.now() + 30_000; // single source: countdown + timeout
   session.afkTimer = setTimeout(() => {
     const game = session.game;
     if (['settled', 'showdown', 'runout'].includes(game.phase)) return;
@@ -3621,6 +3625,10 @@ function _forceEnd(session) {
 
 async function _renderPokerState(session, note) {
   const game = session.game;
+  // Arm the turn timer BEFORE building the embed — the countdown shows the
+  // exact deadline the AFK timeout enforces (was: armed after the edit, so the
+  // embed could never carry it).
+  if (!['lobby', 'runout', 'showdown', 'settled'].includes(game.phase)) _armAfk(session);
   let embed = _pokerEmbed(game, note || '');
   let components = [];
   if (game.phase === 'lobby') {
@@ -3646,7 +3654,6 @@ async function _renderPokerState(session, note) {
   try {
     session.msg = await session.msg.edit({ embeds: [embed], components });
   } catch { /* stale — game state still valid; AFK chain resolves */ }
-  if (!['settled'].includes(game.phase)) _armAfk(session);
 }
 
 async function _runoutAndSettle(session) {
@@ -3796,16 +3803,24 @@ async function handlePokerButton(interaction) {
   // Sync-clear AFK BEFORE any await (PvP lesson)
   clearTimeout(session.afkTimer);
 
-  const engineAction = action === 'call' ? 'call' : action === 'allin' ? 'allin' : action === 'fold' ? 'fold' : null;
+  // The call/check button is GENERIC (one customId, label flips by state — spec
+  // §2.5): resolve the real action from the CURRENT owed amount at click time.
+  // A stale "Call 2500" after a raise elsewhere resolves by live state, and the
+  // BB-option "Check" press resolves to check instead of erroring.
+  let engineAction = null;
+  if (action === 'call') engineAction = game.currentBet - player.currentBet <= 0 ? 'check' : 'call';
+  else if (action === 'allin') engineAction = 'allin';
+  else if (action === 'fold') engineAction = 'fold';
   if (!engineAction) return interaction.reply({ content: 'Unknown action.', ephemeral: true });
 
   const r = pokerEngine.playerAction(game, userId, engineAction);
   if (!r.ok) return interaction.reply({ content: `❌ ${r.error}`, ephemeral: true });
   await interaction.deferUpdate();
   const who = player.username || userId;
+  const verb = { call: 'calls', check: 'checks', allin: 'goes ALL-IN 💎', fold: 'folds' }[engineAction];
   return _afterAction(session, r, r.events && r.events[0] && r.events[0].type === 'raise'
     ? `💰 ${who} raises to ${r.events[0].toAmount.toLocaleString()}${r.events[0].allIn ? ' — ALL-IN!' : ''}`
-    : `${who} ${engineAction === 'call' ? 'calls' : engineAction === 'allin' ? 'goes ALL-IN 💎' : 'folds'}`);
+    : `${who} ${verb}`);
 }
 
 async function handlePokerModal(interaction) {
