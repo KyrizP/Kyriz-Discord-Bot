@@ -2,11 +2,11 @@
 // Run: node test/plinko_sim.js
 
 const PLINKO_MULTIPLIERS = {
-  low:    [1.5, 1.3, 1.1, 1.0, 0.8, 1.0, 1.1, 1.3, 1.5],
-  medium: [5,   2,   1.4, 0.9, 0.4, 0.9, 1.4, 2,   5],
-  high:   [26,  5,   1.5, 0.3, 0,   0.3, 1.5, 5,   26],
+  low:    [1.4, 1.2, 1.0, 0.8, 1.0, 1.2, 1.4],
+  medium: [3,   1.6, 1.0, 0.4, 1.0, 1.6, 3],
+  high:   [12,  2,   0.5, 0,   0.5, 2,   12],
 };
-const ROWS = 8;
+const ROWS = 6;
 const SPINS = 2_000_000;
 
 let allPass = true;

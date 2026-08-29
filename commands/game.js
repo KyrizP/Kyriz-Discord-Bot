@@ -170,11 +170,12 @@ const COOLDOWN_HELP = 1000;  // 1 second for help
 // Medium 97.33% / High 97.66% — all ≤ 99.5%.
 // ============================================================
 
-const PLINKO_ROWS = 8;
+const PLINKO_ROWS = 6; // 6 rows → 7 slots — slim board (26 chars) fits every phone
 const PLINKO_MULTIPLIERS = {
-  low:    [1.5, 1.3, 1.1, 1.0, 0.8, 1.0, 1.1, 1.3, 1.5],
-  medium: [5,   2,   1.4, 0.9, 0.4, 0.9, 1.4, 2,   5],
-  high:   [26,  5,   1.5, 0.3, 0,   0.3, 1.5, 5,   26],
+  // Retuned for 7 slots / binomial(6): RTP low 98.75% · medium 98.75% · high 98.44% (sim-verified)
+  low:    [1.4, 1.2, 1.0, 0.8, 1.0, 1.2, 1.4],
+  medium: [3,   1.6, 1.0, 0.4, 1.0, 1.6, 3],
+  high:   [12,  2,   0.5, 0,   0.5, 2,   12],
 };
 
 function simulatePlinkoPath() {
@@ -204,7 +205,7 @@ function renderPlinkoBoard(ballPositions, risk) {
   // snapping, no teleport. Landing row (below board): ball at column 2k,
   // directly above its multiplier cell.
   const mults = PLINKO_MULTIPLIERS[risk];
-  const W = 17; // 9 slots × 2 columns; every token is 3 chars (emoji ≈ 2 + space)
+  const W = 13; // 7 slots × 2 columns − 1; every token is 2 chars
   const lines = [];
   for (let row = 0; row < PLINKO_ROWS; row++) {
     let line = '';
@@ -222,7 +223,7 @@ function renderPlinkoBoard(ballPositions, risk) {
   // pegs, the channels AND the multiplier cells below (char 6k). No drift
   // possible: every row is built from the same tokens.
   const ballLine = Array.from({ length: W }, (_, col) => {
-    if (col % 2 !== 0) return '   '; // channel columns have no gate
+    if (col % 2 !== 0) return '  '; // channel columns have no gate
     const slot = col / 2;
     const landed = ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === slot * 2);
     return landed ? '🔵' : '▼ ';
@@ -3877,7 +3878,7 @@ async function _plinkoDropInner(userId, risk, s) {
       let k = 0;
       const r = Math.min(frame, PLINKO_ROWS);
       for (let i = 0; i < r; i++) if (d.path[i] === 1) k++;
-      const col = Math.max(0, Math.min(16, 8 + 2 * k - r));
+      const col = Math.max(0, Math.min(12, 6 + 2 * k - r));
       return { row: Math.min(frame, PLINKO_ROWS - 1), col };
     });
     const landed = drops.map((d) => ({ row: PLINKO_ROWS, col: d.slot * 2 }));
@@ -5349,11 +5350,11 @@ function createOddsPage(page) {
 
         '🔵 **Plinko** _— 8 rows, 9 slots (8 rows = binomial)_\n' +
         '```\n' +
-        'Risk   Slots (0→8, center = middle)\n' +
-        'Low    1.5x 1.3x 1.1x 1.0x 0.8x 1.0x 1.1x 1.3x 1.5x\n' +
-        'Medium 5.0x 2.0x 1.4x 0.9x 0.4x 0.9x 1.4x 2.0x 5.0x\n' +
-        'High   26.x 5.0x 1.5x 0.3x 0.0x 0.3x 1.5x 5.0x 26.x\n' +
-        'RTP: Low ~98.98% | Medium ~97.33% | High ~97.66%\n' +
+        'Risk   Slots (edge → center → edge)\n' +
+        'Low    1.4x 1.2x 1.0x 0.8x 1.0x 1.2x 1.4x\n' +
+        'Medium 3.0x 1.6x 1.0x 0.4x 1.0x 1.6x 3.0x\n' +
+        'High   12x  2.0x 0.5x 0x  0.5x 2.0x 12x\n' +
+        'RTP: Low ~98.8% | Medium ~98.8% | High ~98.4%\n' +
         '```\n\n' +
 
         '🪙 **Coinflip**\n' +
