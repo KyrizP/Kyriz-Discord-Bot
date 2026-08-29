@@ -204,23 +204,30 @@ function renderPlinkoBoard(ballPositions, risk) {
   // snapping, no teleport. Landing row (below board): ball at column 2k,
   // directly above its multiplier cell.
   const mults = PLINKO_MULTIPLIERS[risk];
-  const W = 17; // 9 slots × 2
+  const W = 17; // 9 slots × 2 columns; every token is 3 chars (emoji ≈ 2 + space)
   const lines = [];
   for (let row = 0; row < PLINKO_ROWS; row++) {
     let line = '';
     for (let col = 0; col < W; col++) {
       const isBall = ballPositions.some((b) => b.row === row && b.col === col);
-      if (isBall) line += ' 🔵';
+      if (isBall) line += '🔵 ';
       else line += col % 2 === (row + 1) % 2 ? ' ◆ ' : ' · ';
     }
     lines.push(line);
   }
-  // Landing row + multiplier row: slot k spans columns 2k and 2k+1
+  // Landing row: ball token at column 2k — inside slot k's 6-char cell
   const ballLine = Array.from({ length: W }, (_, col) =>
-    ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === col) ? ' 🔵' : '  ').join('');
+    ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === col) ? '🔵 ' : '   ').join('');
   lines.push(ballLine);
+  // Multiplier row: slot k = columns 2k..2k+1 = a 6-char cell; label centered
+  // so the ball lands EXACTLY above its own multiplier (char 3×2k vs cell 6k)
   const multLine = mults
-    .map((m) => (m === 0 ? '0x' : `${m}x`).slice(0, 5).padStart(5))
+    .map((m) => {
+      const s = m === 0 ? '0x' : `${m}x`;
+      const pad = Math.max(0, 6 - s.length);
+      const left = Math.ceil(pad / 2);
+      return ' '.repeat(left) + s + ' '.repeat(pad - left);
+    })
     .join('');
   lines.push(multLine);
   return '```\n' + lines.join('\n') + '\n```';
