@@ -3791,10 +3791,16 @@ async function handlePokerButton(interaction) {
   if (action === 'raise') {
     // Show modal (raise-TO semantics)
     const modal = new ModalBuilder().setCustomId('poker_raise_modal').setTitle('Raise To');
-    const min = pokerEngine.minRaiseTo(game);
     const max = player.chips + player.currentBet;
+    // A short stack can't make a full min-raise — its only legal raise is
+    // ALL-IN (the engine accepts a below-min raise-TO exactly at the stack).
+    // Never show a nonsensical "min 600k, max 450k": clamp, and say it plainly.
+    const min = Math.min(pokerEngine.minRaiseTo(game), max);
+    const label = min >= max
+      ? `Raise TO total — ALL-IN ONLY (💎 ${max.toLocaleString()})`
+      : `Raise TO total (min ${min.toLocaleString()}, max ${max.toLocaleString()})`;
     modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('amount').setLabel(`Raise TO total (min ${min.toLocaleString()}, max ${max.toLocaleString()})`).setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('amount').setLabel(label).setStyle(TextInputStyle.Short).setRequired(true)
     ));
     session.pendingRaiseUser = userId;
     return interaction.showModal(modal);
