@@ -198,14 +198,13 @@ function simulatePlinkoDrop(risk) {
 // creating diagonal channels — the ball rides IN a channel, never "through"
 // a peg. Cells: peg '◆', channel '·', ball '🔵' overlays its channel cell.
 function renderPlinkoBoard(ballPositions, risk) {
-  // 17-column grid (2 per slot). Pegs at row r sit on columns ≡ (r+1) mod 2;
-  // the ball's column 8 + 2k − r always has parity ≡ r mod 2 — OPPOSITE the
-  // pegs', so the ball can never render on a peg (structural, not luck).
-  // Lateral movement is exactly ±1 column per row: visible every frame, no
-  // snapping, no teleport. Landing row (below board): ball at column 2k,
-  // directly above its multiplier cell.
+  // 15-column grid, every token 2 chars (30-char board). Pegs at row r sit on
+  // columns ≡ (r+1) mod 2; the ball's column 6 + 2k − r always has parity ≡ r
+  // — OPPOSITE the pegs', so the ball rides a channel, never a peg (structural).
+  // Slot k owns column 2k+1: that's a · channel in the last board row, the ▼
+  // gate below it, AND the multiplier under that — one vertical line per slot.
   const mults = PLINKO_MULTIPLIERS[risk];
-  const W = 13; // 7 slots × 2 columns − 1; every token is 2 chars
+  const W = 15; // 7 slots × 2 columns + 1; every token is 2 chars
   const lines = [];
   for (let row = 0; row < PLINKO_ROWS; row++) {
     let line = '';
@@ -216,31 +215,25 @@ function renderPlinkoBoard(ballPositions, risk) {
     }
     lines.push(line);
   }
-  // Gate row: 9 slot openings (6-char cells). Empty slots show ▼ markers so
-  // every "hole" is visible; landed balls sit dead-center above their label.
-  // Gate row ON THE SAME 17-token grid as the board (3-char tokens): slot k's
-  // gate sits at column 2k — the ▼/🔵 now share one coordinate system with the
-  // pegs, the channels AND the multiplier cells below (char 6k). No drift
-  // possible: every row is built from the same tokens.
+  // Gate row on the same 15-token grid: slot k's gate at column 2k+1 — the
+  // SAME column as that slot's · channels in the last board row, so the ball
+  // drops straight down: channel → ▼ → multiplier. No drift possible.
   const ballLine = Array.from({ length: W }, (_, col) => {
-    if (col % 2 !== 0) return '  '; // channel columns have no gate
-    const slot = col / 2;
-    const landed = ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === slot * 2);
+    if (col % 2 === 0) return '  '; // peg columns have no gate
+    const landed = ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === col);
     return landed ? '🔵' : '▼ ';
   }).join('');
   lines.push(ballLine);
-  // Multiplier row: slot k = columns 2k..2k+1 = a 6-char cell; label centered
-  // so the ball lands EXACTLY above its own multiplier (char 3×2k vs cell 6k)
-  const multLine = mults
-    .map((m) => {
-      // Drop the trailing 'x' (implied) so every label ≤3 chars in a 4-char
-      // cell — gaps between labels, total 36 ≈ board 34, no phone wrap.
-      const t = m === 0 ? '0' : String(m);
-      const pad = Math.max(0, 4 - t.length);
-      return ' '.repeat(Math.ceil(pad / 2)) + t + ' '.repeat(pad - Math.ceil(pad / 2));
-    })
-    .join('');
-  lines.push(multLine);
+  // Multiplier row on the SAME 30-char canvas: gate k occupies chars
+  // 4k+2..4k+3, so the label starts there (one char left for 3-char labels) —
+  // · ▼ and the number all share column 2k+1. 30 chars = board width, no wrap.
+  const canvas = ' '.repeat(W * 2).split('');
+  mults.forEach((m, k) => {
+    const t = m === 0 ? '0' : String(m);
+    const start = 4 * k + 2 - (t.length === 3 ? 1 : 0);
+    for (let i = 0; i < t.length && start + i < W * 2; i++) canvas[start + i] = t[i];
+  });
+  lines.push(canvas.join(''));
   return '```\n' + lines.join('\n') + '\n```';
 }
 
@@ -3878,10 +3871,10 @@ async function _plinkoDropInner(userId, risk, s) {
       let k = 0;
       const r = Math.min(frame, PLINKO_ROWS);
       for (let i = 0; i < r; i++) if (d.path[i] === 1) k++;
-      const col = Math.max(0, Math.min(12, 6 + 2 * k - r));
+      const col = Math.max(0, Math.min(14, 6 + 2 * k - r));
       return { row: Math.min(frame, PLINKO_ROWS - 1), col };
     });
-    const landed = drops.map((d) => ({ row: PLINKO_ROWS, col: d.slot * 2 }));
+    const landed = drops.map((d) => ({ row: PLINKO_ROWS, col: d.slot * 2 + 1 })); // odd col = gate/channel col — straight drop
     const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : landed, risk);
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
