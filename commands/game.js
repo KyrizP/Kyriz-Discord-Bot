@@ -197,26 +197,30 @@ function simulatePlinkoDrop(risk) {
 // creating diagonal channels — the ball rides IN a channel, never "through"
 // a peg. Cells: peg '◆', channel '·', ball '🔵' overlays its channel cell.
 function renderPlinkoBoard(ballPositions, risk) {
+  // 17-column grid (2 per slot). Pegs at row r sit on columns ≡ (r+1) mod 2;
+  // the ball's column 8 + 2k − r always has parity ≡ r mod 2 — OPPOSITE the
+  // pegs', so the ball can never render on a peg (structural, not luck).
+  // Lateral movement is exactly ±1 column per row: visible every frame, no
+  // snapping, no teleport. Landing row (below board): ball at column 2k,
+  // directly above its multiplier cell.
   const mults = PLINKO_MULTIPLIERS[risk];
-  const width = 9;
+  const W = 17; // 9 slots × 2
   const lines = [];
   for (let row = 0; row < PLINKO_ROWS; row++) {
     let line = '';
-    for (let col = 0; col < width; col++) {
+    for (let col = 0; col < W; col++) {
       const isBall = ballPositions.some((b) => b.row === row && b.col === col);
       if (isBall) line += ' 🔵';
-      else line += (col + row) % 2 === 0 ? ' ◆ ' : ' · ';
+      else line += col % 2 === (row + 1) % 2 ? ' ◆ ' : ' · ';
     }
     lines.push(line);
   }
-  // Multiplier row: center each label in a 5-char cell under its slot
+  // Landing row + multiplier row: slot k spans columns 2k and 2k+1
+  const ballLine = Array.from({ length: W }, (_, col) =>
+    ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === col) ? ' 🔵' : '  ').join('');
+  lines.push(ballLine);
   const multLine = mults
-    .map((m) => {
-      const s = m === 0 ? '0x' : `${m}x`;
-      const pad = Math.max(0, 5 - s.length);
-      const left = Math.floor(pad / 2);
-      return ' '.repeat(left) + s + ' '.repeat(pad - left);
-    })
+    .map((m) => (m === 0 ? '0x' : `${m}x`).slice(0, 5).padStart(5))
     .join('');
   lines.push(multLine);
   return '```\n' + lines.join('\n') + '\n```';
@@ -3843,17 +3847,17 @@ async function _plinkoDropInner(userId, risk, s) {
   let msg = s.msg;
 
   for (let frame = 0; frame <= PLINKO_ROWS; frame++) {
-    // Visual position: ball starts at CENTER (col 4) and drifts ±½ per bounce —
-    // k rights after r rows → col = floor(k - r/2 + 4). At r=0 it sits dead
-    // center (real plinko feel); by r=8 it fans out to its landing slot k.
+    // Ball column on the 17-wide grid: 8 + 2k − r. Always integer, starts at
+    // dead-center (col 8), moves ±1 per row, ends at 2k = its slot column.
     const positions = drops.map((d) => {
       let k = 0;
       const r = Math.min(frame, PLINKO_ROWS);
       for (let i = 0; i < r; i++) if (d.path[i] === 1) k++;
-      const col = Math.max(0, Math.min(8, Math.floor(k - r / 2 + 4)));
+      const col = Math.max(0, Math.min(16, 8 + 2 * k - r));
       return { row: Math.min(frame, PLINKO_ROWS - 1), col };
     });
-    const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : drops.map((d) => ({ row: PLINKO_ROWS - 1, col: d.slot })), risk);
+    const landed = drops.map((d) => ({ row: PLINKO_ROWS, col: d.slot * 2 })); // landing row, slot column 2k
+    const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : landed, risk);
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
       .setTitle(`🔵 PLINKO — ${riskLabel} Risk${balls > 1 ? ` × ${balls} Balls` : ''}`)
