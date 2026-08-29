@@ -3868,12 +3868,17 @@ async function _plinkoDropInner(userId, risk, s) {
   let msg = s.msg;
 
   for (let frame = 0; frame <= PLINKO_ROWS; frame++) {
-    // Ball column on the 17-grid: 8 + 2k − r (center start, ±1/row, lands 2k)
+    // Rights-first arc: after r rows the ball has used min(R, r) of its right
+    // bounces (R = d.slot = total rights). Smooth ±1 col per frame, never
+    // wall-hugs, and row 5 lands EXACTLY on gate col 2·R+1 for every slot —
+    // the final drop is always straight. (The old per-step path order made
+    // the last visible frame sit one gate left whenever step 6 was a right —
+    // the "ball swerves into the multiplier" artifact.)
     const positions = drops.map((d) => {
-      let k = 0;
       const r = Math.min(frame, PLINKO_ROWS);
-      for (let i = 0; i < r; i++) if (d.path[i] === 1) k++;
-      const col = Math.max(0, Math.min(14, 6 + 2 * k - r));
+      const pre = Math.max(0, d.slot - (PLINKO_ROWS - 1)); // all-rights path enters pre-veered
+      const rights = Math.min(d.slot, r + pre);
+      const col = Math.max(0, Math.min(14, 6 + 2 * rights - r));
       return { row: Math.min(frame, PLINKO_ROWS - 1), col };
     });
     const landed = drops.map((d) => ({ row: PLINKO_ROWS, col: d.slot * 2 + 1 })); // odd col = gate/channel col — straight drop
