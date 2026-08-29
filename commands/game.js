@@ -3386,7 +3386,15 @@ function _plinkoLocked(userId) {
 
 async function playPlinko(context, userId, betStr, ballsRaw, source) {
   if (activePlinkoGames.has(userId)) {
-    return context.reply({ content: 'You already have an active Plinko session. Finish or let it expire first.' });
+    const old = activePlinkoGames.get(userId);
+    // Stale takeover: a session older than 5 min (lag-crash / lost timers /
+    // bot hiccup) is dead weight — reclaim instead of locking the player out.
+    if (Date.now() - (old.createdAt || 0) > 5 * 60_000) {
+      clearTimeout(old.riskTimer); clearTimeout(old.idleTimer);
+      activePlinkoGames.delete(userId);
+    } else {
+      return context.reply({ content: 'You already have an active Plinko session. Finish or let it expire first.' });
+    }
   }
   if (_plinkoLocked(userId)) {
     return context.reply({ content: 'Hold on — your previous drop is still resolving.' });
@@ -3419,7 +3427,7 @@ async function playPlinko(context, userId, betStr, ballsRaw, source) {
   const msg = await context.reply({ embeds: [embed], components: [createPlinkoRiskButtons()], fetchReply: true });
 
   // Risk-select state (pre-deduction: no money has moved yet)
-  activePlinkoGames.set(userId, { phase: 'risk', bet: totalBet, perBall, balls, msg });
+  activePlinkoGames.set(userId, { phase: 'risk', bet: totalBet, perBall, balls, msg, createdAt: Date.now() });
   const riskTimer = setTimeout(() => {
     const s = activePlinkoGames.get(userId);
     if (s && s.phase === 'risk' && s.msg.id === msg.id) {
@@ -3914,8 +3922,9 @@ async function _plinkoDropInner(userId, risk, s) {
   clearTimeout(s.idleTimer);
   s.idleTimer = setTimeout(async () => {
     const cur = activePlinkoGames.get(userId);
-    if (!cur || cur.msg.id !== s.msg.id) return;
-    activePlinkoGames.delete(userId);
+    if (!cur) return;
+    activePlinkoGames.delete(userId); // delete FIRST — cleanup must never be skippable
+    if (cur.msg.id !== s.msg.id) return;
     try {
       const e = EmbedBuilder.from(cur.msg.embeds[0]);
       e.setDescription(e.data.description + '\n\n*Session ended — idle 60s*');
@@ -3950,7 +3959,7 @@ async function handlePlinkoButton(interaction) {
       return interaction.update({ content: `❌ ${res.message}`, components: [] });
     }
     clearTimeout(s.riskTimer); // before the await — 30s expiry must not delete the session mid-deduct
-    await interaction.deferUpdate();
+    try { await interaction.deferUpdate(); } catch { /* lag/expired interaction — the drop must still run: the bet is already deducted */ }
     return plinkoDrop(userId, risk);
   }
 
@@ -3991,7 +4000,7 @@ async function handlePlinkoButton(interaction) {
   s.phase = 'risk';          // plinkoDrop requires 'risk' — without this the bet is eaten silently
   s.perBall = perBall;
   s.balls = balls;
-  await interaction.deferUpdate();
+  try { await interaction.deferUpdate(); } catch { /* lag/expired — drop still runs (bet deducted) */ }
   return plinkoDrop(userId, s.risk);
 }
 
