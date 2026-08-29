@@ -3870,22 +3870,22 @@ async function _plinkoDropInner(userId, risk, s) {
   const riskLabel = risk.charAt(0).toUpperCase() + risk.slice(1);
   let msg = s.msg;
 
+  // Compact path-trail animation: progress bar + per-ball ➡/⬅ trail — no wide
+  // board. The 17-column board exceeded phone widths and Discord wraps long
+  // code-block lines (the "makin bawah makin lebar" mobile bug). Plain text
+  // wraps gracefully everywhere and can never misalign.
+  const MULT_LABEL = {
+    low: '1.5x · 1.3x · 1.1x · 1x · 0.8x · 1x · 1.1x · 1.3x · 1.5x',
+    medium: '5x · 2x · 1.4x · 0.9x · 0.4x · 0.9x · 1.4x · 2x · 5x',
+    high: '26x · 5x · 1.5x · 0.3x · 0x · 0.3x · 1.5x · 5x · 26x',
+  };
   for (let frame = 0; frame <= PLINKO_ROWS; frame++) {
-    // Ball column on the 17-wide grid: 8 + 2k − r. Always integer, starts at
-    // dead-center (col 8), moves ±1 per row, ends at 2k = its slot column.
-    const positions = drops.map((d) => {
-      let k = 0;
-      const r = Math.min(frame, PLINKO_ROWS);
-      for (let i = 0; i < r; i++) if (d.path[i] === 1) k++;
-      const col = Math.max(0, Math.min(16, 8 + 2 * k - r));
-      return { row: Math.min(frame, PLINKO_ROWS - 1), col };
-    });
-    const landed = drops.map((d) => ({ row: PLINKO_ROWS, col: d.slot * 2 })); // landing row, slot column 2k
-    const board = renderPlinkoBoard(frame < PLINKO_ROWS ? positions : landed, risk);
+    const prog = '█'.repeat(frame) + '░'.repeat(PLINKO_ROWS - frame);
+    const trails = drops.map((d) => d.path.slice(0, frame).map((p) => (p === 1 ? '➡' : '⬅')).join('') || '·');
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
       .setTitle(`🔵 PLINKO — ${riskLabel} Risk${balls > 1 ? ` × ${balls} Balls` : ''}`)
-      .setDescription(board + `\n💎 ${perBall.toLocaleString()}${balls > 1 ? ` × ${balls} balls` : ''} — dropping...`);
+      .setDescription(`Dropping… \`${prog}\` ${frame}/${PLINKO_ROWS}\n${trails.join('\n')}\n\n💎 ${perBall.toLocaleString()}${balls > 1 ? ` × ${balls} balls` : ''}\nSlots: ${MULT_LABEL[risk]}`);
     try { msg = await msg.edit({ embeds: [embed], components: [] }); } catch { break; }
     if (frame < PLINKO_ROWS) await new Promise((r) => setTimeout(r, 600));
   }
