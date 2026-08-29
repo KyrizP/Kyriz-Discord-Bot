@@ -217,9 +217,15 @@ function renderPlinkoBoard(ballPositions, risk) {
   }
   // Gate row: 9 slot openings (6-char cells). Empty slots show ▼ markers so
   // every "hole" is visible; landed balls sit dead-center above their label.
-  const ballLine = Array.from({ length: 9 }, (_, slot) => {
+  // Gate row ON THE SAME 17-token grid as the board (3-char tokens): slot k's
+  // gate sits at column 2k — the ▼/🔵 now share one coordinate system with the
+  // pegs, the channels AND the multiplier cells below (char 6k). No drift
+  // possible: every row is built from the same tokens.
+  const ballLine = Array.from({ length: W }, (_, col) => {
+    if (col % 2 !== 0) return '   '; // channel columns have no gate
+    const slot = col / 2;
     const landed = ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === slot * 2);
-    return landed ? '  🔵  ' : '  ▼   '; // both EXACTLY 6 chars (▼ is 1-wide, 🔵 is 2-wide + padding)
+    return landed ? '🔵 ' : ' ▼ ';
   }).join('');
   lines.push(ballLine);
   // Multiplier row: slot k = columns 2k..2k+1 = a 6-char cell; label centered
