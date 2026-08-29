@@ -215,9 +215,12 @@ function renderPlinkoBoard(ballPositions, risk) {
     }
     lines.push(line);
   }
-  // Landing row: ball token at column 2k — inside slot k's 6-char cell
-  const ballLine = Array.from({ length: W }, (_, col) =>
-    ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === col) ? '🔵 ' : '   ').join('');
+  // Gate row: 9 slot openings (6-char cells). Empty slots show ▼ markers so
+  // every "hole" is visible; landed balls sit dead-center above their label.
+  const ballLine = Array.from({ length: 9 }, (_, slot) => {
+    const landed = ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === slot * 2);
+    return landed ? '  🔵  ' : '  ▼  ';
+  }).join('');
   lines.push(ballLine);
   // Multiplier row: slot k = columns 2k..2k+1 = a 6-char cell; label centered
   // so the ball lands EXACTLY above its own multiplier (char 3×2k vs cell 6k)
