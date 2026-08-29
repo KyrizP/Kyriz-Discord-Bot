@@ -3515,6 +3515,13 @@ function _settleAndCleanup(session, payouts) {
   // Clear BOTH timers BEFORE map delete — a leaked gameTimer would force-end a dead object.
   clearTimeout(session.afkTimer);
   clearTimeout(session.gameTimer);
+  // Win/Loss stats (spec §2.11): one record per game per player, net-based —
+  // win = positive net, loss = net ≤ 0 (break-even counts as a loss, matching
+  // the casino-wide rule). No XP from poker (zero-sum, §2.11).
+  for (const p of session.game.players) {
+    const net = (payouts[p.id] || 0) - session.game.buyIn;
+    if (net > 0) recordWin(p.id); else recordLoss(p.id);
+  }
   const entries = Object.entries(payouts).map(([id, amt]) => [id, amt]);
   try {
     economyManager.pokerSettleTransaction(session.game.gameId, entries);

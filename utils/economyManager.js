@@ -449,6 +449,7 @@ const S = {
   insertEscrow: db.prepare('INSERT INTO poker_escrow (game_id, user_id, buy_in) VALUES (?, ?, ?)'),
   deleteEscrow: db.prepare('DELETE FROM poker_escrow WHERE game_id = ?'),
   selectEscrows: db.prepare('SELECT game_id, user_id, buy_in FROM poker_escrow'),
+  selectEscrowByGame: db.prepare('SELECT user_id, buy_in FROM poker_escrow WHERE game_id = ?'),
   win: db.prepare('UPDATE players SET total_wins = total_wins + 1 WHERE user_id = ?'),
   loss: db.prepare('UPDATE players SET total_losses = total_losses + 1 WHERE user_id = ?'),
   allRows: db.prepare('SELECT * FROM players'),
@@ -963,6 +964,15 @@ function pokerSettleTransaction(gameId, payouts) {
     // Double-settle guard: deleteEscrow returns the number of rows removed —
     // 0 means this game was already settled (or never existed). A second
     // settlement would double-credit every player; refuse instead.
+    // Zero-sum assertion (spec §2.6): every settle path refunds Σ buy-ins —
+    // normal showdown (chips+pots), force-end (chips+contributed), cancel and
+    // boot recovery all reduce to it. A payout map that destroys or mints
+    // Kryztal must NEVER commit — throw rolls back, escrow survives, boot
+    // recovery retries loudly instead of silently corrupting wallets.
+    // (Read the escrow total BEFORE deleting the rows it lives in.)
+    const escrowed = S.selectEscrowByGame.all(gameId).reduce((s, r) => s + r.buy_in, 0);
+    const paid = payouts.reduce((s, [, amount]) => s + amount, 0);
+    if (paid !== escrowed) throw new Error(`poker settle: zero-sum violation — payouts ${paid} ≠ escrowed ${escrowed} for ${gameId}`);
     const removed = S.deleteEscrow.run(gameId).changes; // .run() returns {changes, lastInsertRowid}
     if (removed === 0) throw new Error('poker settle: escrow already settled for ' + gameId);
     for (const [userId, amount] of payouts) {

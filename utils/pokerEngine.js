@@ -231,8 +231,12 @@ function playerAction(game, userId, action, amount) {
     for (const p of game.players) if (p !== player) p.hasActedThisRound = false;
     player.hasActedThisRound = true;
     game.pot = game.players.reduce((s, p) => s + p.contributed, 0);
-    if (_canAct(player) && _roundComplete(game)) { _advanceStreet(game); return { ok: true, phaseChanged: true }; }
-    if (!_canAct(player) && game.players.filter(_canAct).length <= 1) { _advanceStreet(game); return { ok: true, phaseChanged: true }; }
+    // Round completion is _roundComplete's call — NOT "≤1 player can act".
+    // The old heuristic advanced the street even when that one remaining
+    // player (e.g. the BB facing an all-in) still owed a call, giving them a
+    // free showdown for just their blind. _roundComplete already handles the
+    // all-actors-gone (0) and single-actor-matched (1) cases correctly.
+    if (_roundComplete(game)) { _advanceStreet(game); return { ok: true, phaseChanged: true }; }
     game.currentTurnIndex = _nextActor(game, game.currentTurnIndex);
     return { ok: true, events: [{ type: 'raise', userId, toAmount: amount, allIn: player.allIn }] };
   }
