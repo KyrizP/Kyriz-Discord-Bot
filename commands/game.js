@@ -199,8 +199,8 @@ function simulatePlinkoDrop(risk) {
 // a peg. Cells: peg '◆', channel '·', ball '🔵' overlays its channel cell.
 function renderPlinkoBoard(ballPositions, risk) {
   // 15-column grid, every token 2 chars (30-char board). Pegs at row r sit on
-  // columns ≡ (r+1) mod 2; the ball's column 6 + 2k − r always has parity ≡ r
-  // — OPPOSITE the pegs', so the ball rides a channel, never a peg (structural).
+  // columns ≡ (r+1) mod 2; the ball's column 6 + 2·rights − r always has
+  // parity ≡ r — OPPOSITE the pegs', so it rides a channel, never a peg.
   // Slot k owns column 2k+1: that's a · channel in the last board row, the ▼
   // gate below it, AND the multiplier under that — one vertical line per slot.
   const mults = PLINKO_MULTIPLIERS[risk];
@@ -3522,16 +3522,19 @@ function _settleAndCleanup(session, payouts) {
   // Clear BOTH timers BEFORE map delete — a leaked gameTimer would force-end a dead object.
   clearTimeout(session.afkTimer);
   clearTimeout(session.gameTimer);
-  // Win/Loss stats (spec §2.11): one record per game per player, net-based —
-  // win = positive net, loss = net ≤ 0 (break-even counts as a loss, matching
-  // the casino-wide rule). No XP from poker (zero-sum, §2.11).
-  for (const p of session.game.players) {
-    const net = (payouts[p.id] || 0) - session.game.buyIn;
-    if (net > 0) recordWin(p.id); else recordLoss(p.id);
-  }
   const entries = Object.entries(payouts).map(([id, amt]) => [id, amt]);
   try {
     economyManager.pokerSettleTransaction(session.game.gameId, entries);
+    // Win/Loss stats (spec §2.11) AFTER the money commits: a settle deferred
+    // to boot recovery (tx throw → everyone refunded) must not record W/L for
+    // a hand that effectively never happened. Stats are cosmetic — never let
+    // a stats write failure break cleanup either.
+    try {
+      for (const p of session.game.players) {
+        const net = (payouts[p.id] || 0) - session.game.buyIn;
+        if (net > 0) recordWin(p.id); else recordLoss(p.id);
+      }
+    } catch { /* money already committed */ }
   } catch (e) {
     // Settle rolled back → escrow row SURVIVES → boot recovery refunds on next
     // start. Never leave the session in the map (locks every player out).
