@@ -165,9 +165,9 @@ const COOLDOWN_CMD = 4000;   // 4 seconds for other commands
 const COOLDOWN_HELP = 1000;  // 1 second for help
 
 // ============================================================
-// PLINKO — 8-row peg board, 9 multiplier slots, 3 risk levels.
-// RTP verified via test/plinko_sim.js (2M spins): Low 98.98% /
-// Medium 97.33% / High 97.66% — all ≤ 99.5%.
+// PLINKO — 6-row peg board, 7 multiplier slots, 3 risk levels.
+// RTP verified via test/plinko_sim.js (2M spins): Low 98.8% /
+// Medium 98.7% / High 98.2-98.6% — all ≤ 99.5%.
 // ============================================================
 
 const PLINKO_ROWS = 6; // 6 rows → 7 slots — slim board (26 chars) fits every phone
@@ -3391,19 +3391,21 @@ function _plinkoLocked(userId) {
 }
 
 async function playPlinko(context, userId, betStr, ballsRaw, source) {
+  if (_plinkoLocked(userId)) {
+    return context.reply({ content: 'Hold on — your previous drop is still resolving.' });
+  }
   if (activePlinkoGames.has(userId)) {
     const old = activePlinkoGames.get(userId);
-    // Stale takeover: a session older than 5 min (lag-crash / lost timers /
+    // Stale takeover: a session inactive for 5 min (lag-crash / lost timers /
     // bot hiccup) is dead weight — reclaim instead of locking the player out.
+    // createdAt refreshes on every drop, so this can never hit a live replay
+    // chain (idle expiry cleans those at 60s) — only truly abandoned ones.
     if (Date.now() - (old.createdAt || 0) > 5 * 60_000) {
       clearTimeout(old.riskTimer); clearTimeout(old.idleTimer);
       activePlinkoGames.delete(userId);
     } else {
       return context.reply({ content: 'You already have an active Plinko session. Finish or let it expire first.' });
     }
-  }
-  if (_plinkoLocked(userId)) {
-    return context.reply({ content: 'Hold on — your previous drop is still resolving.' });
   }
 
   const bet = parseBet(betStr, userId);
@@ -3888,7 +3890,7 @@ async function _plinkoDropInner(userId, risk, s) {
       .setTitle(`🔵 PLINKO — ${riskLabel} Risk${balls > 1 ? ` × ${balls} Balls` : ''}`)
       .setDescription(board + `\n💎 ${perBall.toLocaleString()}${balls > 1 ? ` × ${balls} balls` : ''}`);
     try { msg = await msg.edit({ embeds: [embed], components: [] }); } catch { break; }
-    if (frame < PLINKO_ROWS) await new Promise((r) => setTimeout(r, 400)); // 8×400ms ≈ 3.2s total
+    if (frame < PLINKO_ROWS) await new Promise((r) => setTimeout(r, 400)); // 6×400ms ≈ 2.4s + render
   }
 
   // Payout per ball (floor), total return
@@ -3926,6 +3928,7 @@ async function _plinkoDropInner(userId, risk, s) {
   s.phase = 'result';
   s.risk = risk;
   s.msg = msg;
+  s.createdAt = Date.now(); // liveness: replay chains stay 'young' — takeover must not reclaim a live session
   try { s.msg = await msg.edit({ embeds: [embed], components: [createPlinkoReplayButtons()] }); } catch { /* stale — session still payable */ }
 
   // Idle expiry: reset on every drop (spec §1.4) — disable buttons + clear session
@@ -4420,18 +4423,19 @@ async function handleButton(interaction) {
   // Battle mode buttons (per-user locked inside battleCmd.handleButton)
   if (customId.startsWith('battle_') || customId.startsWith('pvp_')) return battleCmd.handleButton(interaction);
 
+  // Maintenance: block NEW wagers from stale panels (plinko risk/replay / poker
+  // lobby join) — in-progress rounds still finish (convention), but risk/Again/
+  // Join start a NEW bet and must respect maintenance. MUST stay ABOVE the
+  // plinko_/poker_ routes below or it never fires (regression caught in review).
+  if ((customId.startsWith('plinko_risk_') || customId.startsWith('plinko_again') || customId.startsWith('plinko_b') || customId === 'poker_join') && maintenanceMode.active && !isSuperAdmin(interaction.user.id) && !isAdmin(interaction.user.id)) {
+    return interaction.reply({ content: `🛠️ ${maintenanceMode.message}`, ephemeral: true });
+  }
+
   // Plinko (owner verified inside handler; turn-free single-player)
   if (customId.startsWith('plinko_')) return handlePlinkoButton(interaction);
 
   // Poker (buttons are GENERIC — turn resolved from game state, never customId: spec §2.5)
   if (customId.startsWith('poker_')) return handlePokerButton(interaction);
-
-  // Maintenance: block NEW wagers from stale panels (plinko replay / poker lobby
-  // join) — in-progress rounds still finish (convention), but 'Again'/'Join' start
-  // a NEW bet and must respect maintenance.
-  if ((customId.startsWith('plinko_again') || customId.startsWith('plinko_b') || customId === 'poker_join') && maintenanceMode.active && !isSuperAdmin(interaction.user.id) && !isAdmin(interaction.user.id)) {
-    return interaction.reply({ content: `🛠️ ${maintenanceMode.message}`, ephemeral: true });
-  }
 
   // Maintenance: block shop buy/pagination for non-admins on an already-open shop embed
   // (the command-level guard covers /shop & /buy; game buttons are left alone so in-progress
@@ -5348,7 +5352,7 @@ function createOddsPage(page) {
       .setDescription(
         '**Payouts for all games.**\n\n' +
 
-        '🔵 **Plinko** _— 8 rows, 9 slots (8 rows = binomial)_\n' +
+        '🔵 **Plinko** _— 6 rows, 7 slots (binomial)_\n' +
         '```\n' +
         'Risk   Slots (edge → center → edge)\n' +
         'Low    1.4x 1.2x 1.0x 0.8x 1.0x 1.2x 1.4x\n' +
