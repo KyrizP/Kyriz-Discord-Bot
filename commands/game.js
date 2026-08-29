@@ -234,7 +234,9 @@ function renderPlinkoBoard(ballPositions, risk) {
     for (let i = 0; i < t.length && start + i < W * 2; i++) canvas[start + i] = t[i];
   });
   lines.push(canvas.join(''));
-  return '```\n' + lines.join('\n') + '\n```';
+  // Side walls: uniform '+2 char' shift on EVERY row — the internal column
+  // system (channels/gates/labels) is untouched, alignment can't skew.
+  return '```\n' + lines.map((l) => '| ' + l + ' |').join('\n') + '\n```';
 }
 
 /**
