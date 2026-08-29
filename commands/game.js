@@ -210,8 +210,8 @@ function renderPlinkoBoard(ballPositions, risk) {
     let line = '';
     for (let col = 0; col < W; col++) {
       const isBall = ballPositions.some((b) => b.row === row && b.col === col);
-      if (isBall) line += '🔵 ';
-      else line += col % 2 === (row + 1) % 2 ? ' ◆ ' : ' · ';
+      if (isBall) line += ' @ ';
+      else line += col % 2 === (row + 1) % 2 ? ' O ' : ' . ';
     }
     lines.push(line);
   }
@@ -225,7 +225,7 @@ function renderPlinkoBoard(ballPositions, risk) {
     if (col % 2 !== 0) return '   '; // channel columns have no gate
     const slot = col / 2;
     const landed = ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === slot * 2);
-    return landed ? '🔵 ' : ' ▼ ';
+    return landed ? ' @ ' : ' v ';
   }).join('');
   lines.push(ballLine);
   // Multiplier row: slot k = columns 2k..2k+1 = a 6-char cell; label centered
