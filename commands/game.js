@@ -219,7 +219,7 @@ function renderPlinkoBoard(ballPositions, risk) {
   // every "hole" is visible; landed balls sit dead-center above their label.
   const ballLine = Array.from({ length: 9 }, (_, slot) => {
     const landed = ballPositions.some((b) => b.row >= PLINKO_ROWS && b.col === slot * 2);
-    return landed ? '  🔵  ' : '  ▼  ';
+    return landed ? '  🔵  ' : '  ▼   '; // both EXACTLY 6 chars (▼ is 1-wide, 🔵 is 2-wide + padding)
   }).join('');
   lines.push(ballLine);
   // Multiplier row: slot k = columns 2k..2k+1 = a 6-char cell; label centered
