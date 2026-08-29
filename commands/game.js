@@ -3487,11 +3487,18 @@ function _pokerActionButtons(game) {
   );
 }
 
+// Poker-only card formatter: VS16 makes suits render as emoji (♥️♦️ red).
+// cardDeck.formatCard stays plain — Blackjack depends on it.
+const SUIT_EMOJI = { '♠': '♠️', '♥': '♥️', '♦': '♦️', '♣': '♣️' };
+function pokerCard(c) {
+  return `[${c.rank}${SUIT_EMOJI[c.suit] || c.suit}]`;
+}
+
 function _boardLine(game) {
   const hidden = '🂠';
-  const shown = game.community.map((card) => formatCard(card)).join(' ');
+  const shown = game.community.map((card) => pokerCard(card)).join(' ');
   const missing = 5 - game.community.length;
-  return shown + (' ' + hidden).repeat(Math.max(0, missing)).trim();
+  return shown + ('  ' + hidden).repeat(Math.max(0, missing)).trim(); // wider gap: unrevealed cards breathe
 }
 
 function _pokerEmbed(game, extra) {
@@ -3692,7 +3699,7 @@ async function _showSettlement(session) {
     for (const p of game.players) {
       if (p.folded) { lines.push(`🏳️ **${p.username || p.id}** folded`); continue; }
       const disp = pokerHand.getHandDisplay(p.holeCards, game.community);
-      lines.push(`🂠 **${p.username || p.id}** ${p.holeCards.map((c) => formatCard(c)).join(' ')} → ${disp}`);
+      lines.push(`🂠 **${p.username || p.id}** ${p.holeCards.map((c) => pokerCard(c)).join(' ')} → ${disp}`);
     }
   } else if (game.handResults && game.handResults.type === 'fold-win') {
     lines.push(`🏆 **${game.players.find((p) => p.id === game.handResults.winnerId)?.username || game.handResults.winnerId}** wins 💎 ${game.handResults.amount.toLocaleString()} — everyone folded`);
@@ -3721,7 +3728,7 @@ function _afterAction(session, result, note) {
   }
   if (result.phaseChanged && ['flop', 'turn', 'river'].includes(game.phase)) {
     pokerEngine.dealStreet(game);
-    return _renderPokerState(session, `${game.phase.toUpperCase()}!` + (game.community.length === 3 ? ` ${game.community.map((c) => formatCard(c)).join(' ')}` : ' ' + game.community.map((c) => formatCard(c)).join(' ')));
+    return _renderPokerState(session, `${game.phase.toUpperCase()}! ${game.community.map((c) => pokerCard(c)).join(' ')}`);
   }
   return _renderPokerState(session, note);
 }
@@ -3788,7 +3795,7 @@ async function handlePokerButton(interaction) {
     if (game.phase === 'lobby') return interaction.reply({ content: "Cards haven't been dealt yet.", ephemeral: true });
     if (player.folded) return interaction.reply({ content: 'You have folded.', ephemeral: true });
     const disp = pokerHand.getHandDisplay(player.holeCards, game.community);
-    return interaction.reply({ content: `(Only you can see this)\nYour Hand: ${player.holeCards.map((c) => formatCard(c)).join(' ')}\n${disp}`, ephemeral: true });
+    return interaction.reply({ content: `(Only you can see this)\nYour Hand: ${player.holeCards.map((c) => pokerCard(c)).join(' ')}\n${disp}`, ephemeral: true });
   }
 
   if (!player) return interaction.reply({ content: "You're not in this game.", ephemeral: true });

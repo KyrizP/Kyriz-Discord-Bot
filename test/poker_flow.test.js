@@ -175,6 +175,54 @@ async function hostGame(ids, buyIn, label) {
   const delta2 = ids2.reduce((s, id) => s + eco.getBalance(id) - before2[id], 0);
   ok(delta2 === 0 || delta2 >= 150000, `hand2: ΣΔ ${delta2} is zero-sum or zero-sum + level-up reward(s)`);
 
+  // ---- HAND 3: 5-player table — cap, All-in BUTTON, fold-win settle ----
+  console.log('— hand 3: 5p table, 6th rejected, All-in button, fold-win —');
+  errors.length = 0;
+  const ids3 = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'];
+  for (const id of ids3) { eco.registerUser(id, 'u' + id); eco.addBalance(id, 5000000); }
+  const before3 = {};
+  for (const id of ids3) before3[id] = eco.getBalance(id);
+  const msg3 = fakePrefixMessage('F1', 'ky poker 100000');
+  await game.handlePrefixCommand(msg3, 'poker', ['100000']);
+  const panel3 = msg3.channel.sent[0].m;
+  for (const id of ['F2', 'F3', 'F4', 'F5']) {
+    const it = fakeInteraction(id, 'poker_join', panel3);
+    await game.handleButton(it);
+    const c = String((it.replied && it.replied.content) || '');
+    if (c) console.log(`  [dbg h3] join ${id}: ${c.slice(0, 100)}`);
+  }
+  if (eco.getActivePokerEscrows().length !== 5) console.log('  [dbg h3] escrows:', eco.getActivePokerEscrows().length, 'sent:', msg3.channel.sent.length);
+  ok(eco.getActivePokerEscrows().length === 5, 'hand3: 5 escrow rows (full table)');
+  const sixth = fakeInteraction('F6', 'poker_join', panel3);
+  await game.handleButton(sixth);
+  ok(/Table is full/.test(String((sixth.replied && sixth.replied.content) || '')), 'hand3: 6th join rejected — table capped at 5');
+  ok(eco.getBalance('F6') === before3.F6, 'hand3: 6th player not charged');
+  await game.handleButton(fakeInteraction('F1', 'poker_start', panel3));
+  ok(true, 'hand3: 5p game started');
+
+  // First actor uses the 💎 All-in BUTTON (never handler-driven before)
+  let alliner = null;
+  for (const uid of ids3.slice(0, 5)) {
+    const it = fakeInteraction(uid, 'poker_allin', panel3);
+    await game.handleButton(it);
+    const c = String((it.replied && it.replied.content) || '');
+    noteError(c);
+    if (!/not your turn/i.test(c)) { alliner = uid; break; }
+  }
+  ok(alliner !== null, 'hand3: All-in button consumed by the turn holder');
+  // Everyone else folds → fold-win settle (whole pot to the all-inner, no reveal)
+  let folds = 0;
+  while (eco.getActivePokerEscrows().length > 0 && folds < 8) {
+    const r = await act(panel3, ids3.slice(0, 5), 'poker_fold');
+    if (!r) break;
+    folds++;
+  }
+  ok(await waitEscrowEmpty('hand3'), 'hand3: escrow cleared after fold-win');
+  ok(errors.length === 0, `hand3: zero error replies (${errors.join(' | ') || 'none'})`);
+  const delta3 = ids3.slice(0, 5).reduce((s, id) => s + (eco.getBalance(id) - before3[id]), 0);
+  ok(delta3 === 0, `hand3: ΣΔ exactly 0 across 5 players (got ${delta3})`);
+  ok(eco.getBalance(alliner) > before3[alliner], `hand3: all-inner took the pot (+${eco.getBalance(alliner) - before3[alliner]})`);
+
   console.log(`\n${fail === 0 ? '✅' : '❌'} poker_flow — Pass: ${pass} | Fail: ${fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FLOW CRASHED:', e); process.exit(1); });

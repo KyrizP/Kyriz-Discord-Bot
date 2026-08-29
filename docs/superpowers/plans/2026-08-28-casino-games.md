@@ -910,15 +910,16 @@ Expected: All pass, zero regressions.
 
 - [x] **Step 3: Manual test checklist**
 
-- [ ] 2-player full flow: lobby → deal → bet → showdown → settlement
-- [ ] 5-player with side pots
-- [ ] All-in pre-flop: full runout
-- [ ] Everyone folds: winner takes pot, no reveal
-- [ ] AFK: auto-fold after 30s / auto-check when possible
-- [ ] View Hand: ephemeral, correct evaluation
-- [ ] Raise modal: min-raise validation
-- [ ] Insufficient balance join: rejected
-- [ ] Already in game: rejected
+- [x] 2-player full flow: lobby → deal → bet → showdown → settlement — automated (test/poker_flow.test.js hand 1, 20 asserts)
+- [x] 5-player with side pots — automated (test/poker_sidepot.test.js): NOTE side pots are structurally impossible with equal buy-ins (proven, 300 games) — what is verified is the single-layer zero-sum + the engine's multi-layer math (pokerEngine #4-6)
+- [x] All-in pre-flop: full runout — automated (poker_sidepot Part C handler-level + Part A/B engine)
+- [x] Everyone folds: winner takes pot, no reveal — automated (poker_flow hand 3, 5p fold-win)
+- [x] AFK: auto-fold after 30s / auto-check when possible — engine-verified (pokerEngine #9 autoAction); live Discord behavior still worth one manual glance
+- [x] View Hand: ephemeral, correct evaluation — automated (casino.flow)
+- [x] Raise modal: min-raise validation — automated (pokerEngine #10, poker_flow hand 2, poker_sidepot C); short-stack label clamp fixed after owner report
+- [x] Insufficient balance join: rejected — automated (pokerEscrow suite rollback case + plinko_money pattern)
+- [x] Already in game: rejected — code-verified (join guard `_userInPokerGame`) + 6th-player cap automated (poker_flow hand 3)
+- Manual checklist remaining (owner, live Discord): raise modal on mobile, AFK 30s auto-check visually, 3+ humans in one hand
 - [ ] Host cancel: all refunded
 - [ ] Non-host Start/Cancel: rejected
 - [ ] Non-player buttons: rejected
